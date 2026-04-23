@@ -1,0 +1,73 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Finance dashboard — deep navy/slate surfaces, amber accent */
+    --background: 220 20% 10%;
+    --foreground: 210 15% 88%;
+
+    --card: 220 18% 13%;
+    --card-foreground: 210 15% 88%;
+
+    --popover: 220 18% 13%;
+    --popover-foreground: 210 15% 88%;
+
+    --primary: 38 95% 55%;       /* Amber accent */
+    --primary-foreground: 220 20% 8%;
+
+    --secondary: 220 15% 20%;
+    --secondary-foreground: 210 12% 75%;
+
+    --muted: 220 15% 17%;
+    --muted-foreground: 215 10% 52%;
+
+    --accent: 220 15% 20%;
+    --accent-foreground: 210 15% 88%;
+
+    --destructive: 0 65% 50%;
+    --destructive-foreground: 210 15% 88%;
+
+    --border: 220 12% 22%;
+    --input: 220 12% 22%;
+    --ring: 38 95% 55%;
+
+    --radius: 0.5rem;
+
+    /* Custom semantic colors */
+    --color-private-credit: 270 70% 65%;
+    --color-bank: 200 80% 55%;
+    --color-gse: 140 60% 48%;
+    --color-servicer: 38 95% 55%;
+    --color-mers: 15 85% 58%;
+    --color-other: 215 10% 52%;
+  }
+}
+
+@layer base {
+  * { @apply border-border; }
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Inter', 'DM Sans', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: hsl(var(--background)); }
+::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground)); }
+
+/* Category badge colors */
+.cat-PRIVATE_CREDIT { @apply bg-purple-900/40 text-purple-300 border-purple-700/50; }
+.cat-BANK           { @apply bg-blue-900/40 text-blue-300 border-blue-700/50; }
+.cat-GSE            { @apply bg-green-900/40 text-green-300 border-green-700/50; }
+.cat-SERVICER       { @apply bg-amber-900/40 text-amber-300 border-amber-700/50; }
+.cat-MERS           { @apply bg-orange-900/40 text-orange-300 border-orange-700/50; }
+.cat-OTHER, .cat-UNCLASSIFIED { @apply bg-slate-800/60 text-slate-400 border-slate-600/50; }
+
+.status-OK    { @apply text-green-400; }
+.status-CAPPED { @apply text-amber-400; }
+.status-ERROR { @apply text-red-400; }
