@@ -81,8 +81,8 @@ MANUAL_OVERRIDES = [
     (r'OAKTREE\s+FUNDING|OAKTREE\s+CAPITAL', 'OAKTREE'),
     # NewRez
     (r'NEWREZ|NEW\s*REZ|SHELLPOINT', 'NEWREZ / SHELLPOINT'),
-    # Nationstar / Mr. Cooper
-    (r'NATIONSTAR\s+MORT\w*|MR\.?\s*COOPER', 'NATIONSTAR / MR. COOPER'),
+    # Nationstar / Mr. Cooper (all variants unified)
+    (r'NATIONSTAR|MR\.?\s*COOPER', 'NATIONSTAR / MR. COOPER'),
     # Lakeview
     (r'LAKEVIEW\s+LOAN', 'LAKEVIEW LOAN SERVICING'),
     # US Bank
@@ -107,8 +107,8 @@ MANUAL_OVERRIDES = [
     (r'PHH\s+MORT', 'PHH MORTGAGE'),
     # Rocket / Quicken
     (r'ROCKET\s+MORT|QUICKEN\s+LOAN', 'ROCKET MORTGAGE'),
-    # Freedom Mortgage
-    (r'FREEDOM\s+MORT', 'FREEDOM MORTGAGE'),
+    # Freedom Mortgage (all variants)
+    (r'FREEDOM\s+MORT|FREEDOM\s+MTG', 'FREEDOM MORTGAGE'),
     # PennyMac
     (r'PENNYMAC|PENNY\s*MAC', 'PENNYMAC'),
     # Mr. Cooper (standalone)
@@ -125,6 +125,28 @@ MANUAL_OVERRIDES = [
     (r'FEDERAL\s+HOME\s+LOAN\s+MORT|FREDDIE\s+MAC|\bFHLMC\b', 'FREDDIE MAC'),
     # Ginnie Mae
     (r'GINNIE\s+MAE|\bGNMA\b', 'GINNIE MAE'),
+    # HUD / Secretary of Housing — all variants → single canonical
+    (r'SECRETARY\s+OF\s+HOUSING|HOUSING\s+AND\s+URBAN\s+DEV|HOUSING\s*&\s*URBAN\s+DEV|\bHUD\b', 'SECRETARY OF HOUSING AND URBAN DEVELOPMENT'),
+    # Mortgage Assets Management (special servicer)
+    (r'MORTGAGE\s+ASSETS\s+MANAGEMENT', 'MORTGAGE ASSETS MANAGEMENT'),
+    # Kiavi Funding (bridge/private lender)
+    (r'KIAVI\s+FUND', 'KIAVI FUNDING'),
+    # Figure Lending
+    (r'FIGURE\s+LEND', 'FIGURE LENDING'),
+    # Velocity Commercial Capital
+    (r'VELOCITY\s+COMMERCIAL', 'VELOCITY COMMERCIAL CAPITAL'),
+    # Churchill Funding
+    (r'CHURCHILL\s+FUND', 'CHURCHILL FUNDING I'),
+    # City First
+    (r'CITY\s+FIRST', 'CITY FIRST'),
+    # ELS Holdings
+    (r'ELS\s+HOLD', 'ELS HOLDINGS'),
+    # Alto Capital
+    (r'\bALTO\b', 'ALTO CAPITAL'),
+    # CitiMortgage
+    (r'CITI\s*MORTGAGE|CITOMORTGAGE', 'CITIMORTGAGE'),
+    # Paramount Residential Mortgage
+    (r'PARAMOUNT\s+RESIDENTIAL', 'PARAMOUNT RESIDENTIAL MORTGAGE'),
     # Taylor Made Lending
     (r'TAYLOR\s+MADE\s+LENDING', 'TAYLOR MADE LENDING'),
     # Worthy Lending
@@ -184,6 +206,25 @@ def classify_canonical(name: str) -> str:
             return etype
     return 'OTHER'
 
+_INST_TYPES = {'BANK', 'SERVICER', 'PRIVATE_CREDIT', 'GSE'}
+
+def get_txn_type(assignor_canon: str, assignee_canon: str,
+                 assignor_type: str, assignee_type: str) -> str:
+    if assignor_canon == assignee_canon:
+        return 'SELF_ASSIGN'
+    if assignor_type == 'MERS':
+        return 'MERS_RELEASE'
+    a_inst = assignor_type in _INST_TYPES
+    b_inst = assignee_type in _INST_TYPES
+    if a_inst and b_inst:
+        return 'MARKET_TRANSFER'
+    if not a_inst and b_inst:
+        return 'ORIGINATION'
+    if a_inst and not b_inst:
+        return 'INSTITUTIONAL_OUT'
+    return 'PRIVATE'
+
+
 def canonicalize(name: str) -> str:
     """Return a canonical brand name for a raw entity string."""
     if not name or not name.strip():
@@ -239,6 +280,7 @@ def build_normalized_tables():
             assignee_canon TEXT,
             assignor_type  TEXT,
             assignee_type  TEXT,
+            txn_type       TEXT,  -- MARKET_TRANSFER | ORIGINATION | SELF_ASSIGN | MERS_RELEASE | PRIVATE | OTHER
             rec_book       TEXT,
             rec_page       TEXT,
             total_parties  INTEGER  -- how many raw rows were rolled up
@@ -315,12 +357,14 @@ def build_normalized_tables():
 
         assignor_canon = canonicalize(dominant_assignor)
         assignee_canon = canonicalize(dominant_grantee)
+        txn_type = get_txn_type(assignor_canon, assignee_canon, assignor_type, grantee_type)
 
         inserts.append((
             cfn, rec_date,
             dominant_assignor or 'UNKNOWN', dominant_grantee or 'UNKNOWN',
             assignor_canon, assignee_canon,
             assignor_type, grantee_type,
+            txn_type,
             rec_book, rec_page,
             total_parties
         ))
@@ -328,8 +372,8 @@ def build_normalized_tables():
     conn.executemany("""
         INSERT OR REPLACE INTO aom_events_clean
         (cfn, rec_date, assignor, assignee, assignor_canon, assignee_canon,
-         assignor_type, assignee_type, rec_book, rec_page, total_parties)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?)
+         assignor_type, assignee_type, txn_type, rec_book, rec_page, total_parties)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
     """, inserts)
     conn.commit()
 
@@ -444,7 +488,7 @@ def build_normalized_tables():
         conn.commit()
         print(f"  Classified {len(type_updates)} entities (out of {n_nodes})")
 
-    # Propagate updated types back into aom_events_clean
+    # Propagate updated types back into aom_events_clean and re-derive txn_type
     conn.execute("""
         UPDATE aom_events_clean
         SET assignor_type = COALESCE(
@@ -456,8 +500,23 @@ def build_normalized_tables():
             'OTHER'
         )
     """)
+    # Re-derive txn_type now that types are finalized
+    conn.execute("""
+        UPDATE aom_events_clean SET txn_type =
+        CASE
+            WHEN assignor_canon = assignee_canon THEN 'SELF_ASSIGN'
+            WHEN assignor_type  = 'MERS'         THEN 'MERS_RELEASE'
+            WHEN assignor_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE')
+             AND assignee_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE') THEN 'MARKET_TRANSFER'
+            WHEN assignor_type NOT IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','MERS')
+             AND assignee_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE') THEN 'ORIGINATION'
+            WHEN assignor_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE')
+             AND assignee_type NOT IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','MERS') THEN 'INSTITUTIONAL_OUT'
+            ELSE 'PRIVATE'
+        END
+    """)
     conn.commit()
-    print("  Propagated types to aom_events_clean")
+    print("  Propagated types + txn_type to aom_events_clean")
 
     # Show type distribution
     type_dist = conn.execute(
@@ -468,6 +527,7 @@ def build_normalized_tables():
     # ── Indexes ───────────────────────────────────────────────────────────────
     conn.executescript("""
         CREATE INDEX IF NOT EXISTS idx_clean_date ON aom_events_clean(rec_date);
+        CREATE INDEX IF NOT EXISTS idx_clean_txn_type ON aom_events_clean(txn_type);
         CREATE INDEX IF NOT EXISTS idx_clean_assignor ON aom_events_clean(assignor_canon);
         CREATE INDEX IF NOT EXISTS idx_clean_assignee ON aom_events_clean(assignee_canon);
         CREATE INDEX IF NOT EXISTS idx_rel_source ON entity_relationships(source_entity);

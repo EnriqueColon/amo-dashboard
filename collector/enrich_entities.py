@@ -33,7 +33,47 @@ GSE_PATTERN = re.compile(
 )
 MERS_PATTERN = re.compile(r'^MERS$|MORTGAGE ELECTRONIC', re.IGNORECASE)
 
+# ── Manual overrides — corrections that the LLM gets wrong ────────────────────
+# Applied BEFORE the LLM pass; these always win.
+MANUAL_OVERRIDES: dict[str, str] = {
+    # Bridge / private lenders misclassified as SERVICER
+    'KIAVI FUNDING':                'PRIVATE_CREDIT',
+    'ANCHOR LOANS':                 'PRIVATE_CREDIT',
+    'FIGURE LENDING':               'PRIVATE_CREDIT',
+    'FIRSTKEY':                     'PRIVATE_CREDIT',
+    'FIRSTKEY MORTGAGE':            'PRIVATE_CREDIT',
+    'VELOCITY COMMERCIAL CAPITAL':  'PRIVATE_CREDIT',
+    'VELOCITY COMMERCIAL':          'PRIVATE_CREDIT',
+    'REVERSE MORTGAGE FUNDING':     'PRIVATE_CREDIT',
+    'FINANCE OF AMERICA REVERSE':   'SERVICER',      # reverse mortgage servicer, not PE
+    'ELS HOLDINGS':                 'PRIVATE_CREDIT',
+    'ALTO CAPITAL':                 'PRIVATE_CREDIT',
+    'CITY FIRST':                   'PRIVATE_CREDIT',
+    'CHURCHILL FUNDING I':          'PRIVATE_CREDIT',
+    'NWL 2016 EVERGREEN':           'PRIVATE_CREDIT',
+    'NWL COMPANY':                  'PRIVATE_CREDIT',
+    'PACIFIC ASSET HOLDING':        'PRIVATE_CREDIT',
+    'TOWD POINT':                   'PRIVATE_CREDIT',
+    'LADDER CRE FINANCE REIT':      'PRIVATE_CREDIT',
+    'BANKWARD':                     'PRIVATE_CREDIT',
+    # Correspondent mortgage banks misclassified as PRIVATE_CREDIT
+    'PARAMOUNT RESIDENTIAL MORTGAGE': 'SERVICER',
+    'PARAMOUNT RESIDENTIAL':          'SERVICER',
+    # Citi mortgage-servicing arm misclassified as OTHER
+    'CITIMORTGAGE':                 'SERVICER',
+    'COMPUTERSHARE TRUST':          'SERVICER',
+    # US Mortgage Resolution entities — distressed debt
+    'US MORTGAGE RESOLUTION TRUST': 'PRIVATE_CREDIT',
+    'US RESOLUTION':                'PRIVATE_CREDIT',
+}
+
+
 def rule_classify(name: str) -> str | None:
+    # Manual overrides win first
+    upper = name.upper().strip()
+    for key, val in MANUAL_OVERRIDES.items():
+        if key in upper:
+            return val
     if MERS_PATTERN.search(name):
         return 'MERS'
     if GSE_PATTERN.search(name):
@@ -102,15 +142,39 @@ def llm_classify_batch(names: list[str]) -> dict[str, str]:
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
-def enrich():
+def enrich(force_reclassify: bool = False):
     conn = sqlite3.connect(DB)
     conn.execute('PRAGMA journal_mode=WAL')
 
-    # Entities already in cache
-    already = {
-        row[0] for row in
-        conn.execute("SELECT name FROM entity_classifications").fetchall()
-    }
+    # Entities already in cache (skip unless --force flag)
+    already: set[str] = set()
+    if not force_reclassify:
+        already = {
+            row[0] for row in
+            conn.execute("SELECT name FROM entity_classifications").fetchall()
+        }
+
+    # When forcing, apply manual overrides immediately to the cache and entity_nodes
+    if force_reclassify:
+        print("Force-reclassify mode: applying manual overrides to entire cache...")
+        override_updates = []
+        for row in conn.execute("SELECT name FROM entity_classifications").fetchall():
+            name = row[0]
+            for key, val in MANUAL_OVERRIDES.items():
+                if key in name.upper():
+                    override_updates.append((val, name))
+                    break
+        if override_updates:
+            conn.executemany(
+                "UPDATE entity_classifications SET category = ? WHERE name = ?",
+                override_updates
+            )
+            conn.executemany(
+                "UPDATE entity_nodes SET entity_type = ? WHERE entity = ?",
+                override_updates
+            )
+            conn.commit()
+            print(f"  Applied {len(override_updates)} override corrections")
 
     # Entities above volume threshold, sorted high→low so important ones go first
     candidates = conn.execute(
@@ -167,7 +231,7 @@ def enrich():
     )
     conn.commit()
 
-    # ── Propagate to aom_events_clean ────────────────────────────────────────
+    # ── Propagate to aom_events_clean + re-derive txn_type ───────────────────
     print("Propagating to aom_events_clean...")
     conn.execute("""
         UPDATE aom_events_clean
@@ -181,6 +245,22 @@ def enrich():
             'OTHER'
           )
     """)
+    # Re-derive txn_type with finalized types
+    if conn.execute("SELECT 1 FROM pragma_table_info('aom_events_clean') WHERE name='txn_type'").fetchone():
+        conn.execute("""
+            UPDATE aom_events_clean SET txn_type =
+            CASE
+                WHEN assignor_canon = assignee_canon THEN 'SELF_ASSIGN'
+                WHEN assignor_type  = 'MERS'         THEN 'MERS_RELEASE'
+                WHEN assignor_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE')
+                 AND assignee_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE') THEN 'MARKET_TRANSFER'
+                WHEN assignor_type NOT IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','MERS')
+                 AND assignee_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE') THEN 'ORIGINATION'
+                WHEN assignor_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE')
+                 AND assignee_type NOT IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','MERS') THEN 'INSTITUTIONAL_OUT'
+                ELSE 'PRIVATE'
+            END
+        """)
     conn.commit()
 
     # ── Summary ──────────────────────────────────────────────────────────────
@@ -204,4 +284,5 @@ def enrich():
 
 
 if __name__ == '__main__':
-    enrich()
+    force = '--force' in sys.argv or '--force-reclassify' in sys.argv
+    enrich(force_reclassify=force)
