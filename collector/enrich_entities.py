@@ -65,6 +65,27 @@ MANUAL_OVERRIDES: dict[str, str] = {
     # US Mortgage Resolution entities — distressed debt
     'US MORTGAGE RESOLUTION TRUST': 'PRIVATE_CREDIT',
     'US RESOLUTION':                'PRIVATE_CREDIT',
+    # Eastern Financial (South FL credit union mortgage arm) — institutional lender
+    'EASTERN FINANCIAL MORTGAGE':   'BANK',
+    'EASTERN FINANCIAL':            'BANK',
+    # Bradesco (Brazilian bank with FL operations)
+    'BRADESCO BANK':                'BANK',
+    'BRADESCO':                     'BANK',
+    # Space Coast Credit Union (successor to Eastern Financial Federal CU)
+    'SPACE COAST CREDIT UNION':     'BANK',
+    # Structured credit / distressed trusts
+    'MEB LOAN TRUST':               'PRIVATE_CREDIT',
+    'RRA CAPITAL':                  'PRIVATE_CREDIT',
+    '1 SHARPE OPPORTUNITY TRUST':   'PRIVATE_CREDIT',
+    'WATERFALL ASSET MANAGEMENT':   'PRIVATE_CREDIT',
+    'AMERIHOME MORTGAGE':           'SERVICER',
+    'FIXED INCOME USA':             'PRIVATE_CREDIT',
+    # DLJ Mortgage Capital (Credit Suisse/UBS legacy vehicle)
+    'DLJ MORTGAGE CAPITAL':         'BANK',
+    # Truist
+    'TRUIST BANK':                  'BANK',
+    # Pacific Union Financial (correspondent lender)
+    'PACIFIC UNION FINANCIAL':      'SERVICER',
 }
 
 

@@ -15,55 +15,54 @@ DB = os.environ.get('AMO_DB_PATH', '/opt/amo-dashboard/miami_dade_amo.db')
 # ── Suffix / noise removal ────────────────────────────────────────────────────
 # These are stripped from the END of entity names before canonicalization
 STRIP_SUFFIXES = [
+    # Multi-word legal / descriptive phrases (strip whole phrase first)
     r'\bA NEW YORK STATE CHARTERED BANK\b',
     r'\bA NATIONAL BANKING ASSOCIATION\b',
     r'\bA DELAWARE LIMITED LIABILITY COMPANY\b',
     r'\bA DELAWARE CORPORATION\b',
     r'\bA NEW YORK CORPORATION\b',
-    r'\bNATIONAL ASSOCIATION\b',
-    r'\bNATIONAL BANKING ASSOC\b',
+    r'\bA MARYLAND CORPORATION\b',
+    r'\bA CALIFORNIA CORPORATION\b',
+    r'\bA FLORIDA CORPORATION\b',
     r'\bNATIONAL BANKING ASSOCIATION\b',
+    r'\bNATIONAL BANKING ASSOC\b',
+    r'\bNATIONAL ASSOCIATION\b',
     r'\bFEDERAL SAVINGS BANK\b',
     r'\bFEDERAL SAVINGS\b',
     r'\bFEDERAL BANK\b',
     r'\bSAVINGS BANK\b',
     r'\bSTATE BANK\b',
-    r'\bAS TRUSTEE\b',
+    r'\bAS INDENTURE TRUSTEE\b',
     r'\bAS COLLATERAL AGENT\b',
     r'\bAS ADMINISTRATIVE AGENT\b',
+    r'\bAS TRUSTEE\b',
     r'\bAS AGENT\b',
     r'\bIN ITS CAPACITY AS\b',
     r'\bIN ITS INDIVIDUAL CAPACITY\b',
-    r'\bAS INDENTURE TRUSTEE\b',
     r'\bADMINISTRATOR\b',
-    r'\bA MARYLAND CORPORATION\b',
-    r'\bA CALIFORNIA CORPORATION\b',
-    r'\bA FLORIDA CORPORATION\b',
-    r'\bFSB\b',
-    r'\bN\.?A\.?\b',
+    # Pure legal entity suffixes — safe to strip, carry no brand meaning
+    r'\bCORPORATION\b',
+    r'\bCORP\.?\b',
+    r'\bINCORPORATED\b',
+    r'\bINC\.?\b',
+    r'\bLIMITED LIABILITY COMPANY\b',
     r'\bLLLP\b',
     r'\bLLLC\b',
     r'\bLLC\b',
     r'\bL\.L\.C\.?\b',
     r'\bL\.P\.?\b',
     r'\bLTD\.?\b',
-    r'\bINC\.?\b',
-    r'\bCORP\.?\b',
     r'\bCO\.?\b',
     r'\bPLC\b',
     r'\bLP\b',
-    r'\bIII\b',
+    r'\bFSB\b',
+    r'\bN\.?A\.?\b',
     r'\bII\b',
-    r'\bTRUST\b',
-    r'\bTRUSTEE\b',
-    r'\bFUND\b',
-    r'\bGROUP\b',
-    r'\bHOLDINGS\b',
-    r'\bHOLDING\b',
-    r'\bCAPITAL\b',
-    r'\bFINANCIAL\b',
-    r'\bMORTGAGE\b',
-    r'\bBANK\b',
+    r'\bIII\b',
+    # NOTE: FINANCIAL, MORTGAGE, BANK, CAPITAL, TRUST, FUND, GROUP, HOLDINGS
+    # are intentionally NOT stripped here because they are often core brand
+    # identifiers (e.g. "EASTERN FINANCIAL", "FIGURE LENDING", "ALTO CAPITAL").
+    # Entities where these words are truly noise are handled via MANUAL_OVERRIDES.
 ]
 
 # Manual canonical overrides — maps normalized → canonical brand name
@@ -151,6 +150,32 @@ MANUAL_OVERRIDES = [
     (r'TAYLOR\s+MADE\s+LENDING', 'TAYLOR MADE LENDING'),
     # Worthy Lending
     (r'WORTHY\s+LENDING', 'WORTHY LENDING'),
+    # Eastern Financial (South Florida credit union mortgage arm)
+    (r'EASTERN\s+FINANCIAL', 'EASTERN FINANCIAL MORTGAGE'),
+    # Bradesco (Brazilian bank with US/FL operations)
+    (r'BRADESCO', 'BRADESCO BANK'),
+    # Space Coast Credit Union (successor to Eastern Financial Federal CU)
+    (r'SPACE\s+COAST\s+CREDIT', 'SPACE COAST CREDIT UNION'),
+    # AmeriHome / Western Alliance mortgage arm
+    (r'AMERIHOME\s+MORT', 'AMERIHOME MORTGAGE'),
+    # Truist (BB&T + SunTrust merger)
+    (r'TRUIST', 'TRUIST BANK'),
+    # Pacific Union Financial
+    (r'PACIFIC\s+UNION\s+FINANCIAL', 'PACIFIC UNION FINANCIAL'),
+    # Ameritas Life Partners
+    (r'AMERITAS', 'AMERITAS LIFE'),
+    # Towd Point (Angelo Gordon CLO trust)
+    (r'TOWD\s+POINT', 'TOWD POINT'),
+    # New Penn / Shellpoint
+    (r'NEW\s+PENN\s+FINANCIAL|NEW\s+PENN\s+MORT', 'NEWREZ / SHELLPOINT'),
+    # Waterfall Asset Management
+    (r'WATERFALL\s+ASSET', 'WATERFALL ASSET MANAGEMENT'),
+    # MEB Loan Trust (distressed debt vehicle)
+    (r'\bMEB\s+LOAN\s+TRUST', 'MEB LOAN TRUST'),
+    # RRA Capital
+    (r'\bRRA\s+CP\b|\bRRA\s+CAPITAL', 'RRA CAPITAL'),
+    # 1 Sharpe Opportunity
+    (r'1\s+SHARPE\s+OPPORTUNITY|ONE\s+SHARPE\s+OPPORTUNITY', '1 SHARPE OPPORTUNITY TRUST'),
 ]
 
 # Compiled patterns
@@ -164,26 +189,30 @@ ENTITY_TYPE_PATTERNS = [
     ('GSE',            r'FANNIE MAE|FREDDIE MAC|GINNIE MAE'),
     # MERS gets its own color in the UI
     ('MERS',           r'^MERS$|MORTGAGE ELECTRONIC'),
-    # Banks (commercial, investment, savings)
+    # Banks (commercial, investment, savings, credit unions)
     ('BANK',           r'WELLS FARGO|JPMORGAN CHASE|BANK OF AMERICA|US BANK|CITIBANK|'
                        r'DEUTSCHE BANK|GOLDMAN SACHS|WILMINGTON SAVINGS|BARCLAYS|'
-                       r'MORGAN STANLEY|HSBC|REGIONS|TRUIST|PNC|TD BANK|BB&T|SUNTRUST|'
+                       r'MORGAN STANLEY|HSBC|REGIONS|TRUIST BANK|PNC|TD BANK|BB&T|SUNTRUST|'
                        r'CITIZENS BANK|KEYBANK|FIFTH THIRD|CREDIT SUISSE|UBS|'
                        r'FIRST REPUBLIC|SIGNATURE BANK|SILICON VALLEY|'
                        r'COMMERCE BANK|SOUTH STATE|SEACOAST|BANKUNITED|'
                        r'SYNOVUS|AMERIS|PINNACLE|CADENCE|STERLING BANK|'
-                       r'INDEPENDENT BANK|CENTERSTATE|CENTERSTATE|WESTERN ALLIANCE|'
+                       r'INDEPENDENT BANK|CENTERSTATE|WESTERN ALLIANCE|'
                        r'FLAGSTAR|HEARTLAND|GLACIER|COLUMBIA BANKING|BANNER BANK|'
-                       r'PACIFIC PREMIER|VALLEY NATIONAL|ENTERPRISE BANK|PROVIDENT'),
-    # Private credit / asset managers
+                       r'PACIFIC PREMIER|VALLEY NATIONAL|ENTERPRISE BANK|PROVIDENT|'
+                       r'BRADESCO BANK|EASTERN FINANCIAL MORTGAGE|SPACE COAST CREDIT UNION|'
+                       r'DLJ MORTGAGE CAPITAL|PACIFIC UNION FINANCIAL|AMERITAS LIFE'),
+    # Private credit / asset managers / structured credit trusts
     ('PRIVATE_CREDIT', r'OAKTREE|TPG RE|CARLYLE|ATLAS SP|BLACKSTONE|APOLLO|KKR|ARES|'
                        r'PIMCO|CERBERUS|LONE STAR|FORTRESS|ANGELO GORDON|'
                        r'BENEFIT STREET|BAIN CAPITAL|CENTERBRIDGE|BROOKFIELD|'
                        r'STARWOOD|READY CAPITAL|MESA WEST|ACRES CAPITAL|TORCHLIGHT|'
                        r'LADDER CAPITAL|ARBOR REALTY|HUNT REAL ESTATE|'
                        r'BRIDGE INVESTMENT|THETIS ASSET|SCULPTOR|MARATHON ASSET|'
-                       r'RITHM CAPITAL|NEW RESIDENTIAL|ANGELO GORDON|ELLINGTON|'
-                       r'TWO HARBORS|ANNALY|CHIMERA|AG MORTGAGE|CLAROS'),
+                       r'RITHM CAPITAL|NEW RESIDENTIAL|ELLINGTON|'
+                       r'TWO HARBORS|ANNALY|CHIMERA|AG MORTGAGE|CLAROS|'
+                       r'TOWD POINT|MEB LOAN TRUST|RRA CAPITAL|1 SHARPE OPPORTUNITY|'
+                       r'WATERFALL ASSET|AMERIHOME MORTGAGE|FIXED INCOME USA'),
     # Mortgage servicers
     ('SERVICER',       r'NEWREZ|SHELLPOINT|NATIONSTAR|MR\.? COOPER|LAKEVIEW LOAN|'
                        r'PHH MORTGAGE|FREEDOM MORTGAGE|PENNYMAC|SELECT PORTFOLIO|'
