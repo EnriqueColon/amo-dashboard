@@ -381,6 +381,159 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     res.json(db.prepare(sql).all(...params));
   });
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // DEAL INTELLIGENCE ENDPOINTS
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // Known special servicers (handle distressed / non-performing loans)
+  const SPECIAL_SERVICERS = [
+    'MORTGAGE ASSETS MANAGEMENT',
+    'SELECT PORTFOLIO SERVICING',
+    'CARRINGTON MORTGAGE',
+    'SPECIALIZED LOAN SERVICING',
+    'OCWEN LOAN SERVICING',
+    'PHH MORTGAGE',
+    'RUSHMORE LOAN MANAGEMENT',
+    'FAYERWEATHER STREET MORTGAGE',
+    'REVERSE MORTGAGE FUNDING',
+    'FINANCE OF AMERICA REVERSE',
+  ];
+  const specialSvcPlaceholders = SPECIAL_SERVICERS.map(() => '?').join(',');
+
+  // Pre-compile Deal Intelligence statements
+  const diStmts = {
+    bankToPeTotal: db.prepare(`
+      SELECT COUNT(*) as n FROM aom_events_clean
+      WHERE assignor_type='BANK' AND assignee_type='PRIVATE_CREDIT' AND txn_type='MARKET_TRANSFER'
+    `),
+    instOutTotal: db.prepare(`SELECT COUNT(*) as n FROM aom_events_clean WHERE txn_type='INSTITUTIONAL_OUT'`),
+    netSellersCount: db.prepare(`
+      SELECT COUNT(*) as n FROM entity_nodes
+      WHERE entity_type IN ('BANK','SERVICER')
+        AND outbound_vol > inbound_vol * 1.5
+        AND total_vol >= 20
+    `),
+    activePeBuyers: db.prepare(`
+      SELECT COUNT(DISTINCT assignee_canon) as n FROM aom_events_clean
+      WHERE assignee_type='PRIVATE_CREDIT'
+        AND assignor_type IN ('BANK','SERVICER','GSE')
+    `),
+    sellerPressure: db.prepare(`
+      SELECT entity, entity_type,
+             inbound_vol, outbound_vol, total_vol,
+             (outbound_vol - inbound_vol) AS net_outbound,
+             first_seen, last_seen
+      FROM entity_nodes
+      WHERE entity_type IN ('BANK','SERVICER')
+        AND total_vol >= 20
+      ORDER BY net_outbound DESC
+      LIMIT 25
+    `),
+    peCompetitive: db.prepare(`
+      SELECT en.entity, en.inbound_vol, en.outbound_vol, en.total_vol,
+             en.first_seen, en.last_seen,
+             (SELECT COUNT(*) FROM aom_events_clean
+              WHERE assignee_canon=en.entity
+                AND assignor_type IN ('BANK','SERVICER','GSE')
+             ) AS inst_inbound
+      FROM entity_nodes en
+      WHERE en.entity_type = 'PRIVATE_CREDIT'
+        AND en.total_vol >= 5
+      ORDER BY en.inbound_vol DESC
+      LIMIT 20
+    `),
+    bankToPeRows: db.prepare(`
+      SELECT c.cfn, c.rec_date,
+             c.assignor_canon AS seller, c.assignee_canon AS buyer,
+             c.assignor, c.assignee,
+             c.rec_book, c.rec_page
+      FROM aom_events_clean c
+      WHERE c.assignor_type='BANK' AND c.assignee_type='PRIVATE_CREDIT'
+        AND c.txn_type='MARKET_TRANSFER'
+      ORDER BY c.rec_date DESC
+      LIMIT ? OFFSET ?
+    `),
+    bankToPeCount: db.prepare(`
+      SELECT COUNT(*) as n FROM aom_events_clean
+      WHERE assignor_type='BANK' AND assignee_type='PRIVATE_CREDIT' AND txn_type='MARKET_TRANSFER'
+    `),
+    monthlyDistressed: db.prepare(`
+      SELECT strftime('%Y-%m', rec_date) AS month,
+        SUM(CASE WHEN assignor_type='BANK' AND assignee_type='PRIVATE_CREDIT'
+                  AND txn_type='MARKET_TRANSFER' THEN 1 ELSE 0 END) AS bank_to_pe,
+        SUM(CASE WHEN txn_type='INSTITUTIONAL_OUT' THEN 1 ELSE 0 END) AS inst_out,
+        SUM(CASE WHEN txn_type='MARKET_TRANSFER'   THEN 1 ELSE 0 END) AS market_transfers
+      FROM aom_events_clean
+      GROUP BY month ORDER BY month
+    `),
+    recentBankToPe: db.prepare(`
+      SELECT c.rec_date, c.assignor_canon AS seller, c.assignee_canon AS buyer, COUNT(*) AS n
+      FROM aom_events_clean c
+      WHERE c.assignor_type='BANK' AND c.assignee_type='PRIVATE_CREDIT'
+        AND c.txn_type='MARKET_TRANSFER'
+        AND c.rec_date >= date('now', '-180 days')
+      GROUP BY c.assignor_canon, c.assignee_canon
+      ORDER BY n DESC LIMIT 10
+    `),
+  };
+
+  // ─── GET /api/deal-intelligence/summary ───────────────────────────────────
+  app.get('/api/deal-intelligence/summary', (_req, res) => {
+    const bank_to_pe_total  = (diStmts.bankToPeTotal.get()    as any).n;
+    const inst_out_total    = (diStmts.instOutTotal.get()      as any).n;
+    const net_sellers_count = (diStmts.netSellersCount.get()   as any).n;
+    const active_pe_buyers  = (diStmts.activePeBuyers.get()    as any).n;
+
+    const special_svc_vol = (db.prepare(`
+      SELECT COALESCE(SUM(inbound_vol),0) as n FROM entity_nodes
+      WHERE entity IN (${specialSvcPlaceholders})
+    `).get(...SPECIAL_SERVICERS) as any).n;
+
+    res.json({ bank_to_pe_total, inst_out_total, net_sellers_count, active_pe_buyers, special_svc_vol });
+  });
+
+  // ─── GET /api/deal-intelligence/seller-pressure ───────────────────────────
+  app.get('/api/deal-intelligence/seller-pressure', (_req, res) => {
+    res.json(diStmts.sellerPressure.all());
+  });
+
+  // ─── GET /api/deal-intelligence/pe-competitive ────────────────────────────
+  app.get('/api/deal-intelligence/pe-competitive', (_req, res) => {
+    res.json(diStmts.peCompetitive.all());
+  });
+
+  // ─── GET /api/deal-intelligence/special-servicers ────────────────────────
+  app.get('/api/deal-intelligence/special-servicers', (_req, res) => {
+    const rows = db.prepare(`
+      SELECT entity, inbound_vol, outbound_vol, total_vol, first_seen, last_seen
+      FROM entity_nodes
+      WHERE entity IN (${specialSvcPlaceholders})
+      ORDER BY inbound_vol DESC
+    `).all(...SPECIAL_SERVICERS);
+    res.json(rows);
+  });
+
+  // ─── GET /api/deal-intelligence/bank-to-pe ────────────────────────────────
+  app.get('/api/deal-intelligence/bank-to-pe', (req, res) => {
+    const { page = '1', limit = '50' } = req.query as Record<string, string>;
+    const pageNum  = Math.max(1, parseInt(page));
+    const limitNum = Math.min(parseInt(limit) || 50, 200);
+    const offset   = (pageNum - 1) * limitNum;
+    const total    = (diStmts.bankToPeCount.get() as any).n;
+    const rows     = diStmts.bankToPeRows.all(limitNum, offset);
+    res.json({ total, page: pageNum, limit: limitNum, pages: Math.ceil(total / limitNum), rows });
+  });
+
+  // ─── GET /api/deal-intelligence/monthly ───────────────────────────────────
+  app.get('/api/deal-intelligence/monthly', (_req, res) => {
+    res.json(diStmts.monthlyDistressed.all());
+  });
+
+  // ─── GET /api/deal-intelligence/recent-bank-to-pe ────────────────────────
+  app.get('/api/deal-intelligence/recent-bank-to-pe', (_req, res) => {
+    res.json(diStmts.recentBankToPe.all());
+  });
+
   // ─── GET /api/fdic/financials ─────────────────────────────────────────────
   app.get('/api/fdic/financials', async (req, res) => {
     const state = typeof req.query.state === 'string' ? req.query.state : undefined;

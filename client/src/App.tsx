@@ -11,6 +11,7 @@ import CleanEvents from '@/pages/CleanEvents';
 import MarketRelationships from '@/pages/MarketRelationships';
 import MarketAnalytics from '@/pages/MarketAnalytics';
 import PrivateCredit from '@/pages/PrivateCredit';
+import DealIntelligence from '@/pages/DealIntelligence';
 import Entities from '@/pages/Entities';
 import CollectionLog from '@/pages/CollectionLog';
 import NotFound from '@/pages/not-found';
@@ -30,6 +31,7 @@ export default function App() {
                 <Route path="/market-analytics" component={MarketAnalytics} />
                 <Route path="/assignments" component={Assignments} />
                 <Route path="/private-credit" component={PrivateCredit} />
+                <Route path="/deal-intelligence" component={DealIntelligence} />
                 <Route path="/entities" component={Entities} />
                 <Route path="/collection-log" component={CollectionLog} />
                 <Route component={NotFound} />
