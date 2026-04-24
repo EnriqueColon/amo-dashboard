@@ -95,13 +95,13 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Top KPIs — two rows */}
+      {/* Top KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        {isLoading ? Array(8).fill(0).map((_,i) => <Skeleton key={i} className="h-20 rounded-lg" />) : (<>
-          <StatCard label="Raw Assignments" value={raw?.total?.toLocaleString()} icon={Database} sub={`${raw?.unique_cfns?.toLocaleString()} unique CFNs`} />
-          <StatCard label="Clean Transactions" value={net?.clean_total?.toLocaleString()} icon={FileText} sub="deduplicated, 1 per CFN" color="text-green-400" />
-          <StatCard label="Market Transfers" value={raw?.market_transfers?.toLocaleString()} icon={TrendingUp} sub="institution → institution" color="text-emerald-400" />
-          <StatCard label="Private Credit Txns" value={raw?.private_credit_txns?.toLocaleString()} icon={TrendingUp} sub="PE/Credit entities" color="text-purple-400" />
+        {isLoading ? Array(4).fill(0).map((_,i) => <Skeleton key={i} className="h-20 rounded-lg" />) : (<>
+          <StatCard label="Total Filings" value={raw?.total?.toLocaleString()} icon={Database} sub={`${raw?.min_date} → ${raw?.max_date}`} />
+          <StatCard label="Unique Entities" value={raw?.unique_entities?.toLocaleString()} icon={FileText} sub={`${(raw?.unique_grantors ?? 0 + raw?.unique_grantees ?? 0).toLocaleString()} raw names canonicalized`} color="text-green-400" />
+          <StatCard label="Market Transfers" value={raw?.market_transfers?.toLocaleString()} icon={TrendingUp} sub={`${raw?.total ? Math.round((raw.market_transfers / raw.total) * 100) : 0}% of all filings`} color="text-emerald-400" />
+          <StatCard label="Private Credit Txns" value={raw?.private_credit_txns?.toLocaleString()} icon={TrendingUp} sub={`${raw?.self_assigns?.toLocaleString() ?? '—'} self-assigns excluded`} color="text-purple-400" />
         </>)}
       </div>
 

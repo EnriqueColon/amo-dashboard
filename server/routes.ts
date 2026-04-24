@@ -12,6 +12,8 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     statsRange:          db.prepare('SELECT MIN(rec_date) as min_date, MAX(rec_date) as max_date FROM assignments'),
     statsGrantors:       db.prepare('SELECT COUNT(DISTINCT grantor) as n FROM assignments'),
     statsGrantees:       db.prepare('SELECT COUNT(DISTINCT grantee) as n FROM assignments'),
+    statsUniqueEntities: db.prepare('SELECT COUNT(DISTINCT entity) as n FROM entity_nodes'),
+    statsSelfAssigns:    db.prepare(`SELECT COUNT(*) as n FROM aom_events_clean WHERE txn_type='SELF_ASSIGN'`),
     statsPrivCredit:     db.prepare(`SELECT COUNT(*) as n FROM aom_events_clean WHERE (assignor_type='PRIVATE_CREDIT' OR assignee_type='PRIVATE_CREDIT') AND txn_type != 'SELF_ASSIGN'`),
     statsMarketTransfers:db.prepare(`SELECT COUNT(*) as n FROM aom_events_clean WHERE txn_type='MARKET_TRANSFER'`),
     statsTxnBreakdown:   db.prepare(`SELECT txn_type, COUNT(*) as n FROM aom_events_clean GROUP BY txn_type ORDER BY n DESC`),
@@ -81,17 +83,20 @@ export async function registerRoutes(httpServer: Server, app: Express) {
 
   // ─── GET /api/stats ───────────────────────────────────────────────────────
   app.get('/api/stats', (_req, res) => {
-    const total             = (stmts.statsTotal.get() as any).n;
-    const unique_cfns       = total; // cfn is unique per assignment row
+    const total               = (stmts.statsTotal.get() as any).n;
     const { min_date, max_date } = stmts.statsRange.get() as any;
-    const unique_grantors   = (stmts.statsGrantors.get() as any).n;
-    const unique_grantees   = (stmts.statsGrantees.get() as any).n;
+    const unique_grantors     = (stmts.statsGrantors.get() as any).n;
+    const unique_grantees     = (stmts.statsGrantees.get() as any).n;
+    const unique_entities     = (stmts.statsUniqueEntities.get() as any).n;
+    const self_assigns        = (stmts.statsSelfAssigns.get() as any).n;
     const private_credit_txns = (stmts.statsPrivCredit.get() as any).n;
     const market_transfers    = (stmts.statsMarketTransfers.get() as any).n;
     const txn_breakdown       = stmts.statsTxnBreakdown.all();
     const collection_log_count = (stmts.statsLogCount.get() as any).n;
-    const last_collected    = (stmts.statsLastCollected.get() as any)?.dt;
-    res.json({ total, unique_cfns, min_date, max_date, unique_grantors, unique_grantees, private_credit_txns, market_transfers, txn_breakdown, collection_log_count, last_collected });
+    const last_collected      = (stmts.statsLastCollected.get() as any)?.dt;
+    // unique_cfns kept for backward compat — raw table enforces 1 row per CFN
+    const unique_cfns = total;
+    res.json({ total, unique_cfns, unique_entities, self_assigns, min_date, max_date, unique_grantors, unique_grantees, private_credit_txns, market_transfers, txn_breakdown, collection_log_count, last_collected });
   });
 
   // ─── GET /api/monthly-volume ──────────────────────────────────────────────
