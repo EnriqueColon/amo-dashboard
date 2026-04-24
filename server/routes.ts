@@ -45,11 +45,22 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     mostConnected:       db.prepare('SELECT entity, inbound_vol, outbound_vol, degree, entity_type FROM entity_nodes ORDER BY degree DESC LIMIT 10'),
     privateCreditTotal:  db.prepare(`SELECT COUNT(*) as n FROM aom_events_clean WHERE assignor_type='PRIVATE_CREDIT' OR assignee_type='PRIVATE_CREDIT'`),
     privateCreditRows:   db.prepare(`
-      SELECT cfn, rec_date, assignor, assignee, assignor_canon, assignee_canon,
-             assignor_type as grantor_category, assignee_type as grantee_category
-      FROM aom_events_clean
-      WHERE assignor_type='PRIVATE_CREDIT' OR assignee_type='PRIVATE_CREDIT'
-      ORDER BY rec_date DESC LIMIT ? OFFSET ?
+      SELECT c.cfn, c.rec_date,
+             c.assignor  AS grantor, c.assignee  AS grantee,
+             c.assignor_canon, c.assignee_canon,
+             c.assignor_type AS grantor_category,
+             c.assignee_type AS grantee_category,
+             a.address
+      FROM aom_events_clean c
+      LEFT JOIN assignments a ON c.cfn = a.cfn
+      WHERE c.assignor_type='PRIVATE_CREDIT' OR c.assignee_type='PRIVATE_CREDIT'
+      ORDER BY c.rec_date DESC LIMIT ? OFFSET ?
+    `),
+    privateCreditTopGrantees: db.prepare(`
+      SELECT entity AS name, inbound_vol AS count
+      FROM entity_nodes
+      WHERE entity_type = 'PRIVATE_CREDIT' AND inbound_vol > 0
+      ORDER BY inbound_vol DESC LIMIT 10
     `),
     collectionLog:       db.prepare('SELECT date_from, date_to, records_found, status FROM collection_log ORDER BY date_from DESC'),
   };
@@ -244,6 +255,11 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const total    = (stmts.privateCreditTotal.get() as any).n;
     const rows     = stmts.privateCreditRows.all(limitNum, offset);
     res.json({ total, page: pageNum, limit: limitNum, pages: Math.ceil(total / limitNum), rows });
+  });
+
+  // ─── GET /api/private-credit/top-grantees ─────────────────────────────────
+  app.get('/api/private-credit/top-grantees', (_req, res) => {
+    res.json(stmts.privateCreditTopGrantees.all());
   });
 
 

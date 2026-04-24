@@ -15,17 +15,10 @@ export default function PrivateCredit() {
     keepPreviousData: true,
   } as any);
 
-  // Also pull top private credit grantees
+  // Top private credit purchasers (grantees by inbound volume)
   const { data: assignees } = useQuery({
-    queryKey: ['/api/top-assignees-pc'],
-    queryFn: async () => {
-      const r = await apiRequest('GET', '/api/assignments?category=PRIVATE_CREDIT&limit=500');
-      const d = await r.json();
-      // Tally grantees
-      const map: Record<string, number> = {};
-      for (const row of d.rows) { map[row.grantee] = (map[row.grantee] || 0) + 1; }
-      return Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 10);
-    },
+    queryKey: ['/api/private-credit/top-grantees'],
+    queryFn: () => apiRequest('GET', '/api/private-credit/top-grantees').then(r => r.json()),
   });
 
   return (
@@ -45,13 +38,13 @@ export default function PrivateCredit() {
         <div className="bg-card border border-border rounded-lg p-4">
           <h2 className="text-sm font-semibold mb-3 text-foreground">Top Private Credit Purchasers (Grantees)</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {assignees.map(([name, count]: [string, number], i) => (
-              <div key={name} className="flex items-center justify-between gap-2 bg-muted/30 rounded px-3 py-2">
+            {(assignees as any[]).map((row, i) => (
+              <div key={row.name} className="flex items-center justify-between gap-2 bg-muted/30 rounded px-3 py-2">
                 <div className="flex items-center gap-2 min-w-0">
                   <span className="text-xs text-muted-foreground w-4 shrink-0">{i+1}</span>
-                  <span className="text-xs font-medium truncate" title={name}>{name}</span>
+                  <span className="text-xs font-medium truncate" title={row.name}>{row.name}</span>
                 </div>
-                <span className="text-xs font-mono text-purple-400 shrink-0">{count.toLocaleString()}</span>
+                <span className="text-xs font-mono text-purple-400 shrink-0">{row.count.toLocaleString()}</span>
               </div>
             ))}
           </div>
