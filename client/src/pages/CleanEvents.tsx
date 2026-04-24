@@ -7,7 +7,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import CategoryBadge from '@/components/CategoryBadge';
 import {
   ChevronLeft, ChevronRight, Search, X, CheckCircle,
-  ArrowRight, Info, TrendingUp, TrendingDown, Users, Filter,
+  ArrowRight, Info, TrendingUp, TrendingDown, Users, Filter, ChevronDown, ChevronUp,
+  Landmark, Repeat2, BookOpen, AlertCircle, ArrowUpRight, Users2,
 } from 'lucide-react';
 
 interface Filters { assignor: string; assignee: string; start_date: string; end_date: string; txn_type: string; }
@@ -29,6 +30,188 @@ function TxnTypeBadge({ type }: { type: string }) {
     <span className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium leading-none ${meta.color}`} title={meta.desc}>
       {meta.label}
     </span>
+  );
+}
+
+// ── Per-transaction narrative engine ─────────────────────────────────────────
+interface Narrative {
+  headline: string;
+  what: string;         // plain-language description of what happened
+  why: string;          // market significance / why this matters
+  icon: React.ElementType;
+  accentClass: string;  // tailwind text color for the accent
+}
+
+function getTransactionNarrative(row: {
+  txn_type: string;
+  assignor_type: string;
+  assignee_type: string;
+  assignor_canon: string;
+  assignee_canon: string;
+}): Narrative {
+  const { txn_type, assignor_type, assignee_type, assignor_canon, assignee_canon } = row;
+  const at = assignor_type ?? 'OTHER';
+  const bt = assignee_type ?? 'OTHER';
+  const fmt = (t: string) => t.replace('_', ' ');
+
+  if (txn_type === 'MARKET_TRANSFER') {
+    if (at === 'BANK' && bt === 'SERVICER') return {
+      headline: 'Bank offloading servicing rights',
+      what: `${assignor_canon} (bank) sold or transferred the servicing rights on this loan to ${assignee_canon} (servicer). Servicers collect monthly payments and manage the loan day-to-day; banks often prefer to sell these rights rather than manage them in-house.`,
+      why: 'MSR sales are a core funding mechanism for banks — they free up capital and transfer operational complexity to specialist servicers. High volume between these two entities often signals a bulk portfolio trade.',
+      icon: Landmark,
+      accentClass: 'text-emerald-400',
+    };
+    if (at === 'SERVICER' && bt === 'BANK') return {
+      headline: 'Servicer pooling into bank / trust',
+      what: `${assignor_canon} (servicer) assigned this mortgage to ${assignee_canon} (bank/trustee). The bank here is almost certainly acting as trustee for a securitization trust (MBS pool) rather than holding the loan on its own balance sheet.`,
+      why: 'This is the securitization pipeline in action. The mortgage is being pooled with others to back a bond. US Bank, Wilmington Savings, and Goldman Sachs appear here repeatedly as trust custodians for private-label MBS.',
+      icon: Landmark,
+      accentClass: 'text-emerald-400',
+    };
+    if (at === 'BANK' && bt === 'BANK') return {
+      headline: 'Bank-to-bank loan transfer',
+      what: `${assignor_canon} transferred ownership of this mortgage to ${assignee_canon}. Both are banks — this indicates a whole-loan sale, portfolio acquisition, or trust restructuring between two institutional balance sheets.`,
+      why: 'Less common than bank→servicer flows. Often signals distressed loan sales, bank M&A-related transfers, or movement into a structured vehicle managed by the receiving bank.',
+      icon: Landmark,
+      accentClass: 'text-emerald-400',
+    };
+    if (at === 'SERVICER' && bt === 'SERVICER') return {
+      headline: 'Servicer-to-servicer MSR trade',
+      what: `${assignor_canon} transferred servicing rights to ${assignee_canon}. Both are mortgage servicers, making this a pure MSR portfolio trade — no underlying loan ownership changed, only who manages and collects on the loan.`,
+      why: 'Servicers constantly buy and sell MSR portfolios based on capacity, cost of capital, and servicing efficiency. This is the most common transaction type between servicers and reflects active secondary market trading.',
+      icon: Repeat2,
+      accentClass: 'text-emerald-400',
+    };
+    if (at === 'PRIVATE_CREDIT' || bt === 'PRIVATE_CREDIT') {
+      const pcName = at === 'PRIVATE_CREDIT' ? assignor_canon : assignee_canon;
+      const pcDir  = at === 'PRIVATE_CREDIT' ? 'selling' : 'acquiring';
+      return {
+        headline: `Private credit fund ${pcDir}`,
+        what: `${pcName} is a private credit or alternative investment entity. They are ${pcDir} this mortgage position. Private credit funds often target non-QM loans, bridge loans, or distressed debt that doesn't fit agency guidelines.`,
+        why: 'Private credit involvement signals non-traditional mortgage activity — hard money lending, fix-and-flip, DSCR investor loans, or distressed asset acquisition. Watch these flows for signals about the local non-agency market.',
+        icon: TrendingUp,
+        accentClass: 'text-emerald-400',
+      };
+    }
+    if (at === 'GSE' || bt === 'GSE') {
+      const gseName = at === 'GSE' ? assignor_canon : assignee_canon;
+      return {
+        headline: 'Government / agency involvement',
+        what: `This transfer involves ${gseName}, a government-sponsored enterprise or federal agency. GSEs like Fannie Mae and Freddie Mac guarantee conforming loans; HUD/FHA programs appear when government-insured loans transfer.`,
+        why: 'Agency transfers are the bedrock of the US mortgage market. When a GSE is the buyer, the loan is typically being pooled into an agency MBS. When a GSE is the seller, it may be disposing of a REO property or adjusting its portfolio.',
+        icon: BookOpen,
+        accentClass: 'text-emerald-400',
+      };
+    }
+    return {
+      headline: `${fmt(at)} → ${fmt(bt)} institutional transfer`,
+      what: `${assignor_canon} (${fmt(at)}) transferred this mortgage to ${assignee_canon} (${fmt(bt)}). Both parties are institutional, making this a true secondary market transaction.`,
+      why: 'Institutional-to-institutional transfers represent the core of mortgage secondary market activity. These flows reveal how capital moves between different types of financial intermediaries.',
+      icon: ArrowUpRight,
+      accentClass: 'text-emerald-400',
+    };
+  }
+
+  if (txn_type === 'ORIGINATION') return {
+    headline: 'Mortgage entering the institutional system',
+    what: `${assignor_canon} — an individual borrower, seller, or non-institutional intermediary — assigned this mortgage to ${assignee_canon} (${fmt(bt)}). The loan is being transferred into the formal financial system for the first time.`,
+    why: 'Origination flows represent new supply. They show which institutions are capturing new loans in this market. The receiving entity is either the originating lender taking formal title, or a servicer receiving a freshly-originated loan for servicing.',
+    icon: ArrowUpRight,
+    accentClass: 'text-blue-400',
+  };
+
+  if (txn_type === 'MERS_RELEASE') return {
+    headline: 'MERS releasing its nominee interest',
+    what: `MERS (Mortgage Electronic Registration Systems) is stepping out of the chain to formally recognize ${assignee_canon} as the holder of record. MERS is named as the nominal mortgagee on millions of US loans to avoid re-recording fees each time a loan is sold — but the actual owner always sits behind it.`,
+    why: 'Not a true ownership transfer. This is registry housekeeping — MERS is simply making the real beneficial owner (${assignee_canon}) visible in the public record. These filings often accompany loan modifications, foreclosure initiations, or securitization unwinds that require a clean title chain.',
+    icon: BookOpen,
+    accentClass: 'text-purple-400',
+  };
+
+  if (txn_type === 'SELF_ASSIGN') return {
+    headline: 'Administrative self-assignment — no economic transfer',
+    what: `${assignor_canon} assigned this mortgage to itself. The assignor and assignee are the same canonical entity. This nearly always reflects a corporate event: a legal name change, entity merger, subsidiary consolidation, or a recorder\'s correction filing.`,
+    why: 'No money changed hands and no loan ownership changed. Common examples: Quicken Loans → Rocket Mortgage rebrand, bank subsidiaries merging under a parent name, or a servicer correcting a title defect. Filter these out when analyzing real market activity.',
+    icon: Repeat2,
+    accentClass: 'text-zinc-400',
+  };
+
+  if (txn_type === 'INSTITUTIONAL_OUT') return {
+    headline: 'Institution releasing to a private party',
+    what: `${assignor_canon} (${fmt(at)}) assigned this mortgage to ${assignee_canon}, a non-institutional party. Institutions rarely assign mortgages outward to individuals — this typically indicates a loan payoff/satisfaction being recorded, an REO property transfer, or a distressed sale to a local investor.`,
+    why: 'Worth investigating individually. Could signal a foreclosure-related deed transfer, a short sale, or a hard-money lender releasing collateral after repayment. The receiving party\'s name often tells the story.',
+    icon: AlertCircle,
+    accentClass: 'text-amber-400',
+  };
+
+  if (txn_type === 'PRIVATE') return {
+    headline: 'Private-party transfer',
+    what: `${assignor_canon} and ${assignee_canon} are both non-institutional parties — individuals, small LLCs, or unclassified entities. This is person-to-person or small-investor activity outside the formal lending system.`,
+    why: 'Non-institutional flows: seller financing, estate transfers, small real estate investors, or HOA-related liens. Lower market intelligence value but can reveal informal lending patterns in specific neighborhoods.',
+    icon: Users2,
+    accentClass: 'text-slate-400',
+  };
+
+  return {
+    headline: 'Mortgage assignment',
+    what: `${assignor_canon} transferred an interest in this mortgage to ${assignee_canon}.`,
+    why: '',
+    icon: ArrowRight,
+    accentClass: 'text-muted-foreground',
+  };
+}
+
+// ── Expandable transaction detail row ────────────────────────────────────────
+function TransactionDetail({ row }: { row: any }) {
+  const n = getTransactionNarrative(row);
+  const Icon = n.icon;
+  return (
+    <tr className="bg-muted/10 border-b border-border/30">
+      <td colSpan={8} className="px-4 py-4">
+        <div className="flex gap-4">
+          {/* Icon column */}
+          <div className={`shrink-0 mt-0.5 ${n.accentClass}`}>
+            <Icon size={16} />
+          </div>
+          {/* Content */}
+          <div className="flex-1 min-w-0 space-y-3">
+            {/* Headline */}
+            <p className={`text-xs font-semibold ${n.accentClass}`}>{n.headline}</p>
+            {/* Two-column explanation */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">What happened</p>
+                <p className="text-xs text-foreground/80 leading-relaxed">{n.what}</p>
+              </div>
+              {n.why && (
+                <div className="space-y-1">
+                  <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Market significance</p>
+                  <p className="text-xs text-foreground/80 leading-relaxed">{n.why}</p>
+                </div>
+              )}
+            </div>
+            {/* Recording reference */}
+            <div className="flex items-center gap-4 pt-1 border-t border-border/30 text-[10px] text-muted-foreground">
+              <span>CFN <span className="font-mono text-foreground">{row.cfn}</span></span>
+              <span>Recorded <span className="text-foreground">{row.rec_date}</span></span>
+              <span>Book / Page <span className="font-mono text-foreground">{row.rec_book}/{row.rec_page}</span></span>
+              {row.total_parties > 2 && (
+                <span className="text-amber-400">{row.total_parties} parties on original filing</span>
+              )}
+              <a
+                href={`https://www2.miamidadeclerk.gov/ocs/Search.aspx?QS=RN${row.cfn}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="ml-auto flex items-center gap-1 hover:text-foreground transition-colors"
+              >
+                View on county portal <ArrowUpRight size={9} />
+              </a>
+            </div>
+          </div>
+        </div>
+      </td>
+    </tr>
   );
 }
 
@@ -58,6 +241,7 @@ export default function CleanEvents() {
   const [applied, setApplied] = useState<Filters>(EMPTY);
   const [page, setPage] = useState(1);
   const [showGlossary, setShowGlossary] = useState(false);
+  const [expandedCfn, setExpandedCfn] = useState<string | null>(null);
 
   const qs = `?assignor=${encodeURIComponent(applied.assignor)}&assignee=${encodeURIComponent(applied.assignee)}&start_date=${applied.start_date}&end_date=${applied.end_date}&txn_type=${applied.txn_type}&page=${page}&limit=50`;
 
@@ -176,7 +360,8 @@ export default function CleanEvents() {
           <CheckCircle size={12} className="mt-0.5 shrink-0 text-green-400" />
           <span>
             One row = one real mortgage transfer event. Assignor → <ArrowRight size={10} className="inline mx-0.5" /> Assignee.
-            Entity names are normalized (typos corrected, suffixes removed). Multi-party filings collapsed to dominant direction.
+            Entity names are normalized (typos corrected, suffixes removed). Multi-party filings collapsed to dominant direction.{' '}
+            <span className="text-primary/80">Click any row to see a plain-language explanation of the transaction.</span>
             <button onClick={() => setShowGlossary(true)} className="ml-1.5 underline hover:text-foreground transition-colors">Learn more</button>
           </span>
         </div>
@@ -281,56 +466,71 @@ export default function CleanEvents() {
                       {Array(8).fill(0).map((_, j) => <td key={j} className="px-3 py-2.5"><Skeleton className="h-3 w-full" /></td>)}
                     </tr>
                   ))
-                : (data?.rows || []).map((r: any, i: number) => (
-                    <tr key={`${r.cfn}-${i}`} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
-                      {/* CFN */}
-                      <td className="px-3 py-2 font-mono text-primary text-[11px] whitespace-nowrap">
-                        <a
-                          href={`https://www2.miamidadeclerk.gov/ocs/Search.aspx?QS=RN${r.cfn}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="hover:underline"
-                          title="View on Miami-Dade Clerk portal"
-                        >
-                          {r.cfn}
-                        </a>
-                      </td>
-                      {/* Date */}
-                      <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">{r.rec_date}</td>
-                      {/* Assignor */}
-                      <td className="px-3 py-2 max-w-[200px]">
-                        <div className="font-semibold text-foreground truncate" title={r.assignor_canon}>{r.assignor_canon}</div>
-                        {r.assignor !== r.assignor_canon && (
-                          <div className="text-muted-foreground truncate text-[10px]" title={r.assignor}>{r.assignor}</div>
-                        )}
-                        <CategoryBadge category={r.assignor_type} size="xs" />
-                      </td>
-                      {/* Arrow */}
-                      <td className="px-1 py-2 text-center">
-                        <ArrowRight size={12} className="text-muted-foreground/40 mx-auto" />
-                      </td>
-                      {/* Assignee */}
-                      <td className="px-3 py-2 max-w-[200px]">
-                        <div className="font-semibold text-foreground truncate" title={r.assignee_canon}>{r.assignee_canon}</div>
-                        {r.assignee !== r.assignee_canon && (
-                          <div className="text-muted-foreground truncate text-[10px]" title={r.assignee}>{r.assignee}</div>
-                        )}
-                        <CategoryBadge category={r.assignee_type} size="xs" />
-                      </td>
-                      {/* Txn type */}
-                      <td className="px-3 py-2 whitespace-nowrap">
-                        {r.txn_type ? <TxnTypeBadge type={r.txn_type} /> : null}
-                      </td>
-                      {/* Parties */}
-                      <td className="px-3 py-2 text-center">
-                        {r.total_parties > 2
-                          ? <span className="text-amber-400 font-mono" title={`${r.total_parties} parties on original filing`}>{r.total_parties}</span>
-                          : <span className="text-muted-foreground">{r.total_parties}</span>}
-                      </td>
-                      {/* Book/Page */}
-                      <td className="px-3 py-2 font-mono text-muted-foreground text-[11px] whitespace-nowrap">{r.rec_book}/{r.rec_page}</td>
-                    </tr>
-                  ))
+                : (data?.rows || []).flatMap((r: any, i: number) => {
+                    const isExpanded = expandedCfn === r.cfn;
+                    return [
+                      <tr
+                        key={`${r.cfn}-${i}`}
+                        className={`border-b border-border/50 hover:bg-muted/20 transition-colors cursor-pointer group ${isExpanded ? 'bg-muted/20' : ''}`}
+                        onClick={() => setExpandedCfn(isExpanded ? null : r.cfn)}
+                        title="Click to see transaction explanation"
+                      >
+                        {/* Expand toggle */}
+                        <td className="px-3 py-2 font-mono text-primary text-[11px] whitespace-nowrap">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-muted-foreground/30 group-hover:text-muted-foreground/70 transition-colors">
+                              {isExpanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+                            </span>
+                            <span className="hover:underline" onClick={e => e.stopPropagation()}>
+                              <a
+                                href={`https://www2.miamidadeclerk.gov/ocs/Search.aspx?QS=RN${r.cfn}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title="View on Miami-Dade Clerk portal"
+                              >
+                                {r.cfn}
+                              </a>
+                            </span>
+                          </div>
+                        </td>
+                        {/* Date */}
+                        <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">{r.rec_date}</td>
+                        {/* Assignor */}
+                        <td className="px-3 py-2 max-w-[200px]">
+                          <div className="font-semibold text-foreground truncate" title={r.assignor_canon}>{r.assignor_canon}</div>
+                          {r.assignor !== r.assignor_canon && (
+                            <div className="text-muted-foreground truncate text-[10px]" title={r.assignor}>{r.assignor}</div>
+                          )}
+                          <CategoryBadge category={r.assignor_type} size="xs" />
+                        </td>
+                        {/* Arrow */}
+                        <td className="px-1 py-2 text-center">
+                          <ArrowRight size={12} className="text-muted-foreground/40 mx-auto" />
+                        </td>
+                        {/* Assignee */}
+                        <td className="px-3 py-2 max-w-[200px]">
+                          <div className="font-semibold text-foreground truncate" title={r.assignee_canon}>{r.assignee_canon}</div>
+                          {r.assignee !== r.assignee_canon && (
+                            <div className="text-muted-foreground truncate text-[10px]" title={r.assignee}>{r.assignee}</div>
+                          )}
+                          <CategoryBadge category={r.assignee_type} size="xs" />
+                        </td>
+                        {/* Txn type */}
+                        <td className="px-3 py-2 whitespace-nowrap">
+                          {r.txn_type ? <TxnTypeBadge type={r.txn_type} /> : null}
+                        </td>
+                        {/* Parties */}
+                        <td className="px-3 py-2 text-center">
+                          {r.total_parties > 2
+                            ? <span className="text-amber-400 font-mono" title={`${r.total_parties} parties on original filing`}>{r.total_parties}</span>
+                            : <span className="text-muted-foreground">{r.total_parties}</span>}
+                        </td>
+                        {/* Book/Page */}
+                        <td className="px-3 py-2 font-mono text-muted-foreground text-[11px] whitespace-nowrap">{r.rec_book}/{r.rec_page}</td>
+                      </tr>,
+                      ...(isExpanded ? [<TransactionDetail key={`${r.cfn}-detail`} row={r} />] : []),
+                    ];
+                  })
               }
               {!isLoading && !data?.rows?.length && (
                 <tr><td colSpan={8} className="px-3 py-12 text-center text-muted-foreground">No records found.</td></tr>
