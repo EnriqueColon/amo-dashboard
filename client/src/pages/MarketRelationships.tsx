@@ -57,13 +57,16 @@ export default function MarketRelationships() {
   const zoomRef      = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
   const simRef       = useRef<d3.Simulation<NodeDatum, EdgeDatum> | null>(null);
 
-  const [minTxns, setMinTxns]       = useState(20);
-  const [days, setDays]             = useState(0);
-  const [entityInput, setEntityInput] = useState('');
+  const [minTxns, setMinTxns]           = useState(20);
+  const [days, setDays]                 = useState(0);
+  const [entityInput, setEntityInput]   = useState('');
   const [entityFilter, setEntityFilter] = useState('');
-  const [hovered, setHovered]       = useState<NodeDatum | null>(null);
-  const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
-  const [selected, setSelected]     = useState<string | null>(null);
+  const [institutionalOnly, setInstitutionalOnly] = useState(false);
+  const [hovered, setHovered]           = useState<NodeDatum | null>(null);
+  const [tooltipPos, setTooltipPos]     = useState({ x: 0, y: 0 });
+  const [selected, setSelected]         = useState<string | null>(null);
+
+  const INST_TYPES = new Set(['BANK', 'SERVICER', 'PRIVATE_CREDIT', 'GSE', 'MERS']);
 
   const qs = `?min_txns=${minTxns}&days=${days}&entity=${encodeURIComponent(entityFilter)}`;
   const { data, isLoading } = useQuery({
@@ -75,8 +78,20 @@ export default function MarketRelationships() {
   useEffect(() => {
     if (!data || !svgRef.current || !containerRef.current) return;
 
-    const rawNodes = (data.nodes ?? []) as NodeDatum[];
-    const rawEdges = (data.edges ?? []) as EdgeDatum[];
+    // Optionally filter to institutional entities only (removes individual/OTHER noise)
+    const allNodes = (data.nodes ?? []) as NodeDatum[];
+    const allEdges = (data.edges ?? []) as EdgeDatum[];
+    const instNodeIds = institutionalOnly
+      ? new Set(allNodes.filter(n => INST_TYPES.has(n.entity_type)).map(n => n.id))
+      : null;
+    const rawNodes = instNodeIds ? allNodes.filter(n => instNodeIds.has(n.id)) : allNodes;
+    const rawEdges = instNodeIds
+      ? allEdges.filter(e => {
+          const s = typeof e.source === 'string' ? e.source : (e.source as NodeDatum).id;
+          const t = typeof e.target === 'string' ? e.target : (e.target as NodeDatum).id;
+          return instNodeIds.has(s) && instNodeIds.has(t);
+        })
+      : allEdges;
     if (!rawNodes.length) return;
 
     const W = containerRef.current.clientWidth  || 900;
@@ -260,7 +275,7 @@ export default function MarketRelationships() {
     }, 2500);
 
     return () => { sim.stop(); };
-  }, [data]);
+  }, [data, institutionalOnly]);
 
   const doZoom = useCallback((dir: 'in' | 'out' | 'reset') => {
     if (!svgRef.current || !zoomRef.current) return;
@@ -330,6 +345,17 @@ export default function MarketRelationships() {
           )}
         </div>
 
+        <div className="w-px h-5 bg-border hidden sm:block" />
+
+        {/* Institutional-only toggle */}
+        <button
+          onClick={() => setInstitutionalOnly(v => !v)}
+          title="Hide OTHER (individual/private party) nodes — show only institutional participants"
+          className={`flex items-center gap-1.5 h-7 px-2.5 rounded border text-[10px] font-medium transition-colors ${institutionalOnly ? 'bg-primary/20 text-primary border-primary/40' : 'border-border text-muted-foreground hover:text-foreground'}`}
+        >
+          <span>{institutionalOnly ? '⬡ Inst. only' : '⬡ All nodes'}</span>
+        </button>
+
         {/* Zoom controls */}
         <div className="flex items-center gap-1 ml-auto">
           <Button size="sm" variant="ghost" onClick={() => doZoom('in')}  className="h-7 w-7 p-0"><ZoomIn  size={13}/></Button>
@@ -348,7 +374,7 @@ export default function MarketRelationships() {
         ))}
         <div className="flex items-center gap-1 ml-3 text-[9px] text-muted-foreground/60">
           <Info size={9} />
-          <span>Node size = volume · Edge width = transaction count · Drag · Click to highlight</span>
+          <span>Node size = volume · Edge width = transaction count · Drag · Click to highlight · Self-assignments excluded</span>
         </div>
       </div>
 

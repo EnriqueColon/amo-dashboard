@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { TrendingUp, TrendingDown, Network, FileText, Database, RefreshCw, Star, ChevronRight } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import CategoryBadge from '@/components/CategoryBadge';
@@ -100,17 +100,27 @@ export default function Dashboard() {
         {isLoading ? Array(8).fill(0).map((_,i) => <Skeleton key={i} className="h-20 rounded-lg" />) : (<>
           <StatCard label="Raw Assignments" value={raw?.total?.toLocaleString()} icon={Database} sub={`${raw?.unique_cfns?.toLocaleString()} unique CFNs`} />
           <StatCard label="Clean Transactions" value={net?.clean_total?.toLocaleString()} icon={FileText} sub="deduplicated, 1 per CFN" color="text-green-400" />
-          <StatCard label="Entity Network" value={net?.node_count?.toLocaleString()} icon={Network} sub={`${net?.edge_count?.toLocaleString()} relationships`} color="text-blue-400" />
+          <StatCard label="Market Transfers" value={raw?.market_transfers?.toLocaleString()} icon={TrendingUp} sub="institution → institution" color="text-emerald-400" />
           <StatCard label="Private Credit Txns" value={raw?.private_credit_txns?.toLocaleString()} icon={TrendingUp} sub="PE/Credit entities" color="text-purple-400" />
         </>)}
       </div>
 
       {/* Monthly Volume Chart */}
       <div className="bg-card border border-border rounded-lg p-4">
-        <h2 className="text-sm font-semibold mb-4 text-foreground">Monthly Assignment Volume</h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-semibold text-foreground">Monthly Assignment Volume</h2>
+          <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-emerald-500 inline-block" />Market Transfers</span>
+            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-blue-400 inline-block" />Originations</span>
+            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-slate-600 inline-block" />Other</span>
+          </div>
+        </div>
         {mLoading ? <Skeleton className="h-52" /> : (
           <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={monthly} margin={{ top: 0, right: 8, left: 0, bottom: 0 }}>
+            <BarChart data={(monthly || []).map((m: any) => ({
+              ...m,
+              other: m.total - (m.market_transfers || 0) - (m.originations || 0),
+            }))} margin={{ top: 0, right: 8, left: 0, bottom: 0 }}>
               <XAxis dataKey="month" tickFormatter={fmtMonth}
                 tick={{ fontSize: 10, fill: '#64748b' }} tickLine={false} axisLine={false} />
               <YAxis tick={{ fontSize: 10, fill: '#64748b' }} tickLine={false} axisLine={false} width={42}
@@ -118,13 +128,11 @@ export default function Dashboard() {
               <Tooltip
                 contentStyle={{ background: 'hsl(220 18% 13%)', border: '1px solid hsl(220 12% 22%)', borderRadius: 6, fontSize: 11 }}
                 labelFormatter={fmtMonth}
-                formatter={(v: any) => [v.toLocaleString(), 'Assignments']}
+                formatter={(v: any, name: string) => [v.toLocaleString(), name === 'market_transfers' ? 'Market Transfers' : name === 'originations' ? 'Originations' : 'Other']}
               />
-              <Bar dataKey="total" radius={[2,2,0,0]} maxBarSize={36}>
-                {(monthly || []).map((_: any, i: number) => (
-                  <Cell key={i} fill="hsl(38 95% 55%)" />
-                ))}
-              </Bar>
+              <Bar dataKey="market_transfers" stackId="a" fill="#10b981" radius={[0,0,0,0]} maxBarSize={36} />
+              <Bar dataKey="originations"     stackId="a" fill="#60a5fa" radius={[0,0,0,0]} maxBarSize={36} />
+              <Bar dataKey="other"            stackId="a" fill="#475569" radius={[2,2,0,0]} maxBarSize={36} />
             </BarChart>
           </ResponsiveContainer>
         )}

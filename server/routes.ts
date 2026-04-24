@@ -13,11 +13,15 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     statsGrantors:       db.prepare('SELECT COUNT(DISTINCT grantor) as n FROM assignments'),
     statsGrantees:       db.prepare('SELECT COUNT(DISTINCT grantee) as n FROM assignments'),
     statsPrivCredit:     db.prepare(`SELECT COUNT(*) as n FROM aom_events_clean WHERE assignor_type='PRIVATE_CREDIT' OR assignee_type='PRIVATE_CREDIT'`),
+    statsMarketTransfers:db.prepare(`SELECT COUNT(*) as n FROM aom_events_clean WHERE txn_type='MARKET_TRANSFER'`),
+    statsTxnBreakdown:   db.prepare(`SELECT txn_type, COUNT(*) as n FROM aom_events_clean GROUP BY txn_type ORDER BY n DESC`),
     statsLogCount:       db.prepare('SELECT COUNT(*) as n FROM collection_log'),
     statsLastCollected:  db.prepare(`SELECT MAX(date_to) as dt FROM collection_log WHERE status='OK'`),
     monthlyVolume:       db.prepare(`
       SELECT strftime('%Y-%m', rec_date) as month,
         COUNT(*) as total,
+        SUM(CASE WHEN txn_type='MARKET_TRANSFER' THEN 1 ELSE 0 END) as market_transfers,
+        SUM(CASE WHEN txn_type='ORIGINATION'     THEN 1 ELSE 0 END) as originations,
         COUNT(DISTINCT assignor_canon) as unique_assignors,
         COUNT(DISTINCT assignee_canon) as unique_assignees
       FROM aom_events_clean GROUP BY month ORDER BY month
@@ -35,6 +39,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
              COALESCE(assignee_type,'OTHER') as to_cat,
              COUNT(*) as count
       FROM aom_events_clean
+      WHERE txn_type != 'SELF_ASSIGN'
       GROUP BY from_cat, to_cat ORDER BY count DESC
     `),
     networkStats:        db.prepare('SELECT COUNT(*) as n FROM aom_events_clean'),
@@ -73,9 +78,11 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const unique_grantors   = (stmts.statsGrantors.get() as any).n;
     const unique_grantees   = (stmts.statsGrantees.get() as any).n;
     const private_credit_txns = (stmts.statsPrivCredit.get() as any).n;
+    const market_transfers    = (stmts.statsMarketTransfers.get() as any).n;
+    const txn_breakdown       = stmts.statsTxnBreakdown.all();
     const collection_log_count = (stmts.statsLogCount.get() as any).n;
     const last_collected    = (stmts.statsLastCollected.get() as any)?.dt;
-    res.json({ total, unique_cfns, min_date, max_date, unique_grantors, unique_grantees, private_credit_txns, collection_log_count, last_collected });
+    res.json({ total, unique_cfns, min_date, max_date, unique_grantors, unique_grantees, private_credit_txns, market_transfers, txn_breakdown, collection_log_count, last_collected });
   });
 
   // ─── GET /api/monthly-volume ──────────────────────────────────────────────
@@ -334,8 +341,9 @@ export async function registerRoutes(httpServer: Server, app: Express) {
 
   // ─── GET /api/clean-events ────────────────────────────────────────────────
   // Deduplicated clean transaction table
+  // Supports: assignor, assignee, start_date, end_date, txn_type, page, limit
   app.get('/api/clean-events', (req, res) => {
-    const { assignor, assignee, start_date, end_date, page = '1', limit = '50' } = req.query as Record<string, string>;
+    const { assignor, assignee, start_date, end_date, txn_type, page = '1', limit = '50' } = req.query as Record<string, string>;
     const pageNum = Math.max(1, parseInt(page));
     const limitNum = Math.min(parseInt(limit) || 50, 500);
     const offset = (pageNum - 1) * limitNum;
@@ -346,12 +354,13 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     if (assignee)    { where.push("UPPER(assignee_canon) LIKE UPPER(?)"); params.push(`%${assignee}%`); }
     if (start_date)  { where.push("rec_date >= ?"); params.push(start_date); }
     if (end_date)    { where.push("rec_date <= ?"); params.push(end_date); }
+    if (txn_type)    { where.push("txn_type = ?"); params.push(txn_type.toUpperCase()); }
 
     const wc = where.length ? `WHERE ${where.join(' AND ')}` : '';
     const total = (db.prepare(`SELECT COUNT(*) as n FROM aom_events_clean ${wc}`).get(...params) as any).n;
     const rows = db.prepare(`
       SELECT cfn, rec_date, assignor, assignee, assignor_canon, assignee_canon,
-             assignor_type, assignee_type, rec_book, rec_page, total_parties
+             assignor_type, assignee_type, txn_type, rec_book, rec_page, total_parties
       FROM aom_events_clean ${wc}
       ORDER BY rec_date DESC LIMIT ? OFFSET ?
     `).all(...params, limitNum, offset);

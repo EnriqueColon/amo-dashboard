@@ -7,11 +7,30 @@ import { Skeleton } from '@/components/ui/skeleton';
 import CategoryBadge from '@/components/CategoryBadge';
 import {
   ChevronLeft, ChevronRight, Search, X, CheckCircle,
-  ArrowRight, Info, TrendingUp, TrendingDown, Users,
+  ArrowRight, Info, TrendingUp, TrendingDown, Users, Filter,
 } from 'lucide-react';
 
-interface Filters { assignor: string; assignee: string; start_date: string; end_date: string; }
-const EMPTY: Filters = { assignor: '', assignee: '', start_date: '', end_date: '' };
+interface Filters { assignor: string; assignee: string; start_date: string; end_date: string; txn_type: string; }
+const EMPTY: Filters = { assignor: '', assignee: '', start_date: '', end_date: '', txn_type: '' };
+
+// ── Transaction type metadata ─────────────────────────────────────────────────
+const TXN_TYPES: Record<string, { label: string; color: string; desc: string }> = {
+  MARKET_TRANSFER:   { label: 'Market Transfer',  color: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',  desc: 'Institution → Institution (true secondary market)' },
+  ORIGINATION:       { label: 'Origination',      color: 'bg-blue-500/15 text-blue-400 border-blue-500/30',          desc: 'Individual / private → Institution (new supply entering)' },
+  MERS_RELEASE:      { label: 'MERS Release',     color: 'bg-purple-500/15 text-purple-400 border-purple-500/30',    desc: 'MERS nominee discharging nominal interest (registry housekeeping)' },
+  SELF_ASSIGN:       { label: 'Self-Assign',      color: 'bg-zinc-500/15 text-zinc-400 border-zinc-500/30',          desc: 'Same canonical entity on both sides (administrative noise)' },
+  INSTITUTIONAL_OUT: { label: 'Inst. Out',        color: 'bg-amber-500/15 text-amber-400 border-amber-500/30',       desc: 'Institution → Individual (payoff, REO, or distressed)' },
+  PRIVATE:           { label: 'Private',          color: 'bg-slate-500/15 text-slate-400 border-slate-500/30',       desc: 'Individual → Individual (non-institutional)' },
+};
+
+function TxnTypeBadge({ type }: { type: string }) {
+  const meta = TXN_TYPES[type] || { label: type, color: 'bg-zinc-500/15 text-zinc-400 border-zinc-500/30', desc: '' };
+  return (
+    <span className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium leading-none ${meta.color}`} title={meta.desc}>
+      {meta.label}
+    </span>
+  );
+}
 
 // ── Glossary tooltip ─────────────────────────────────────────────────────────
 function GlossaryTip({ term, def }: { term: string; def: string }) {
@@ -40,7 +59,7 @@ export default function CleanEvents() {
   const [page, setPage] = useState(1);
   const [showGlossary, setShowGlossary] = useState(false);
 
-  const qs = `?assignor=${encodeURIComponent(applied.assignor)}&assignee=${encodeURIComponent(applied.assignee)}&start_date=${applied.start_date}&end_date=${applied.end_date}&page=${page}&limit=50`;
+  const qs = `?assignor=${encodeURIComponent(applied.assignor)}&assignee=${encodeURIComponent(applied.assignee)}&start_date=${applied.start_date}&end_date=${applied.end_date}&txn_type=${applied.txn_type}&page=${page}&limit=50`;
 
   const { data, isLoading, isFetching } = useQuery({
     queryKey: ['/api/clean-events', qs],
@@ -134,6 +153,7 @@ export default function CleanEvents() {
               <div><span className="text-foreground font-medium">Date</span> — Date the assignment was recorded with the county.</div>
               <div><span className="text-foreground font-medium">Canonical name</span> — Normalized version (suffixes stripped, brand aliases unified). The smaller grey text below is the original raw name from the filing.</div>
               <div><span className="text-foreground font-medium">Category badge</span> — Entity type: BANK, SERVICER, PRIVATE CREDIT, GSE, MERS, or OTHER.</div>
+              <div><span className="text-foreground font-medium">Type</span> — Transaction classification: <em>Market Transfer</em> (institution→institution), <em>Origination</em> (individual→institution), <em>MERS Release</em>, <em>Self-Assign</em> (administrative noise), <em>Inst. Out</em> (institution→individual), or <em>Private</em> (individual→individual).</div>
               <div><span className="text-foreground font-medium">Parties</span> — Total parties on the original filing. Multi-party filings (e.g. 3–4) indicate complex structures; this table collapses them to their dominant direction.</div>
               <div><span className="text-foreground font-medium">Book / Page</span> — Official recording reference in Miami-Dade's instrument index.</div>
             </div>
@@ -198,6 +218,25 @@ export default function CleanEvents() {
               className="h-8 text-sm" />
           </div>
         </div>
+        {/* Transaction type quick-filter pills */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-xs text-muted-foreground flex items-center gap-1 mr-1">
+            <Filter size={10} />
+            Transaction type:
+          </span>
+          <button
+            onClick={() => setDraft(p => ({ ...p, txn_type: '' }))}
+            className={`h-7 px-2.5 rounded-full border text-[11px] font-medium transition-colors ${!draft.txn_type ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground hover:border-foreground/40'}`}
+          >All</button>
+          {Object.entries(TXN_TYPES).map(([key, meta]) => (
+            <button
+              key={key}
+              onClick={() => setDraft(p => ({ ...p, txn_type: p.txn_type === key ? '' : key }))}
+              className={`h-7 px-2.5 rounded-full border text-[11px] font-medium transition-colors ${draft.txn_type === key ? meta.color + ' border-current' : 'border-border text-muted-foreground hover:text-foreground hover:border-foreground/40'}`}
+              title={meta.desc}
+            >{meta.label}</button>
+          ))}
+        </div>
         <div className="flex gap-2">
           <Button size="sm" onClick={apply} className="h-8"><Search size={13} className="mr-1.5" />Search</Button>
           {hasFilters && <Button size="sm" variant="ghost" onClick={clear} className="h-8 text-muted-foreground"><X size={13} className="mr-1.5" />Clear</Button>}
@@ -225,6 +264,7 @@ export default function CleanEvents() {
                     Assignee <span className="text-muted-foreground/60 font-normal">(Buyer)</span>
                   </span>
                 </th>
+                <th className="px-3 py-2.5 text-left font-medium">Type</th>
                 <th className="px-3 py-2.5 text-center font-medium">
                   <span className="flex items-center justify-center gap-1" title="Total parties on the filing">
                     <Users size={10} />
@@ -238,7 +278,7 @@ export default function CleanEvents() {
               {isLoading
                 ? Array(15).fill(0).map((_, i) => (
                     <tr key={i} className="border-b border-border/50">
-                      {Array(7).fill(0).map((_, j) => <td key={j} className="px-3 py-2.5"><Skeleton className="h-3 w-full" /></td>)}
+                      {Array(8).fill(0).map((_, j) => <td key={j} className="px-3 py-2.5"><Skeleton className="h-3 w-full" /></td>)}
                     </tr>
                   ))
                 : (data?.rows || []).map((r: any, i: number) => (
@@ -277,6 +317,10 @@ export default function CleanEvents() {
                         )}
                         <CategoryBadge category={r.assignee_type} size="xs" />
                       </td>
+                      {/* Txn type */}
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        {r.txn_type ? <TxnTypeBadge type={r.txn_type} /> : null}
+                      </td>
                       {/* Parties */}
                       <td className="px-3 py-2 text-center">
                         {r.total_parties > 2
@@ -289,7 +333,7 @@ export default function CleanEvents() {
                   ))
               }
               {!isLoading && !data?.rows?.length && (
-                <tr><td colSpan={7} className="px-3 py-12 text-center text-muted-foreground">No records found.</td></tr>
+                <tr><td colSpan={8} className="px-3 py-12 text-center text-muted-foreground">No records found.</td></tr>
               )}
             </tbody>
           </table>
