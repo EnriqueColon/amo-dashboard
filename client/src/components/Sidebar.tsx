@@ -5,7 +5,7 @@ import { useState } from 'react';
 const NAV = [
   { href: '/',                    icon: BarChart2,     label: 'Overview',             group: 'main' },
   { href: '/market-relationships',icon: Share2,        label: 'Market Relationships', group: 'analysis', badge: 'NEW' },
-  { href: '/market-analytics',    icon: LineChart,     label: 'Market Analytics',     group: 'analysis' },
+  { href: '/market-analytics',    icon: LineChart,     label: 'FDIC Data Analytics',     group: 'analysis' },
   { href: '/clean-events',        icon: CheckCircle,   label: 'Clean Transactions',   group: 'analysis' },
   { href: '/private-credit',      icon: Shield,        label: 'Private Credit',       group: 'analysis' },
   { href: '/assignments',         icon: FileText,       label: 'Raw Assignments',      group: 'data' },

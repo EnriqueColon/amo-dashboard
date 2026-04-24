@@ -55,8 +55,18 @@ export function getDb(): Database.Database {
       CREATE INDEX IF NOT EXISTS idx_assignments_grantor ON assignments(grantor);
       CREATE INDEX IF NOT EXISTS idx_assignments_grantee ON assignments(grantee);
       CREATE INDEX IF NOT EXISTS idx_assignments_rec_date ON assignments(rec_date);
+      CREATE INDEX IF NOT EXISTS idx_assignments_grantor_upper ON assignments(UPPER(grantor));
+      CREATE INDEX IF NOT EXISTS idx_assignments_grantee_upper ON assignments(UPPER(grantee));
       CREATE INDEX IF NOT EXISTS idx_clean_assignor ON aom_events_clean(assignor_canon);
       CREATE INDEX IF NOT EXISTS idx_clean_assignee ON aom_events_clean(assignee_canon);
+      CREATE INDEX IF NOT EXISTS idx_clean_assignor_type ON aom_events_clean(assignor_type);
+      CREATE INDEX IF NOT EXISTS idx_clean_assignee_type ON aom_events_clean(assignee_type);
+      CREATE INDEX IF NOT EXISTS idx_clean_date ON aom_events_clean(rec_date);
+      CREATE INDEX IF NOT EXISTS idx_entity_class_name ON entity_classifications(name);
+      CREATE INDEX IF NOT EXISTS idx_entity_nodes_type ON entity_nodes(entity_type);
+      CREATE INDEX IF NOT EXISTS idx_entity_nodes_inbound ON entity_nodes(inbound_vol DESC);
+      CREATE INDEX IF NOT EXISTS idx_entity_nodes_outbound ON entity_nodes(outbound_vol DESC);
+      CREATE INDEX IF NOT EXISTS idx_entity_nodes_total ON entity_nodes(total_vol DESC);
     `);
   }
   return _db;

@@ -306,7 +306,7 @@ export default function MarketAnalytics() {
         <div>
           <div className="flex items-center gap-2">
             <LineChart size={20} className="text-primary" />
-            <h1 className="text-xl font-semibold">Market Analytics</h1>
+            <h1 className="text-xl font-semibold">FDIC Data Analytics</h1>
           </div>
           <p className="text-sm text-muted-foreground mt-0.5">
             FDIC financials, failures, and historical summaries with filters.

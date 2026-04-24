@@ -6,62 +6,80 @@ import { fetchFDICFinancials } from './fdic';
 export async function registerRoutes(httpServer: Server, app: Express) {
   const db = getDb();
 
+  // ── Pre-compile all frequently-used statements once at startup ─────────────
+  const stmts = {
+    statsTotal:          db.prepare('SELECT COUNT(*) as n FROM assignments'),
+    statsRange:          db.prepare('SELECT MIN(rec_date) as min_date, MAX(rec_date) as max_date FROM assignments'),
+    statsGrantors:       db.prepare('SELECT COUNT(DISTINCT grantor) as n FROM assignments'),
+    statsGrantees:       db.prepare('SELECT COUNT(DISTINCT grantee) as n FROM assignments'),
+    statsPrivCredit:     db.prepare(`SELECT COUNT(*) as n FROM aom_events_clean WHERE assignor_type='PRIVATE_CREDIT' OR assignee_type='PRIVATE_CREDIT'`),
+    statsLogCount:       db.prepare('SELECT COUNT(*) as n FROM collection_log'),
+    statsLastCollected:  db.prepare(`SELECT MAX(date_to) as dt FROM collection_log WHERE status='OK'`),
+    monthlyVolume:       db.prepare(`
+      SELECT strftime('%Y-%m', rec_date) as month,
+        COUNT(*) as total,
+        COUNT(DISTINCT assignor_canon) as unique_assignors,
+        COUNT(DISTINCT assignee_canon) as unique_assignees
+      FROM aom_events_clean GROUP BY month ORDER BY month
+    `),
+    topAssignors:        db.prepare(`
+      SELECT entity as name, entity_type as category, outbound_vol as total, first_seen as first_date, last_seen as last_date
+      FROM entity_nodes WHERE outbound_vol > 0 ORDER BY outbound_vol DESC LIMIT 25
+    `),
+    topAssignees:        db.prepare(`
+      SELECT entity as name, entity_type as category, inbound_vol as total, first_seen as first_date, last_seen as last_date
+      FROM entity_nodes WHERE inbound_vol > 0 ORDER BY inbound_vol DESC LIMIT 25
+    `),
+    flowMatrix:          db.prepare(`
+      SELECT COALESCE(assignor_type,'OTHER') as from_cat,
+             COALESCE(assignee_type,'OTHER') as to_cat,
+             COUNT(*) as count
+      FROM aom_events_clean
+      GROUP BY from_cat, to_cat ORDER BY count DESC
+    `),
+    networkStats:        db.prepare('SELECT COUNT(*) as n FROM aom_events_clean'),
+    nodeCount:           db.prepare('SELECT COUNT(*) as n FROM entity_nodes'),
+    edgeCount:           db.prepare('SELECT COUNT(*) as n FROM entity_relationships'),
+    topAcquirers:        db.prepare('SELECT entity, inbound_vol, outbound_vol, degree, entity_type FROM entity_nodes ORDER BY inbound_vol DESC LIMIT 10'),
+    topSellers:          db.prepare('SELECT entity, inbound_vol, outbound_vol, degree, entity_type FROM entity_nodes ORDER BY outbound_vol DESC LIMIT 10'),
+    mostConnected:       db.prepare('SELECT entity, inbound_vol, outbound_vol, degree, entity_type FROM entity_nodes ORDER BY degree DESC LIMIT 10'),
+    privateCreditTotal:  db.prepare(`SELECT COUNT(*) as n FROM aom_events_clean WHERE assignor_type='PRIVATE_CREDIT' OR assignee_type='PRIVATE_CREDIT'`),
+    privateCreditRows:   db.prepare(`
+      SELECT cfn, rec_date, assignor, assignee, assignor_canon, assignee_canon,
+             assignor_type as grantor_category, assignee_type as grantee_category
+      FROM aom_events_clean
+      WHERE assignor_type='PRIVATE_CREDIT' OR assignee_type='PRIVATE_CREDIT'
+      ORDER BY rec_date DESC LIMIT ? OFFSET ?
+    `),
+    collectionLog:       db.prepare('SELECT date_from, date_to, records_found, status FROM collection_log ORDER BY date_from DESC'),
+  };
+
   // ─── GET /api/stats ───────────────────────────────────────────────────────
   app.get('/api/stats', (_req, res) => {
-    const total = (db.prepare('SELECT COUNT(*) as n FROM assignments').get() as any).n;
-    const unique_cfns = (db.prepare('SELECT COUNT(DISTINCT cfn) as n FROM assignments').get() as any).n;
-    const { min_date, max_date } = db.prepare('SELECT MIN(rec_date) as min_date, MAX(rec_date) as max_date FROM assignments').get() as any;
-    const unique_grantors = (db.prepare('SELECT COUNT(DISTINCT grantor) as n FROM assignments').get() as any).n;
-    const unique_grantees = (db.prepare('SELECT COUNT(DISTINCT grantee) as n FROM assignments').get() as any).n;
-    const private_credit_txns = (db.prepare(`
-      SELECT COUNT(*) as n FROM assignments a
-      LEFT JOIN entity_classifications ec_g ON UPPER(a.grantor)=UPPER(ec_g.name)
-      LEFT JOIN entity_classifications ec_a ON UPPER(a.grantee)=UPPER(ec_a.name)
-      WHERE ec_g.category='PRIVATE_CREDIT' OR ec_a.category='PRIVATE_CREDIT'
-    `).get() as any).n;
-    const collection_log_count = (db.prepare('SELECT COUNT(*) as n FROM collection_log').get() as any).n;
-    const last_collected = (db.prepare(`SELECT MAX(date_to) as dt FROM collection_log WHERE status='OK'`).get() as any)?.dt;
-
+    const total             = (stmts.statsTotal.get() as any).n;
+    const unique_cfns       = total; // cfn is unique per assignment row
+    const { min_date, max_date } = stmts.statsRange.get() as any;
+    const unique_grantors   = (stmts.statsGrantors.get() as any).n;
+    const unique_grantees   = (stmts.statsGrantees.get() as any).n;
+    const private_credit_txns = (stmts.statsPrivCredit.get() as any).n;
+    const collection_log_count = (stmts.statsLogCount.get() as any).n;
+    const last_collected    = (stmts.statsLastCollected.get() as any)?.dt;
     res.json({ total, unique_cfns, min_date, max_date, unique_grantors, unique_grantees, private_credit_txns, collection_log_count, last_collected });
   });
 
   // ─── GET /api/monthly-volume ──────────────────────────────────────────────
   app.get('/api/monthly-volume', (_req, res) => {
-    const rows = db.prepare(`
-      SELECT strftime('%Y-%m', rec_date) as month,
-        COUNT(*) as total,
-        COUNT(DISTINCT cfn) as unique_cfns,
-        COUNT(DISTINCT grantor) as unique_grantors,
-        COUNT(DISTINCT grantee) as unique_grantees
-      FROM assignments GROUP BY month ORDER BY month
-    `).all();
-    res.json(rows);
+    res.json(stmts.monthlyVolume.all());
   });
 
   // ─── GET /api/top-assignors ───────────────────────────────────────────────
-  app.get('/api/top-assignors', (req, res) => {
-    const n = Math.min(parseInt(req.query.n as string) || 25, 200);
-    const rows = db.prepare(`
-      SELECT a.grantor as name, COALESCE(ec.category,'UNCLASSIFIED') as category,
-        COUNT(*) as total, MIN(a.rec_date) as first_date, MAX(a.rec_date) as last_date
-      FROM assignments a
-      LEFT JOIN entity_classifications ec ON UPPER(a.grantor)=UPPER(ec.name)
-      GROUP BY a.grantor ORDER BY total DESC LIMIT ?
-    `).all(n);
-    res.json(rows);
+  app.get('/api/top-assignors', (_req, res) => {
+    res.json(stmts.topAssignors.all());
   });
 
   // ─── GET /api/top-assignees ───────────────────────────────────────────────
-  app.get('/api/top-assignees', (req, res) => {
-    const n = Math.min(parseInt(req.query.n as string) || 25, 200);
-    const rows = db.prepare(`
-      SELECT a.grantee as name, COALESCE(ec.category,'UNCLASSIFIED') as category,
-        COUNT(*) as total, MIN(a.rec_date) as first_date, MAX(a.rec_date) as last_date
-      FROM assignments a
-      LEFT JOIN entity_classifications ec ON UPPER(a.grantee)=UPPER(ec.name)
-      GROUP BY a.grantee ORDER BY total DESC LIMIT ?
-    `).all(n);
-    res.json(rows);
+  app.get('/api/top-assignees', (_req, res) => {
+    res.json(stmts.topAssignees.all());
   });
 
   // ─── GET /api/assignments ─────────────────────────────────────────────────
@@ -128,16 +146,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
 
   // ─── GET /api/flow-matrix ─────────────────────────────────────────────────
   app.get('/api/flow-matrix', (_req, res) => {
-    const rows = db.prepare(`
-      SELECT COALESCE(ec_g.category,'UNCLASSIFIED') as from_cat,
-             COALESCE(ec_a.category,'UNCLASSIFIED') as to_cat,
-             COUNT(*) as count
-      FROM assignments a
-      LEFT JOIN entity_classifications ec_g ON UPPER(a.grantor)=UPPER(ec_g.name)
-      LEFT JOIN entity_classifications ec_a ON UPPER(a.grantee)=UPPER(ec_a.name)
-      GROUP BY from_cat, to_cat ORDER BY count DESC
-    `).all();
-    res.json(rows);
+    res.json(stmts.flowMatrix.all());
   });
 
   // ─── GET /api/search ──────────────────────────────────────────────────────
@@ -223,60 +232,30 @@ export async function registerRoutes(httpServer: Server, app: Express) {
 
   // ─── GET /api/collection-log ──────────────────────────────────────────────
   app.get('/api/collection-log', (_req, res) => {
-    const rows = db.prepare('SELECT date_from, date_to, records_found, status FROM collection_log ORDER BY date_from DESC').all();
-    res.json(rows);
+    res.json(stmts.collectionLog.all());
   });
 
   // ─── GET /api/private-credit ──────────────────────────────────────────────
   app.get('/api/private-credit', (req, res) => {
     const { page = '1', limit = '50' } = req.query as Record<string, string>;
-    const pageNum = Math.max(1, parseInt(page));
+    const pageNum  = Math.max(1, parseInt(page));
     const limitNum = Math.min(parseInt(limit) || 50, 500);
-    const offset = (pageNum - 1) * limitNum;
-
-    const total = (db.prepare(`
-      SELECT COUNT(*) as n FROM assignments a
-      LEFT JOIN entity_classifications ec_g ON UPPER(a.grantor)=UPPER(ec_g.name)
-      LEFT JOIN entity_classifications ec_a ON UPPER(a.grantee)=UPPER(ec_a.name)
-      WHERE ec_g.category='PRIVATE_CREDIT' OR ec_a.category='PRIVATE_CREDIT'
-    `).get() as any).n;
-
-    const rows = db.prepare(`
-      SELECT a.cfn, a.rec_date, a.grantor, a.grantee, a.address,
-        COALESCE(ec_g.category,'UNCLASSIFIED') as grantor_category,
-        COALESCE(ec_a.category,'UNCLASSIFIED') as grantee_category
-      FROM assignments a
-      LEFT JOIN entity_classifications ec_g ON UPPER(a.grantor)=UPPER(ec_g.name)
-      LEFT JOIN entity_classifications ec_a ON UPPER(a.grantee)=UPPER(ec_a.name)
-      WHERE ec_g.category='PRIVATE_CREDIT' OR ec_a.category='PRIVATE_CREDIT'
-      ORDER BY a.rec_date DESC LIMIT ? OFFSET ?
-    `).all(limitNum, offset);
-
+    const offset   = (pageNum - 1) * limitNum;
+    const total    = (stmts.privateCreditTotal.get() as any).n;
+    const rows     = stmts.privateCreditRows.all(limitNum, offset);
     res.json({ total, page: pageNum, limit: limitNum, pages: Math.ceil(total / limitNum), rows });
   });
 
 
   // ─── GET /api/network-stats ───────────────────────────────────────────────
-  // Summary stats from the clean/denoised dataset
   app.get('/api/network-stats', (_req, res) => {
-    const clean_total = (db.prepare('SELECT COUNT(*) as n FROM aom_events_clean').get() as any)?.n ?? 0;
-    const node_count  = (db.prepare('SELECT COUNT(*) as n FROM entity_nodes').get() as any)?.n ?? 0;
-    const edge_count  = (db.prepare('SELECT COUNT(*) as n FROM entity_relationships').get() as any)?.n ?? 0;
-    const raw_total   = (db.prepare('SELECT COUNT(*) as n FROM assignments').get() as any).n;
-
-    const top_acquirers = db.prepare(`
-      SELECT entity, inbound_vol, outbound_vol, degree, entity_type
-      FROM entity_nodes ORDER BY inbound_vol DESC LIMIT 10
-    `).all();
-    const top_sellers = db.prepare(`
-      SELECT entity, inbound_vol, outbound_vol, degree, entity_type
-      FROM entity_nodes ORDER BY outbound_vol DESC LIMIT 10
-    `).all();
-    const most_connected = db.prepare(`
-      SELECT entity, inbound_vol, outbound_vol, degree, entity_type
-      FROM entity_nodes ORDER BY degree DESC LIMIT 10
-    `).all();
-
+    const clean_total    = (stmts.networkStats.get() as any)?.n ?? 0;
+    const node_count     = (stmts.nodeCount.get() as any)?.n ?? 0;
+    const edge_count     = (stmts.edgeCount.get() as any)?.n ?? 0;
+    const raw_total      = (stmts.statsTotal.get() as any).n;
+    const top_acquirers  = stmts.topAcquirers.all();
+    const top_sellers    = stmts.topSellers.all();
+    const most_connected = stmts.mostConnected.all();
     res.json({ clean_total, raw_total, node_count, edge_count, top_acquirers, top_sellers, most_connected });
   });
 
