@@ -12,7 +12,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     statsRange:          db.prepare('SELECT MIN(rec_date) as min_date, MAX(rec_date) as max_date FROM assignments'),
     statsGrantors:       db.prepare('SELECT COUNT(DISTINCT grantor) as n FROM assignments'),
     statsGrantees:       db.prepare('SELECT COUNT(DISTINCT grantee) as n FROM assignments'),
-    statsPrivCredit:     db.prepare(`SELECT COUNT(*) as n FROM aom_events_clean WHERE assignor_type='PRIVATE_CREDIT' OR assignee_type='PRIVATE_CREDIT'`),
+    statsPrivCredit:     db.prepare(`SELECT COUNT(*) as n FROM aom_events_clean WHERE (assignor_type='PRIVATE_CREDIT' OR assignee_type='PRIVATE_CREDIT') AND txn_type != 'SELF_ASSIGN'`),
     statsMarketTransfers:db.prepare(`SELECT COUNT(*) as n FROM aom_events_clean WHERE txn_type='MARKET_TRANSFER'`),
     statsTxnBreakdown:   db.prepare(`SELECT txn_type, COUNT(*) as n FROM aom_events_clean GROUP BY txn_type ORDER BY n DESC`),
     statsLogCount:       db.prepare('SELECT COUNT(*) as n FROM collection_log'),
@@ -48,24 +48,33 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     topAcquirers:        db.prepare('SELECT entity, inbound_vol, outbound_vol, degree, entity_type FROM entity_nodes ORDER BY inbound_vol DESC LIMIT 10'),
     topSellers:          db.prepare('SELECT entity, inbound_vol, outbound_vol, degree, entity_type FROM entity_nodes ORDER BY outbound_vol DESC LIMIT 10'),
     mostConnected:       db.prepare('SELECT entity, inbound_vol, outbound_vol, degree, entity_type FROM entity_nodes ORDER BY degree DESC LIMIT 10'),
-    privateCreditTotal:  db.prepare(`SELECT COUNT(*) as n FROM aom_events_clean WHERE assignor_type='PRIVATE_CREDIT' OR assignee_type='PRIVATE_CREDIT'`),
+    privateCreditTotal:  db.prepare(`
+      SELECT COUNT(*) as n FROM aom_events_clean
+      WHERE (assignor_type='PRIVATE_CREDIT' OR assignee_type='PRIVATE_CREDIT')
+        AND txn_type != 'SELF_ASSIGN'
+    `),
     privateCreditRows:   db.prepare(`
       SELECT c.cfn, c.rec_date,
              c.assignor  AS grantor, c.assignee  AS grantee,
              c.assignor_canon, c.assignee_canon,
              c.assignor_type AS grantor_category,
              c.assignee_type AS grantee_category,
+             c.txn_type,
              a.address
       FROM aom_events_clean c
       LEFT JOIN assignments a ON c.cfn = a.cfn
-      WHERE c.assignor_type='PRIVATE_CREDIT' OR c.assignee_type='PRIVATE_CREDIT'
+      WHERE (c.assignor_type='PRIVATE_CREDIT' OR c.assignee_type='PRIVATE_CREDIT')
+        AND c.txn_type != 'SELF_ASSIGN'
       ORDER BY c.rec_date DESC LIMIT ? OFFSET ?
     `),
     privateCreditTopGrantees: db.prepare(`
-      SELECT entity AS name, inbound_vol AS count
-      FROM entity_nodes
-      WHERE entity_type = 'PRIVATE_CREDIT' AND inbound_vol > 0
-      ORDER BY inbound_vol DESC LIMIT 10
+      SELECT assignee_canon AS name, COUNT(*) AS count
+      FROM aom_events_clean
+      WHERE assignee_type = 'PRIVATE_CREDIT'
+        AND txn_type != 'SELF_ASSIGN'
+        AND assignor_canon != assignee_canon
+      GROUP BY assignee_canon
+      ORDER BY count DESC LIMIT 10
     `),
     collectionLog:       db.prepare('SELECT date_from, date_to, records_found, status FROM collection_log ORDER BY date_from DESC'),
   };
