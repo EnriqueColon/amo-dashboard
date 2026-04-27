@@ -4,44 +4,54 @@
 
 @layer base {
   :root {
-    /* Finance dashboard — deep navy/slate surfaces, amber accent */
-    --background: 220 20% 10%;
-    --foreground: 210 15% 88%;
+    /* Finance dashboard — clean light theme, navy primary */
+    --background: 220 16% 96%;
+    --foreground: 220 25% 14%;
 
-    --card: 220 18% 13%;
-    --card-foreground: 210 15% 88%;
+    --card: 0 0% 100%;
+    --card-foreground: 220 25% 14%;
 
-    --popover: 220 18% 13%;
-    --popover-foreground: 210 15% 88%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 25% 14%;
 
-    --primary: 38 95% 55%;       /* Amber accent */
-    --primary-foreground: 220 20% 8%;
+    --primary: 221 83% 48%;       /* Strong blue accent */
+    --primary-foreground: 0 0% 100%;
 
-    --secondary: 220 15% 20%;
-    --secondary-foreground: 210 12% 75%;
+    --secondary: 220 14% 90%;
+    --secondary-foreground: 220 20% 30%;
 
-    --muted: 220 15% 17%;
-    --muted-foreground: 215 10% 52%;
+    --muted: 220 14% 92%;
+    --muted-foreground: 220 10% 44%;
 
-    --accent: 220 15% 20%;
-    --accent-foreground: 210 15% 88%;
+    --accent: 220 14% 90%;
+    --accent-foreground: 220 25% 14%;
 
-    --destructive: 0 65% 50%;
-    --destructive-foreground: 210 15% 88%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
 
-    --border: 220 12% 22%;
-    --input: 220 12% 22%;
-    --ring: 38 95% 55%;
+    --border: 220 13% 86%;
+    --input: 220 13% 86%;
+    --ring: 221 83% 48%;
 
     --radius: 0.5rem;
 
+    /* Sidebar */
+    --sidebar: 220 22% 98%;
+    --sidebar-foreground: 220 25% 14%;
+    --sidebar-border: 220 13% 88%;
+    --sidebar-ring: 221 83% 48%;
+    --sidebar-accent: 220 14% 92%;
+    --sidebar-accent-foreground: 220 25% 14%;
+    --sidebar-primary: 221 83% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+
     /* Custom semantic colors */
-    --color-private-credit: 270 70% 65%;
-    --color-bank: 200 80% 55%;
-    --color-gse: 140 60% 48%;
-    --color-servicer: 38 95% 55%;
-    --color-mers: 15 85% 58%;
-    --color-other: 215 10% 52%;
+    --color-private-credit: 270 60% 52%;
+    --color-bank: 210 80% 45%;
+    --color-gse: 142 60% 38%;
+    --color-servicer: 33 90% 44%;
+    --color-mers: 15 80% 50%;
+    --color-other: 220 10% 52%;
   }
 }
 
@@ -61,13 +71,13 @@
 ::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground)); }
 
 /* Category badge colors */
-.cat-PRIVATE_CREDIT { @apply bg-purple-900/40 text-purple-300 border-purple-700/50; }
-.cat-BANK           { @apply bg-blue-900/40 text-blue-300 border-blue-700/50; }
-.cat-GSE            { @apply bg-green-900/40 text-green-300 border-green-700/50; }
-.cat-SERVICER       { @apply bg-amber-900/40 text-amber-300 border-amber-700/50; }
-.cat-MERS           { @apply bg-orange-900/40 text-orange-300 border-orange-700/50; }
-.cat-OTHER, .cat-UNCLASSIFIED { @apply bg-slate-800/60 text-slate-400 border-slate-600/50; }
+.cat-PRIVATE_CREDIT { @apply bg-purple-100 text-purple-700 border-purple-300; }
+.cat-BANK           { @apply bg-blue-100 text-blue-700 border-blue-300; }
+.cat-GSE            { @apply bg-green-100 text-green-700 border-green-300; }
+.cat-SERVICER       { @apply bg-amber-100 text-amber-700 border-amber-300; }
+.cat-MERS           { @apply bg-orange-100 text-orange-700 border-orange-300; }
+.cat-OTHER, .cat-UNCLASSIFIED { @apply bg-slate-100 text-slate-500 border-slate-300; }
 
-.status-OK    { @apply text-green-400; }
-.status-CAPPED { @apply text-amber-400; }
-.status-ERROR { @apply text-red-400; }
+.status-OK    { @apply text-green-600; }
+.status-CAPPED { @apply text-amber-600; }
+.status-ERROR { @apply text-red-600; }

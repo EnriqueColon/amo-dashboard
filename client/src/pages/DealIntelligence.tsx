@@ -280,7 +280,7 @@ export default function DealIntelligence() {
           </div>
 
           <div className="mt-3 mb-2 px-2">
-            <div className="flex items-center gap-1.5 text-[10px] text-amber-400/80 bg-amber-500/5 border border-amber-500/15 rounded-lg px-3 py-2">
+            <div className="flex items-center gap-1.5 text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
               <Eye size={10} className="shrink-0" />
               <span>When these entities acquire at increasing rates, distressed supply is building upstream — monitor for portfolio sale opportunities.</span>
             </div>
@@ -300,7 +300,7 @@ export default function DealIntelligence() {
                     </div>
                     <div className="flex items-center gap-2">
                       <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
-                        <div className="h-full bg-amber-400/60 rounded-full" style={{ width: `${inPct}%` }} />
+                        <div className="h-full bg-amber-500 rounded-full" style={{ width: `${inPct}%` }} />
                       </div>
                       <span className="text-[9px] text-muted-foreground shrink-0">
                         {row.outbound_vol.toLocaleString()} resold · {inPct}% net acquiring
@@ -348,7 +348,7 @@ export default function DealIntelligence() {
                   <div className="flex-1 flex items-center gap-2">
                     <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
                       <div
-                        className={`h-full rounded-full ${isNetBuyer ? 'bg-purple-500/70' : 'bg-purple-500/30'}`}
+                        className={`h-full rounded-full ${isNetBuyer ? 'bg-purple-500' : 'bg-purple-300'}`}
                         style={{ width: `${barPct}%` }}
                       />
                     </div>
@@ -411,11 +411,11 @@ export default function DealIntelligence() {
                 <th className="px-4 py-2.5 text-left font-medium">CFN</th>
                 <th className="px-4 py-2.5 text-left font-medium">Date</th>
                 <th className="px-4 py-2.5 text-left font-medium">
-                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-400 inline-block" />Bank (Seller)</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-500 inline-block" />Bank (Seller)</span>
                 </th>
                 <th className="px-2 py-2.5 text-center font-medium w-5"></th>
                 <th className="px-4 py-2.5 text-left font-medium">
-                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-purple-400 inline-block" />PE Fund (Buyer)</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-purple-500 inline-block" />PE Fund (Buyer)</span>
                 </th>
                 <th className="px-4 py-2.5 text-left font-medium">Book / Page</th>
                 <th className="px-4 py-2.5 text-center font-medium">Ref</th>
@@ -433,7 +433,7 @@ export default function DealIntelligence() {
                       <td className="px-4 py-2.5 font-mono text-primary/80 text-[11px] whitespace-nowrap">{r.cfn}</td>
                       <td className="px-4 py-2.5 whitespace-nowrap text-muted-foreground">{r.rec_date}</td>
                       <td className="px-4 py-2.5 max-w-[180px]">
-                        <div className="font-semibold text-blue-300 truncate" title={r.seller}>{r.seller}</div>
+                        <div className="font-semibold text-blue-700 truncate" title={r.seller}>{r.seller}</div>
                         {r.assignor !== r.seller && (
                           <div className="text-muted-foreground truncate text-[10px]" title={r.assignor}>{r.assignor}</div>
                         )}
@@ -442,7 +442,7 @@ export default function DealIntelligence() {
                         <ArrowRight size={11} className="text-orange-400/60 mx-auto" />
                       </td>
                       <td className="px-4 py-2.5 max-w-[180px]">
-                        <div className="font-semibold text-purple-300 truncate" title={r.buyer}>{r.buyer}</div>
+                        <div className="font-semibold text-purple-700 truncate" title={r.buyer}>{r.buyer}</div>
                         {r.assignee !== r.buyer && (
                           <div className="text-muted-foreground truncate text-[10px]" title={r.assignee}>{r.assignee}</div>
                         )}

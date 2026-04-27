@@ -16,12 +16,12 @@ const EMPTY: Filters = { assignor: '', assignee: '', start_date: '', end_date: '
 
 // ── Transaction type metadata ─────────────────────────────────────────────────
 const TXN_TYPES: Record<string, { label: string; color: string; desc: string }> = {
-  MARKET_TRANSFER:   { label: 'Market Transfer',  color: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',  desc: 'Institution → Institution (true secondary market)' },
-  ORIGINATION:       { label: 'Origination',      color: 'bg-blue-500/15 text-blue-400 border-blue-500/30',          desc: 'Individual / private → Institution (new supply entering)' },
-  MERS_RELEASE:      { label: 'MERS Release',     color: 'bg-purple-500/15 text-purple-400 border-purple-500/30',    desc: 'MERS nominee discharging nominal interest (registry housekeeping)' },
-  SELF_ASSIGN:       { label: 'Self-Assign',      color: 'bg-zinc-500/15 text-zinc-400 border-zinc-500/30',          desc: 'Same canonical entity on both sides (administrative noise)' },
-  INSTITUTIONAL_OUT: { label: 'Inst. Out',        color: 'bg-amber-500/15 text-amber-400 border-amber-500/30',       desc: 'Institution → Individual (payoff, REO, or distressed)' },
-  PRIVATE:           { label: 'Private',          color: 'bg-slate-500/15 text-slate-400 border-slate-500/30',       desc: 'Individual → Individual (non-institutional)' },
+  MARKET_TRANSFER:   { label: 'Market Transfer',  color: 'bg-emerald-100 text-emerald-700 border-emerald-300',  desc: 'Institution → Institution (true secondary market)' },
+  ORIGINATION:       { label: 'Origination',      color: 'bg-blue-100 text-blue-700 border-blue-300',          desc: 'Individual / private → Institution (new supply entering)' },
+  MERS_RELEASE:      { label: 'MERS Release',     color: 'bg-purple-100 text-purple-700 border-purple-300',    desc: 'MERS nominee discharging nominal interest (registry housekeeping)' },
+  SELF_ASSIGN:       { label: 'Self-Assign',      color: 'bg-zinc-100 text-zinc-600 border-zinc-300',          desc: 'Same canonical entity on both sides (administrative noise)' },
+  INSTITUTIONAL_OUT: { label: 'Inst. Out',        color: 'bg-amber-100 text-amber-700 border-amber-300',       desc: 'Institution → Individual (payoff, REO, or distressed)' },
+  PRIVATE:           { label: 'Private',          color: 'bg-slate-100 text-slate-600 border-slate-300',       desc: 'Individual → Individual (non-institutional)' },
 };
 
 function TxnTypeBadge({ type }: { type: string }) {

@@ -8,11 +8,11 @@ import CategoryBadge from '@/components/CategoryBadge';
 
 // Transaction type badge — compact version for this table
 const TXN_META: Record<string, { label: string; color: string }> = {
-  MARKET_TRANSFER:   { label: 'Market Transfer',  color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/25' },
-  ORIGINATION:       { label: 'Origination',       color: 'text-blue-400 bg-blue-500/10 border-blue-500/25' },
-  MERS_RELEASE:      { label: 'MERS Release',      color: 'text-purple-400 bg-purple-500/10 border-purple-500/25' },
-  INSTITUTIONAL_OUT: { label: 'Inst. Out',          color: 'text-amber-400 bg-amber-500/10 border-amber-500/25' },
-  PRIVATE:           { label: 'Private',            color: 'text-slate-400 bg-slate-500/10 border-slate-500/25' },
+  MARKET_TRANSFER:   { label: 'Market Transfer',  color: 'text-emerald-700 bg-emerald-100 border-emerald-300' },
+  ORIGINATION:       { label: 'Origination',       color: 'text-blue-700 bg-blue-100 border-blue-300' },
+  MERS_RELEASE:      { label: 'MERS Release',      color: 'text-purple-700 bg-purple-100 border-purple-300' },
+  INSTITUTIONAL_OUT: { label: 'Inst. Out',          color: 'text-amber-700 bg-amber-100 border-amber-300' },
+  PRIVATE:           { label: 'Private',            color: 'text-slate-600 bg-slate-100 border-slate-300' },
 };
 
 function TxnBadge({ type }: { type: string }) {
@@ -101,9 +101,9 @@ export default function PrivateCredit() {
                         ? 'Acquiring'
                         : 'Selling';
                     const roleColor = pcRole === 'Acquiring'
-                      ? 'text-purple-400'
+                      ? 'text-purple-700'
                       : pcRole === 'PE ↔ PE'
-                        ? 'text-purple-300'
+                        ? 'text-purple-500'
                         : 'text-muted-foreground';
                     return (
                       <tr key={r.cfn + r.rec_date} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
