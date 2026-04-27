@@ -11,7 +11,8 @@ import {
 import {
   TrendingDown, TrendingUp, AlertTriangle, Target, Users,
   ArrowRight, ChevronLeft, ChevronRight, ExternalLink,
-  Flame, Shield, Eye, Info,
+  Flame, Shield, Eye, Info, ChevronDown, ChevronUp,
+  Building2, MapPin, FileText, Activity, Link2, Hash,
 } from 'lucide-react';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -75,9 +76,246 @@ function KpiCard({ label, value, sub, icon: Icon, accent, tooltip }: {
   );
 }
 
+// ── Deal Detail Panel ─────────────────────────────────────────────────────────
+function RelationshipBadge({ totalDeals, dealNumber }: { totalDeals: number; dealNumber: number | null }) {
+  if (totalDeals === 1) return (
+    <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+      First deal between this pair
+    </span>
+  );
+  if (dealNumber === 1) return (
+    <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+      Most recent of {totalDeals} deals
+    </span>
+  );
+  return (
+    <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+      Deal #{totalDeals - (dealNumber ?? 0) + 1} of {totalDeals} in this relationship
+    </span>
+  );
+}
+
+function DealDetailPanel({ cfn, onClose }: { cfn: string; onClose: () => void }) {
+  const { data: detail, isLoading } = useQuery({
+    queryKey: ['/api/deal-intelligence/deal-detail', cfn],
+    queryFn: () => apiRequest('GET', `/api/deal-intelligence/deal-detail/${cfn}`).then(r => r.json()),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  if (isLoading) return (
+    <tr>
+      <td colSpan={7} className="px-4 py-4 bg-orange-50/50 border-b border-border">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <div className="w-3 h-3 rounded-full border-2 border-orange-400 border-t-transparent animate-spin" />
+          Loading deal intelligence…
+        </div>
+      </td>
+    </tr>
+  );
+
+  if (!detail || detail.error) return null;
+
+  const { transaction: tx, relationship: rel, seller_profile: sp, buyer_profile: bp,
+          seller_other_buyers: sob, buyer_other_sellers: bos } = detail;
+
+  const sellerIsNetSeller = sp && sp.outbound_vol > sp.inbound_vol;
+  const buyerIsNetBuyer   = bp && bp.inbound_vol >= bp.outbound_vol;
+
+  // Derive a plain-language narrative
+  const narrative = (() => {
+    const parts: string[] = [];
+    if (rel.total_deals === 1) {
+      parts.push(`This is the first recorded direct transfer from ${tx.assignor_canon} to ${tx.assignee_canon} in Miami-Dade County.`);
+    } else if (rel.deal_number === 1) {
+      parts.push(`This is the most recent of ${rel.total_deals} recorded transfers between ${tx.assignor_canon} and ${tx.assignee_canon}, spanning ${rel.first_deal} to ${rel.last_deal}.`);
+    } else {
+      const ordinal = rel.total_deals - (rel.deal_number ?? 0) + 1;
+      parts.push(`This is deal #${ordinal} in a ${rel.total_deals}-transaction relationship between ${tx.assignor_canon} and ${tx.assignee_canon} (${rel.first_deal} → ${rel.last_deal}).`);
+    }
+    if (sp && sellerIsNetSeller) {
+      parts.push(`${tx.assignor_canon} is a net seller (${sp.outbound_vol.toLocaleString()} outbound vs ${sp.inbound_vol.toLocaleString()} inbound) — consistent disposition pressure.`);
+    }
+    if (bp && buyerIsNetBuyer) {
+      parts.push(`${tx.assignee_canon} is an active net acquirer with ${bp.inbound_vol.toLocaleString()} total inbound assignments in this market.`);
+    }
+    if (sob && sob.length > 1) {
+      const others = sob.filter((b: any) => b.buyer !== tx.assignee_canon).slice(0, 2).map((b: any) => b.buyer);
+      if (others.length > 0) parts.push(`${tx.assignor_canon} also sells to: ${others.join(', ')}.`);
+    }
+    return parts.join(' ');
+  })();
+
+  return (
+    <tr>
+      <td colSpan={7} className="border-b border-border p-0">
+        <div className="bg-orange-50/40 border-l-2 border-orange-400 px-5 py-4 space-y-4">
+
+          {/* Header */}
+          <div className="flex items-start justify-between gap-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-semibold text-foreground">Deal Intelligence: {cfn}</span>
+                <RelationshipBadge totalDeals={rel.total_deals} dealNumber={rel.deal_number} />
+              </div>
+              {narrative && (
+                <p className="text-[11px] text-muted-foreground max-w-3xl leading-relaxed">{narrative}</p>
+              )}
+            </div>
+            <button onClick={onClose} className="text-muted-foreground/40 hover:text-muted-foreground transition-colors shrink-0 mt-0.5">
+              <ChevronUp size={14} />
+            </button>
+          </div>
+
+          {/* Three-column layout */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+            {/* Col 1: Filing Details */}
+            <div className="space-y-2.5">
+              <p className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                <FileText size={9} />Filing Details
+              </p>
+              <div className="space-y-1.5 text-[11px]">
+                {tx.address && (
+                  <div className="flex items-start gap-1.5">
+                    <MapPin size={10} className="text-muted-foreground/60 mt-0.5 shrink-0" />
+                    <span className="text-foreground">{tx.address}</span>
+                  </div>
+                )}
+                <div className="flex items-center gap-1.5 text-muted-foreground">
+                  <Hash size={10} className="shrink-0" />
+                  <span className="font-mono">{tx.cfn}</span>
+                  <span className="text-muted-foreground/40">·</span>
+                  <span>{tx.rec_date}</span>
+                </div>
+                <div className="flex items-center gap-1.5 text-muted-foreground">
+                  <FileText size={10} className="shrink-0" />
+                  <span>Book {tx.rec_book} / Page {tx.rec_page}</span>
+                </div>
+                {tx.legal_desc && (
+                  <div className="text-muted-foreground/60 text-[10px] italic line-clamp-2" title={tx.legal_desc}>
+                    {tx.legal_desc}
+                  </div>
+                )}
+                <div className="pt-1">
+                  <a
+                    href={`https://www2.miamidadeclerk.gov/ocs/Search.aspx?QS=RN${cfn}`}
+                    target="_blank" rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-[10px] text-primary hover:underline"
+                  >
+                    <ExternalLink size={9} />View county filing
+                  </a>
+                </div>
+              </div>
+            </div>
+
+            {/* Col 2: Relationship History */}
+            <div className="space-y-2.5">
+              <p className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                <Link2 size={9} />Relationship History
+              </p>
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                  <span className="text-2xl font-bold text-foreground">{rel.total_deals}</span>
+                  <span>total deals<br />between this pair</span>
+                </div>
+                {rel.first_deal && (
+                  <div className="text-[10px] text-muted-foreground">
+                    {rel.first_deal} → {rel.last_deal}
+                  </div>
+                )}
+                {/* Recent deal timeline */}
+                {rel.recent_deals && rel.recent_deals.length > 1 && (
+                  <div className="pt-1 space-y-0.5">
+                    <p className="text-[9px] text-muted-foreground/60 uppercase tracking-wider mb-1">Recent filings</p>
+                    {rel.recent_deals.slice(0, 6).map((d: any, i: number) => (
+                      <div key={d.cfn} className={`flex items-center gap-2 text-[10px] ${d.cfn === cfn ? 'text-orange-600 font-medium' : 'text-muted-foreground'}`}>
+                        <span className="font-mono w-24 shrink-0">{d.cfn}</span>
+                        <span>{d.rec_date}</span>
+                        {d.cfn === cfn && <span className="text-[9px] bg-orange-100 text-orange-600 px-1 rounded">this filing</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Col 3: Entity Profiles */}
+            <div className="space-y-3">
+              {/* Seller */}
+              {sp && (
+                <div>
+                  <p className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5 mb-1.5">
+                    <Building2 size={9} className="text-blue-400" />Seller Profile
+                  </p>
+                  <div className="text-[11px] space-y-1">
+                    <div className="font-semibold text-blue-700 text-xs">{tx.assignor_canon}</div>
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <span>{sp.total_vol.toLocaleString()} total assignments</span>
+                      <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded ${sellerIsNetSeller ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-600'}`}>
+                        {sellerIsNetSeller ? 'Net Seller' : 'Net Buyer'}
+                      </span>
+                    </div>
+                    <div className="flex gap-3 text-muted-foreground/70 text-[10px]">
+                      <span>↑ {sp.inbound_vol.toLocaleString()} in</span>
+                      <span>↓ {sp.outbound_vol.toLocaleString()} out</span>
+                    </div>
+                    {sob && sob.length > 0 && (
+                      <div className="pt-1">
+                        <p className="text-[9px] text-muted-foreground/50 mb-0.5">Also sells to:</p>
+                        {sob.filter((b: any) => b.buyer !== tx.assignee_canon).slice(0, 3).map((b: any) => (
+                          <div key={b.buyer} className="text-[10px] text-muted-foreground truncate">
+                            {b.buyer} <span className="text-muted-foreground/40">({b.n})</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Buyer */}
+              {bp && (
+                <div>
+                  <p className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5 mb-1.5">
+                    <Building2 size={9} className="text-purple-400" />Buyer Profile
+                  </p>
+                  <div className="text-[11px] space-y-1">
+                    <div className="font-semibold text-purple-700 text-xs">{tx.assignee_canon}</div>
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <span>{bp.total_vol.toLocaleString()} total assignments</span>
+                      <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded ${buyerIsNetBuyer ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'}`}>
+                        {buyerIsNetBuyer ? 'Net Buyer' : 'Net Seller'}
+                      </span>
+                    </div>
+                    <div className="flex gap-3 text-muted-foreground/70 text-[10px]">
+                      <span>↑ {bp.inbound_vol.toLocaleString()} in</span>
+                      <span>↓ {bp.outbound_vol.toLocaleString()} out</span>
+                    </div>
+                    {bos && bos.length > 0 && (
+                      <div className="pt-1">
+                        <p className="text-[9px] text-muted-foreground/50 mb-0.5">Also buys from:</p>
+                        {bos.filter((s: any) => s.seller !== tx.assignor_canon).slice(0, 3).map((s: any) => (
+                          <div key={s.seller} className="text-[10px] text-muted-foreground truncate">
+                            {s.seller} <span className="text-muted-foreground/40">({s.n})</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function DealIntelligence() {
   const [dealPage, setDealPage] = useState(1);
+  const [selectedCfn, setSelectedCfn] = useState<string | null>(null);
 
   const { data: summary, isLoading: sumLoading } = useQuery({
     queryKey: ['/api/deal-intelligence/summary'],
@@ -418,7 +656,7 @@ export default function DealIntelligence() {
                   <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-purple-500 inline-block" />PE Fund (Buyer)</span>
                 </th>
                 <th className="px-4 py-2.5 text-left font-medium">Book / Page</th>
-                <th className="px-4 py-2.5 text-center font-medium">Ref</th>
+                <th className="px-4 py-2.5 text-center font-medium w-16">Details</th>
               </tr>
             </thead>
             <tbody>
@@ -428,38 +666,45 @@ export default function DealIntelligence() {
                       {Array(7).fill(0).map((_, j) => <td key={j} className="px-4 py-2.5"><Skeleton className="h-3 w-full" /></td>)}
                     </tr>
                   ))
-                : (dealLog?.rows || []).map((r: any, i: number) => (
-                    <tr key={`${r.cfn}-${i}`} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
-                      <td className="px-4 py-2.5 font-mono text-primary/80 text-[11px] whitespace-nowrap">{r.cfn}</td>
-                      <td className="px-4 py-2.5 whitespace-nowrap text-muted-foreground">{r.rec_date}</td>
-                      <td className="px-4 py-2.5 max-w-[180px]">
-                        <div className="font-semibold text-blue-700 truncate" title={r.seller}>{r.seller}</div>
-                        {r.assignor !== r.seller && (
-                          <div className="text-muted-foreground truncate text-[10px]" title={r.assignor}>{r.assignor}</div>
-                        )}
-                      </td>
-                      <td className="px-1 py-2.5 text-center">
-                        <ArrowRight size={11} className="text-orange-400/60 mx-auto" />
-                      </td>
-                      <td className="px-4 py-2.5 max-w-[180px]">
-                        <div className="font-semibold text-purple-700 truncate" title={r.buyer}>{r.buyer}</div>
-                        {r.assignee !== r.buyer && (
-                          <div className="text-muted-foreground truncate text-[10px]" title={r.assignee}>{r.assignee}</div>
-                        )}
-                      </td>
-                      <td className="px-4 py-2.5 font-mono text-muted-foreground text-[11px] whitespace-nowrap">{r.rec_book}/{r.rec_page}</td>
-                      <td className="px-4 py-2.5 text-center">
-                        <a
-                          href={`https://www2.miamidadeclerk.gov/ocs/Search.aspx?QS=RN${r.cfn}`}
-                          target="_blank" rel="noopener noreferrer"
-                          className="text-muted-foreground/40 hover:text-primary transition-colors"
-                          title="View on county portal"
-                        >
-                          <ExternalLink size={11} />
-                        </a>
-                      </td>
-                    </tr>
-                  ))
+                : (dealLog?.rows || []).flatMap((r: any, i: number) => {
+                    const isExpanded = selectedCfn === r.cfn;
+                    return [
+                      <tr
+                        key={`${r.cfn}-${i}`}
+                        onClick={() => setSelectedCfn(isExpanded ? null : r.cfn)}
+                        className={`border-b border-border/50 cursor-pointer transition-colors ${isExpanded ? 'bg-orange-50/60' : 'hover:bg-muted/20'}`}
+                      >
+                        <td className="px-4 py-2.5 font-mono text-primary/80 text-[11px] whitespace-nowrap">{r.cfn}</td>
+                        <td className="px-4 py-2.5 whitespace-nowrap text-muted-foreground">{r.rec_date}</td>
+                        <td className="px-4 py-2.5 max-w-[180px]">
+                          <div className="font-semibold text-blue-700 truncate" title={r.seller}>{r.seller}</div>
+                          {r.assignor !== r.seller && (
+                            <div className="text-muted-foreground truncate text-[10px]" title={r.assignor}>{r.assignor}</div>
+                          )}
+                        </td>
+                        <td className="px-1 py-2.5 text-center">
+                          <ArrowRight size={11} className="text-orange-400/60 mx-auto" />
+                        </td>
+                        <td className="px-4 py-2.5 max-w-[180px]">
+                          <div className="font-semibold text-purple-700 truncate" title={r.buyer}>{r.buyer}</div>
+                          {r.assignee !== r.buyer && (
+                            <div className="text-muted-foreground truncate text-[10px]" title={r.assignee}>{r.assignee}</div>
+                          )}
+                        </td>
+                        <td className="px-4 py-2.5 font-mono text-muted-foreground text-[11px] whitespace-nowrap">{r.rec_book}/{r.rec_page}</td>
+                        <td className="px-4 py-2.5 text-center">
+                          <button
+                            className={`inline-flex items-center gap-1 text-[10px] font-medium transition-colors ${isExpanded ? 'text-orange-500' : 'text-muted-foreground/50 hover:text-orange-400'}`}
+                            title={isExpanded ? 'Collapse' : 'View deal intelligence'}
+                          >
+                            {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                            {isExpanded ? 'Close' : 'Intel'}
+                          </button>
+                        </td>
+                      </tr>,
+                      isExpanded && <DealDetailPanel key={`detail-${r.cfn}`} cfn={r.cfn} onClose={() => setSelectedCfn(null)} />,
+                    ].filter(Boolean);
+                  })
               }
               {!dealLoading && !dealLog?.rows?.length && (
                 <tr><td colSpan={7} className="px-4 py-10 text-center text-muted-foreground">No records found.</td></tr>
@@ -474,11 +719,11 @@ export default function DealIntelligence() {
               Showing {((dealPage-1)*25)+1}–{Math.min(dealPage*25, dealLog.total)} of {dealLog.total.toLocaleString()}
             </span>
             <div className="flex items-center gap-1">
-              <Button size="sm" variant="ghost" disabled={dealPage<=1} onClick={() => setDealPage(1)} className="h-7 px-2 text-xs">First</Button>
-              <Button size="sm" variant="ghost" disabled={dealPage<=1} onClick={() => setDealPage(p=>p-1)} className="h-7 w-7 p-0"><ChevronLeft size={13}/></Button>
+              <Button size="sm" variant="ghost" disabled={dealPage<=1} onClick={() => { setDealPage(1); setSelectedCfn(null); }} className="h-7 px-2 text-xs">First</Button>
+              <Button size="sm" variant="ghost" disabled={dealPage<=1} onClick={() => { setDealPage(p=>p-1); setSelectedCfn(null); }} className="h-7 w-7 p-0"><ChevronLeft size={13}/></Button>
               <span className="text-xs text-muted-foreground px-2">{dealPage} / {dealLog.pages}</span>
-              <Button size="sm" variant="ghost" disabled={dealPage>=dealLog.pages} onClick={() => setDealPage(p=>p+1)} className="h-7 w-7 p-0"><ChevronRight size={13}/></Button>
-              <Button size="sm" variant="ghost" disabled={dealPage>=dealLog.pages} onClick={() => setDealPage(dealLog.pages)} className="h-7 px-2 text-xs">Last</Button>
+              <Button size="sm" variant="ghost" disabled={dealPage>=dealLog.pages} onClick={() => { setDealPage(p=>p+1); setSelectedCfn(null); }} className="h-7 w-7 p-0"><ChevronRight size={13}/></Button>
+              <Button size="sm" variant="ghost" disabled={dealPage>=dealLog.pages} onClick={() => { setDealPage(dealLog.pages); setSelectedCfn(null); }} className="h-7 px-2 text-xs">Last</Button>
             </div>
           </div>
         )}

@@ -548,6 +548,90 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     res.json(diStmts.recentBankToPe.all());
   });
 
+  // ─── GET /api/deal-intelligence/deal-detail/:cfn ──────────────────────────
+  // Returns full filing + relationship intelligence for a single Bank→PE deal
+  app.get('/api/deal-intelligence/deal-detail/:cfn', (req, res) => {
+    const cfn = req.params.cfn;
+
+    const transaction = db.prepare(`
+      SELECT c.cfn, c.rec_date, c.assignor, c.assignee,
+             c.assignor_canon, c.assignee_canon,
+             c.assignor_type, c.assignee_type,
+             c.rec_book, c.rec_page, c.txn_type,
+             a.address, a.legal_desc, a.misc_ref
+      FROM aom_events_clean c
+      LEFT JOIN assignments a ON c.cfn = a.cfn
+      WHERE c.cfn = ?
+    `).get(cfn) as any;
+
+    if (!transaction) return res.status(404).json({ error: 'Not found' });
+
+    const seller = transaction.assignor_canon;
+    const buyer  = transaction.assignee_canon;
+
+    // Full history between this exact pair (bank→PE market transfers only)
+    const pairHistory = db.prepare(`
+      SELECT cfn, rec_date FROM aom_events_clean
+      WHERE assignor_canon = ? AND assignee_canon = ?
+        AND assignor_type='BANK' AND assignee_type='PRIVATE_CREDIT'
+        AND txn_type='MARKET_TRANSFER'
+      ORDER BY rec_date DESC LIMIT 50
+    `).all(seller, buyer) as any[];
+
+    const totalPairDeals = pairHistory.length;
+    const dealIndexFromLatest = pairHistory.findIndex((d: any) => d.cfn === cfn);
+    // deal_number: 1 = most recent, totalPairDeals = oldest
+    const dealNumber = dealIndexFromLatest >= 0 ? dealIndexFromLatest + 1 : null;
+
+    // Seller & buyer node profiles
+    const sellerProfile = db.prepare(
+      'SELECT entity, entity_type, total_vol, inbound_vol, outbound_vol, degree, first_seen, last_seen FROM entity_nodes WHERE entity = ?'
+    ).get(seller) as any;
+
+    const buyerProfile = db.prepare(
+      'SELECT entity, entity_type, total_vol, inbound_vol, outbound_vol, degree, first_seen, last_seen FROM entity_nodes WHERE entity = ?'
+    ).get(buyer) as any;
+
+    // Other PE funds this seller also sold to
+    const sellerOtherBuyers = db.prepare(`
+      SELECT assignee_canon AS buyer, COUNT(*) AS n FROM aom_events_clean
+      WHERE assignor_canon = ? AND assignee_type = 'PRIVATE_CREDIT' AND txn_type = 'MARKET_TRANSFER'
+      GROUP BY assignee_canon ORDER BY n DESC LIMIT 6
+    `).all(seller) as any[];
+
+    // Other banks this buyer also buys from
+    const buyerOtherSellers = db.prepare(`
+      SELECT assignor_canon AS seller, COUNT(*) AS n FROM aom_events_clean
+      WHERE assignee_canon = ? AND assignor_type = 'BANK' AND txn_type = 'MARKET_TRANSFER'
+      GROUP BY assignor_canon ORDER BY n DESC LIMIT 6
+    `).all(buyer) as any[];
+
+    // Monthly cadence for this pair (for sparkline)
+    const pairMonthlyCadence = db.prepare(`
+      SELECT strftime('%Y-%m', rec_date) AS month, COUNT(*) AS n FROM aom_events_clean
+      WHERE assignor_canon = ? AND assignee_canon = ?
+        AND assignor_type='BANK' AND assignee_type='PRIVATE_CREDIT'
+        AND txn_type='MARKET_TRANSFER'
+      GROUP BY month ORDER BY month DESC LIMIT 24
+    `).all(seller, buyer) as any[];
+
+    res.json({
+      transaction,
+      relationship: {
+        total_deals: totalPairDeals,
+        first_deal:  pairHistory.length > 0 ? pairHistory[pairHistory.length - 1].rec_date : null,
+        last_deal:   pairHistory.length > 0 ? pairHistory[0].rec_date : null,
+        deal_number: dealNumber,
+        recent_deals: pairHistory.slice(0, 10),
+        monthly_cadence: pairMonthlyCadence.reverse(),
+      },
+      seller_profile: sellerProfile,
+      buyer_profile:  buyerProfile,
+      seller_other_buyers: sellerOtherBuyers,
+      buyer_other_sellers: buyerOtherSellers,
+    });
+  });
+
   // ─── GET /api/fdic/financials ─────────────────────────────────────────────
   app.get('/api/fdic/financials', async (req, res) => {
     const state = typeof req.query.state === 'string' ? req.query.state : undefined;
