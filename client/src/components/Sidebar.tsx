@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'wouter';
-import { BarChart2, FileText, CheckCircle, Share2, Shield, Building2, ClipboardList, Menu, X, LineChart, Target } from 'lucide-react';
+import { BarChart2, FileText, CheckCircle, Share2, Shield, Building2, ClipboardList, Menu, X, LineChart, Target, LogOut } from 'lucide-react';
 import { useState } from 'react';
 
 const NAV = [
@@ -97,12 +97,23 @@ export default function Sidebar() {
       </nav>
 
       {/* Footer */}
-      {!collapsed && (
-        <div className="px-3 py-3 border-t border-border">
-          <p className="text-[10px] text-muted-foreground">Official Records · AMO</p>
-          <p className="text-[10px] text-muted-foreground/60">Auto-collects Fridays 4pm EDT</p>
-        </div>
-      )}
+      <div className="px-2 py-2 border-t border-border">
+        <form method="POST" action="/logout">
+          <button
+            type="submit"
+            title="Sign out"
+            className={`flex items-center gap-2.5 w-full px-2.5 py-2 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors ${collapsed ? 'justify-center' : ''}`}
+          >
+            <LogOut size={14} className="shrink-0" />
+            {!collapsed && <span>Sign out</span>}
+          </button>
+        </form>
+        {!collapsed && (
+          <div className="px-1 pt-1">
+            <p className="text-[9px] text-muted-foreground/60">Official Records · AMO</p>
+          </div>
+        )}
+      </div>
     </aside>
   );
 }
