@@ -134,7 +134,7 @@ export default function PrivateCredit() {
                         </td>
                         <td className="px-3 py-2 text-center">
                           <a
-                            href={`https://www2.miamidadeclerk.gov/ocs/Search.aspx?QS=RN${r.cfn}`}
+                            href={`https://onlineservices.miamidadeclerk.gov/officialrecords/api/DocumentImage/getdocumentimage?redact=false&sBook=${r.rec_book}&sBookType=O+&sPage=${r.rec_page}`}
                             target="_blank" rel="noopener noreferrer"
                             className="text-muted-foreground/30 hover:text-primary transition-colors"
                             title="View on county portal"

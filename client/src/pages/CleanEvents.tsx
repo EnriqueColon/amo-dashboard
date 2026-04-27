@@ -200,7 +200,7 @@ function TransactionDetail({ row }: { row: any }) {
                 <span className="text-amber-400">{row.total_parties} parties on original filing</span>
               )}
               <a
-                href={`https://www2.miamidadeclerk.gov/ocs/Search.aspx?QS=RN${row.cfn}`}
+                href={`https://onlineservices.miamidadeclerk.gov/officialrecords/api/DocumentImage/getdocumentimage?redact=false&sBook=${row.rec_book}&sBookType=O+&sPage=${row.rec_page}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="ml-auto flex items-center gap-1 hover:text-foreground transition-colors"
@@ -483,7 +483,7 @@ export default function CleanEvents() {
                             </span>
                             <span className="hover:underline" onClick={e => e.stopPropagation()}>
                               <a
-                                href={`https://www2.miamidadeclerk.gov/ocs/Search.aspx?QS=RN${r.cfn}`}
+                                href={`https://onlineservices.miamidadeclerk.gov/officialrecords/api/DocumentImage/getdocumentimage?redact=false&sBook=${r.rec_book}&sBookType=O+&sPage=${r.rec_page}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 title="View on Miami-Dade Clerk portal"

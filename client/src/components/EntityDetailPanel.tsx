@@ -44,7 +44,7 @@ function TxnRow({ r, direction }: { r: any; direction: 'in' | 'out' }) {
     <tr className="border-b border-border/40 hover:bg-muted/20 transition-colors">
       <td className="px-3 py-2 font-mono text-primary text-[11px] whitespace-nowrap">
         <a
-          href={`https://www2.miamidadeclerk.gov/ocs/Search.aspx?QS=RN${r.cfn}`}
+          href={`https://onlineservices.miamidadeclerk.gov/officialrecords/api/DocumentImage/getdocumentimage?redact=false&sBook=${r.rec_book}&sBookType=O+&sPage=${r.rec_page}`}
           target="_blank"
           rel="noopener noreferrer"
           className="hover:underline"

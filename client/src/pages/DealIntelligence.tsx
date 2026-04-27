@@ -198,7 +198,7 @@ function DealDetailPanel({ cfn, onClose }: { cfn: string; onClose: () => void })
                 )}
                 <div className="pt-1">
                   <a
-                    href={`https://www2.miamidadeclerk.gov/ocs/Search.aspx?QS=RN${cfn}`}
+                    href={`https://onlineservices.miamidadeclerk.gov/officialrecords/api/DocumentImage/getdocumentimage?redact=false&sBook=${tx.rec_book}&sBookType=O+&sPage=${tx.rec_page}`}
                     target="_blank" rel="noopener noreferrer"
                     className="inline-flex items-center gap-1 text-[10px] text-primary hover:underline"
                   >
