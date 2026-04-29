@@ -749,7 +749,6 @@ export default function DealIntelligence() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 mt-1">
             {[
               ['Bank → PE Transfer',      'Institutional seller (bank) → institutional buyer (PE fund). True secondary market; bank offloading debt to alternative capital.'],
-              ['Distressed Disposition',  'Institutional seller → private / non-institutional buyer. REO sales, NPL disposals, short-sale settlements — the loan exits the formal system.'],
               ['Market Transfer',         'Institution → institution (any type). Normal secondary market activity between regulated/professional participants.'],
               ['MERS Release',            'MERS (a registry) steps out of the chain. Not a real sale — just making the actual owner visible in the public record.'],
               ['Origination / Intake',    'Private party → institution. A new loan entering the system, or a broker transferring a freshly originated loan to the final lender.'],
