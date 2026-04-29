@@ -42,6 +42,14 @@ export function clearCache() {
   return count;
 }
 
+export function clearCacheByPrefix(prefix: string) {
+  let count = 0;
+  store.forEach((_, key) => {
+    if (key.startsWith(prefix)) { store.delete(key); count++; }
+  });
+  return count;
+}
+
 export function getCacheStats() {
   const now = Date.now();
   let live = 0;

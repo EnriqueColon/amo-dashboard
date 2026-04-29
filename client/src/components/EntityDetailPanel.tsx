@@ -1,12 +1,22 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import CategoryBadge from './CategoryBadge';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   X, ArrowRight, TrendingUp, TrendingDown, Network,
-  Calendar, ChevronDown, ChevronUp, Layers, Info,
+  Calendar, ChevronDown, ChevronUp, Layers, Info, Pencil, Check, AlertCircle,
 } from 'lucide-react';
+
+const ENTITY_TYPES = [
+  { value: 'BANK',           label: 'Bank' },
+  { value: 'PRIVATE_CREDIT', label: 'Private Credit / PE Fund' },
+  { value: 'TRUST',          label: 'Securitization Trust' },
+  { value: 'GSE',            label: 'GSE (Fannie / Freddie / HUD)' },
+  { value: 'SERVICER',       label: 'Mortgage Servicer' },
+  { value: 'MERS',           label: 'MERS Registry' },
+  { value: 'OTHER',          label: 'Other / Private Party' },
+];
 
 // ── Stat pill ─────────────────────────────────────────────────────────────────
 function Stat({ label, value, sub, color }: { label: string; value: string | number; sub?: string; color?: string }) {
@@ -153,11 +163,25 @@ export default function EntityDetailPanel({ entityName, onClose, onNavigate }: P
   const [inboundExpanded, setInboundExpanded] = useState(true);
   const [outboundExpanded, setOutboundExpanded] = useState(true);
   const [subDirection, setSubDirection] = useState<'buyer' | 'seller'>('buyer');
+  const [editingType, setEditingType] = useState(false);
+  const [pendingType, setPendingType] = useState('');
+
+  const queryClient = useQueryClient();
 
   const { data, isLoading } = useQuery({
     queryKey: ['/api/entity', entityName],
     queryFn: () => apiRequest('GET', `/api/entity/${encodeURIComponent(entityName)}`).then(r => r.json()),
     enabled: !!entityName,
+  });
+
+  const typeMutation = useMutation({
+    mutationFn: (type: string) =>
+      apiRequest('PATCH', `/api/entity/${encodeURIComponent(entityName)}/type`, { type }).then(r => r.json()),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/entity', entityName] });
+      queryClient.invalidateQueries({ queryKey: ['/api/entity-nodes'] });
+      setEditingType(false);
+    },
   });
 
   const { data: subData, isLoading: subLoading } = useQuery({
@@ -200,7 +224,55 @@ export default function EntityDetailPanel({ entityName, onClose, onNavigate }: P
               <>
                 <div className="flex items-center gap-2 flex-wrap">
                   <h2 className="text-lg font-bold text-foreground truncate">{entityName}</h2>
-                  {node && <CategoryBadge category={node.entity_type} size="sm" />}
+
+                  {/* Editable entity type */}
+                  {node && !editingType && (
+                    <div className="flex items-center gap-1">
+                      <CategoryBadge category={node.entity_type} size="sm" />
+                      <button
+                        onClick={() => { setPendingType(node.entity_type); setEditingType(true); }}
+                        className="p-0.5 rounded text-muted-foreground/40 hover:text-primary transition-colors"
+                        title="Change entity type"
+                      >
+                        <Pencil size={10} />
+                      </button>
+                    </div>
+                  )}
+                  {node && editingType && (
+                    <div className="flex items-center gap-1.5">
+                      <select
+                        value={pendingType}
+                        onChange={e => setPendingType(e.target.value)}
+                        className="text-[11px] border border-border rounded-md px-2 py-1 bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                        autoFocus
+                      >
+                        {ENTITY_TYPES.map(t => (
+                          <option key={t.value} value={t.value}>{t.label}</option>
+                        ))}
+                      </select>
+                      <button
+                        onClick={() => typeMutation.mutate(pendingType)}
+                        disabled={typeMutation.isPending}
+                        className="p-1 rounded bg-primary/10 text-primary hover:bg-primary/20 transition-colors disabled:opacity-50"
+                        title="Save"
+                      >
+                        {typeMutation.isPending ? <div className="w-3 h-3 border border-primary border-t-transparent rounded-full animate-spin" /> : <Check size={11} />}
+                      </button>
+                      <button
+                        onClick={() => setEditingType(false)}
+                        className="p-1 rounded text-muted-foreground/50 hover:text-foreground transition-colors"
+                        title="Cancel"
+                      >
+                        <X size={11} />
+                      </button>
+                    </div>
+                  )}
+                  {typeMutation.isError && (
+                    <span className="flex items-center gap-1 text-[10px] text-red-500">
+                      <AlertCircle size={10} /> Save failed
+                    </span>
+                  )}
+
                   {classification && (
                     <span className="text-[10px] px-2 py-0.5 bg-muted/30 rounded border border-border/50 text-muted-foreground">
                       {classification.sub_category}

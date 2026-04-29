@@ -3,7 +3,7 @@ import type { Server } from 'http';
 import { getDb } from './db';
 import { fetchFDICFinancials } from './fdic';
 import {
-  getCached, setCached, clearCache, getCacheStats,
+  getCached, setCached, clearCache, clearCacheByPrefix, getCacheStats,
   makeCacheKey, DEFAULT_TTL_MS, STATS_TTL_MS,
 } from './cache';
 
@@ -301,6 +301,39 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     `).all(name);
 
     res.json({ name, node, classification, as_grantee, as_grantor, top_senders, top_receivers });
+  });
+
+  // ─── PATCH /api/entity/:name/type ────────────────────────────────────────
+  // Override the entity type for a canonical entity (persists in entity_nodes
+  // and entity_classifications so it survives page refreshes).
+  app.patch('/api/entity/:name/type', (req, res) => {
+    const name    = decodeURIComponent(req.params.name);
+    const { type } = req.body as { type: string };
+    const VALID = ['BANK','PRIVATE_CREDIT','TRUST','GSE','SERVICER','MERS','OTHER'];
+    if (!VALID.includes(type)) return res.status(400).json({ error: `Invalid type. Must be one of: ${VALID.join(', ')}` });
+
+    // Update entity_nodes immediately
+    db.prepare(`UPDATE entity_nodes SET entity_type = ? WHERE entity = ?`).run(type, name);
+
+    // Upsert into entity_classifications so the override persists
+    db.prepare(`
+      INSERT INTO entity_classifications (name, category, sub_category)
+      VALUES (?, ?, '')
+      ON CONFLICT(name) DO UPDATE SET category = excluded.category
+    `).run(name, type);
+
+    // Also cascade into aom_events_clean so txn_type stays consistent
+    db.prepare(`UPDATE aom_events_clean SET assignor_type = ? WHERE assignor_canon = ?`).run(type, name);
+    db.prepare(`UPDATE aom_events_clean SET assignee_type = ? WHERE assignee_canon = ?`).run(type, name);
+
+    // Clear all relevant cache keys so next request sees fresh data
+    clearCacheByPrefix('/api/entity');
+    clearCacheByPrefix('/api/entity-nodes');
+    clearCacheByPrefix('/api/deal-intelligence');
+    clearCacheByPrefix('/api/network');
+    clearCacheByPrefix('/api/stats');
+
+    res.json({ ok: true, name, type });
   });
 
   // ─── GET /api/entity/:name/sub-entities ───────────────────────────────────
