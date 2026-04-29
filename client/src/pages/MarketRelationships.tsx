@@ -1,10 +1,41 @@
-import { useRef, useEffect, useState, useCallback } from 'react';
+import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Search, ZoomIn, ZoomOut, RotateCcw, Info, X } from 'lucide-react';
 import * as d3 from 'd3';
+
+// ── Fuzzy search helpers ────────────────────────────────────────────────────
+function fuzzyScore(query: string, target: string): number {
+  if (!query) return 0;
+  const q = query.toUpperCase();
+  const t = target.toUpperCase();
+  if (t === q) return 1000;
+  if (t.startsWith(q)) return 900 + (100 - t.length);
+  if (t.includes(q)) return 800 + (100 - t.length);
+  // Check if all query chars appear in order inside target
+  let qi = 0, consecutiveBonus = 0, lastMatch = -1;
+  for (let ti = 0; ti < t.length && qi < q.length; ti++) {
+    if (t[ti] === q[qi]) {
+      consecutiveBonus += lastMatch === ti - 1 ? 10 : 0;
+      lastMatch = ti;
+      qi++;
+    }
+  }
+  if (qi < q.length) return -1; // no match
+  return 200 + consecutiveBonus - t.length;
+}
+
+function fuzzyFilter(query: string, candidates: string[], limit = 8): string[] {
+  if (!query.trim()) return [];
+  const scored = candidates
+    .map(c => ({ c, s: fuzzyScore(query, c) }))
+    .filter(x => x.s >= 0)
+    .sort((a, b) => b.s - a.s)
+    .slice(0, limit);
+  return scored.map(x => x.c);
+}
 
 // ── Types ──────────────────────────────────────────────────────────────────
 interface NodeDatum extends d3.SimulationNodeDatum {
@@ -31,6 +62,7 @@ interface EdgeDatum {
 const TYPE_COLORS: Record<string, string> = {
   BANK:           '#60a5fa',
   PRIVATE_CREDIT: '#c084fc',
+  TRUST:          '#2dd4bf',
   GSE:            '#4ade80',
   SERVICER:       '#fbbf24',
   MERS:           '#fb923c',
@@ -61,18 +93,55 @@ export default function MarketRelationships() {
   const [days, setDays]                 = useState(0);
   const [entityInput, setEntityInput]   = useState('');
   const [entityFilter, setEntityFilter] = useState('');
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [suggestionIdx, setSuggestionIdx]     = useState(-1);
   const [institutionalOnly, setInstitutionalOnly] = useState(false);
   const [hovered, setHovered]           = useState<NodeDatum | null>(null);
   const [tooltipPos, setTooltipPos]     = useState({ x: 0, y: 0 });
   const [selected, setSelected]         = useState<string | null>(null);
+  const searchRef = useRef<HTMLDivElement>(null);
 
-  const INST_TYPES = new Set(['BANK', 'SERVICER', 'PRIVATE_CREDIT', 'GSE', 'MERS']);
+  const INST_TYPES = new Set(['BANK', 'SERVICER', 'PRIVATE_CREDIT', 'GSE', 'MERS', 'TRUST']);
 
   const qs = `?min_txns=${minTxns}&days=${days}&entity=${encodeURIComponent(entityFilter)}`;
   const { data, isLoading } = useQuery({
     queryKey: ['/api/network-graph', qs],
     queryFn: () => apiRequest('GET', `/api/network-graph${qs}`).then(r => r.json()),
   });
+
+  // Fetch full entity list for autocomplete (min 1 txn to get everything)
+  const { data: allEntitiesData } = useQuery({
+    queryKey: ['/api/entities', 'autocomplete'],
+    queryFn: () => apiRequest('GET', '/api/entities').then(r => r.json()),
+    staleTime: Infinity,
+  });
+  const allEntityNames = useMemo<string[]>(() =>
+    (allEntitiesData ?? []).map((e: any) => e.entity as string),
+    [allEntitiesData]
+  );
+
+  const suggestions = useMemo(
+    () => fuzzyFilter(entityInput, allEntityNames),
+    [entityInput, allEntityNames]
+  );
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+        setShowSuggestions(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const commitSearch = (value: string) => {
+    setEntityInput(value);
+    setEntityFilter(value);
+    setShowSuggestions(false);
+    setSuggestionIdx(-1);
+  };
 
   // ── Draw graph ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -332,16 +401,65 @@ export default function MarketRelationships() {
 
         <div className="w-px h-5 bg-border hidden sm:block" />
 
-        {/* Entity focus search */}
-        <div className="flex items-center gap-1">
-          <Input placeholder="Focus on entity…" value={entityInput}
-            onChange={e => setEntityInput(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && setEntityFilter(entityInput)}
-            className="h-7 text-[11px] w-36" />
-          <Button size="sm" onClick={() => setEntityFilter(entityInput)} className="h-7 px-2"><Search size={11} /></Button>
+        {/* Entity focus search — fuzzy autocomplete */}
+        <div ref={searchRef} className="relative flex items-center gap-1">
+          <div className="relative">
+            <Input
+              placeholder="Focus on entity…"
+              value={entityInput}
+              onChange={e => {
+                setEntityInput(e.target.value);
+                setShowSuggestions(true);
+                setSuggestionIdx(-1);
+              }}
+              onFocus={() => entityInput && setShowSuggestions(true)}
+              onKeyDown={e => {
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  setSuggestionIdx(i => Math.min(i + 1, suggestions.length - 1));
+                } else if (e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  setSuggestionIdx(i => Math.max(i - 1, -1));
+                } else if (e.key === 'Enter') {
+                  e.preventDefault();
+                  if (suggestionIdx >= 0 && suggestions[suggestionIdx]) {
+                    commitSearch(suggestions[suggestionIdx]);
+                  } else {
+                    commitSearch(entityInput);
+                  }
+                } else if (e.key === 'Escape') {
+                  setShowSuggestions(false);
+                  setSuggestionIdx(-1);
+                }
+              }}
+              className="h-7 text-[11px] w-48"
+            />
+            {/* Dropdown */}
+            {showSuggestions && suggestions.length > 0 && (
+              <div className="absolute top-full left-0 mt-1 w-72 bg-card border border-border rounded-md shadow-xl z-50 overflow-hidden">
+                {suggestions.map((s, i) => (
+                  <button
+                    key={s}
+                    onMouseDown={e => { e.preventDefault(); commitSearch(s); }}
+                    onMouseEnter={() => setSuggestionIdx(i)}
+                    className={`w-full text-left px-3 py-1.5 text-[11px] truncate transition-colors
+                      ${i === suggestionIdx ? 'bg-primary/10 text-primary' : 'text-foreground hover:bg-muted/40'}`}
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <Button size="sm" onClick={() => commitSearch(entityInput)} className="h-7 px-2">
+            <Search size={11} />
+          </Button>
           {entityFilter && (
-            <Button size="sm" variant="ghost" onClick={() => { setEntityFilter(''); setEntityInput(''); }}
-              className="h-7 px-2 text-[10px]"><X size={11} /></Button>
+            <Button size="sm" variant="ghost"
+              onClick={() => { setEntityFilter(''); setEntityInput(''); setShowSuggestions(false); }}
+              className="h-7 px-2 text-[10px]">
+              <X size={11} />
+            </Button>
           )}
         </div>
 
