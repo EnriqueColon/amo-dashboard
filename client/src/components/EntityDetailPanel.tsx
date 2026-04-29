@@ -227,14 +227,15 @@ export default function EntityDetailPanel({ entityName, onClose, onNavigate }: P
 
                   {/* Editable entity type */}
                   {node && !editingType && (
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1.5">
                       <CategoryBadge category={node.entity_type} size="sm" />
                       <button
                         onClick={() => { setPendingType(node.entity_type); setEditingType(true); }}
-                        className="p-0.5 rounded text-muted-foreground/40 hover:text-primary transition-colors"
+                        className="flex items-center gap-1 px-2 py-0.5 rounded border border-border text-[10px] text-muted-foreground hover:text-primary hover:border-primary/40 hover:bg-primary/5 transition-colors"
                         title="Change entity type"
                       >
                         <Pencil size={10} />
+                        <span>Change type</span>
                       </button>
                     </div>
                   )}
