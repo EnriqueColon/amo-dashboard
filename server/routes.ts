@@ -563,72 +563,229 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     `),
   };
 
-  // ─── GET /api/deal-intelligence/summary ───────────────────────────────────
-  app.get('/api/deal-intelligence/summary', (_req, res) => {
-    const KEY = '/api/deal-intelligence/summary';
-    const cached = getCached(KEY);
-    if (cached) return res.json(cached);
-    const bank_to_pe_total  = (diStmts.bankToPeTotal.get()  as any).n;
-    const inst_out_total    = (diStmts.instOutTotal.get()    as any).n;
-    const net_sellers_count = (diStmts.netSellersCount.get() as any).n;
-    const active_pe_buyers  = (diStmts.activePeBuyers.get() as any).n;
+  // ── Date range helper ────────────────────────────────────────────────────
+  function parseDateRange(query: Record<string, string>) {
+    const start = query.start_date?.trim() || '';
+    const end   = query.end_date?.trim()   || '';
+    const valid = /^\d{4}-\d{2}-\d{2}$/.test(start) && /^\d{4}-\d{2}-\d{2}$/.test(end);
+    if (!valid) return { hasFilter: false, start: '', end: '', priorStart: '', priorEnd: '', days: 0 };
+    const startMs = new Date(start).getTime();
+    const endMs   = new Date(end).getTime();
+    const days = Math.max(1, Math.round((endMs - startMs) / 86400000));
+    const priorEnd   = new Date(startMs - 86400000).toISOString().slice(0, 10);
+    const priorStart = new Date(startMs - 86400000 - days * 86400000).toISOString().slice(0, 10);
+    return { hasFilter: true, start, end, priorStart, priorEnd, days };
+  }
+
+  function diCountsForPeriod(dateWhere: string, params: any[]) {
+    const bank_to_pe = (db.prepare(`
+      SELECT COUNT(*) as n FROM aom_events_clean
+      WHERE assignor_type='BANK' AND assignee_type='PRIVATE_CREDIT' AND txn_type='MARKET_TRANSFER'
+      ${dateWhere}
+    `).get(...params) as any).n;
+    const inst_out = (db.prepare(`
+      SELECT COUNT(*) as n FROM aom_events_clean WHERE txn_type='INSTITUTIONAL_OUT' ${dateWhere}
+    `).get(...params) as any).n;
+    const active_pe_buyers = (db.prepare(`
+      SELECT COUNT(DISTINCT assignee_canon) as n FROM aom_events_clean
+      WHERE assignee_type='PRIVATE_CREDIT' AND assignor_type IN ('BANK','SERVICER','GSE','TRUST') ${dateWhere}
+    `).get(...params) as any).n;
+    // Net sellers: computed from aom_events_clean for the period
+    const net_sellers = (db.prepare(`
+      SELECT COUNT(*) as n FROM (
+        SELECT entity,
+          SUM(CASE WHEN dir='out' THEN cnt ELSE 0 END) as out_vol,
+          SUM(CASE WHEN dir='in'  THEN cnt ELSE 0 END) as in_vol
+        FROM (
+          SELECT assignor_canon as entity, 'out' as dir, COUNT(*) as cnt
+          FROM aom_events_clean
+          WHERE assignor_type IN ('BANK','SERVICER','TRUST') ${dateWhere}
+          GROUP BY assignor_canon
+          UNION ALL
+          SELECT assignee_canon, 'in', COUNT(*)
+          FROM aom_events_clean
+          WHERE assignee_type IN ('BANK','SERVICER','TRUST') ${dateWhere}
+          GROUP BY assignee_canon
+        ) GROUP BY entity
+        HAVING out_vol >= 3 AND out_vol > in_vol * 1.5
+      )
+    `).get(...params, ...params) as any).n;
+    // Special servicer inbound for the period
     const special_svc_vol = (db.prepare(`
-      SELECT COALESCE(SUM(inbound_vol),0) as n FROM entity_nodes
-      WHERE entity IN (${specialSvcPlaceholders})
-    `).get(...SPECIAL_SERVICERS) as any).n;
-    const payload = { bank_to_pe_total, inst_out_total, net_sellers_count, active_pe_buyers, special_svc_vol };
-    setCached(KEY, payload);
+      SELECT COALESCE(COUNT(*), 0) as n FROM aom_events_clean
+      WHERE assignee_canon IN (${specialSvcPlaceholders}) ${dateWhere}
+    `).get(...SPECIAL_SERVICERS, ...params) as any).n;
+    return { bank_to_pe_total: bank_to_pe, inst_out_total: inst_out, active_pe_buyers, net_sellers_count: net_sellers, special_svc_vol };
+  }
+
+  // ─── GET /api/deal-intelligence/summary ───────────────────────────────────
+  app.get('/api/deal-intelligence/summary', (req, res) => {
+    const dr = parseDateRange(req.query as Record<string, string>);
+    const cacheKey = makeCacheKey('/api/deal-intelligence/summary', { start: dr.start, end: dr.end });
+    const cached = getCached(cacheKey);
+    if (cached) return res.json(cached);
+
+    let payload: any;
+    if (!dr.hasFilter) {
+      // All-time: use pre-compiled statements (fast path)
+      const bank_to_pe_total  = (diStmts.bankToPeTotal.get()  as any).n;
+      const inst_out_total    = (diStmts.instOutTotal.get()    as any).n;
+      const net_sellers_count = (diStmts.netSellersCount.get() as any).n;
+      const active_pe_buyers  = (diStmts.activePeBuyers.get()  as any).n;
+      const special_svc_vol   = (db.prepare(
+        `SELECT COALESCE(SUM(inbound_vol),0) as n FROM entity_nodes WHERE entity IN (${specialSvcPlaceholders})`
+      ).get(...SPECIAL_SERVICERS) as any).n;
+      payload = { bank_to_pe_total, inst_out_total, net_sellers_count, active_pe_buyers, special_svc_vol, period: null, prior: null };
+    } else {
+      const currWhere  = `AND rec_date BETWEEN ? AND ?`;
+      const currParams = [dr.start, dr.end];
+      const priorWhere  = `AND rec_date BETWEEN ? AND ?`;
+      const priorParams = [dr.priorStart, dr.priorEnd];
+      const curr  = diCountsForPeriod(currWhere,  currParams);
+      const prior = diCountsForPeriod(priorWhere, priorParams);
+      payload = {
+        ...curr,
+        period: { start: dr.start, end: dr.end, days: dr.days },
+        prior: { ...prior, start: dr.priorStart, end: dr.priorEnd },
+      };
+    }
+    setCached(cacheKey, payload, 30 * 60 * 1000); // 30 min TTL for date-filtered
     res.json(payload);
   });
 
   // ─── GET /api/deal-intelligence/seller-pressure ───────────────────────────
-  app.get('/api/deal-intelligence/seller-pressure', (_req, res) => {
-    const KEY = '/api/deal-intelligence/seller-pressure';
-    const cached = getCached(KEY);
+  app.get('/api/deal-intelligence/seller-pressure', (req, res) => {
+    const dr = parseDateRange(req.query as Record<string, string>);
+    const cacheKey = makeCacheKey('/api/deal-intelligence/seller-pressure', { start: dr.start, end: dr.end });
+    const cached = getCached(cacheKey);
     if (cached) return res.json(cached);
-    const data = diStmts.sellerPressure.all();
-    setCached(KEY, data);
+    let data: any[];
+    if (!dr.hasFilter) {
+      data = diStmts.sellerPressure.all();
+    } else {
+      data = db.prepare(`
+        SELECT entity, entity_type,
+               SUM(CASE WHEN dir='out' THEN cnt ELSE 0 END) as outbound_vol,
+               SUM(CASE WHEN dir='in'  THEN cnt ELSE 0 END) as inbound_vol,
+               SUM(cnt) as total_vol,
+               SUM(CASE WHEN dir='out' THEN cnt ELSE 0 END) -
+               SUM(CASE WHEN dir='in'  THEN cnt ELSE 0 END) as net_outbound
+        FROM (
+          SELECT assignor_canon as entity, assignor_type as entity_type, 'out' as dir, COUNT(*) as cnt
+          FROM aom_events_clean
+          WHERE assignor_type IN ('BANK','SERVICER','TRUST')
+            AND rec_date BETWEEN ? AND ?
+          GROUP BY assignor_canon
+          UNION ALL
+          SELECT assignee_canon, assignee_type, 'in', COUNT(*)
+          FROM aom_events_clean
+          WHERE assignee_type IN ('BANK','SERVICER','TRUST')
+            AND rec_date BETWEEN ? AND ?
+          GROUP BY assignee_canon
+        )
+        GROUP BY entity
+        HAVING total_vol >= 3
+        ORDER BY net_outbound DESC
+        LIMIT 25
+      `).all(dr.start, dr.end, dr.start, dr.end) as any[];
+    }
+    setCached(cacheKey, data, 30 * 60 * 1000);
     res.json(data);
   });
 
   // ─── GET /api/deal-intelligence/pe-competitive ────────────────────────────
-  app.get('/api/deal-intelligence/pe-competitive', (_req, res) => {
-    const KEY = '/api/deal-intelligence/pe-competitive';
-    const cached = getCached(KEY);
+  app.get('/api/deal-intelligence/pe-competitive', (req, res) => {
+    const dr = parseDateRange(req.query as Record<string, string>);
+    const cacheKey = makeCacheKey('/api/deal-intelligence/pe-competitive', { start: dr.start, end: dr.end });
+    const cached = getCached(cacheKey);
     if (cached) return res.json(cached);
-    const data = diStmts.peCompetitive.all();
-    setCached(KEY, data);
+    let data: any[];
+    if (!dr.hasFilter) {
+      data = diStmts.peCompetitive.all();
+    } else {
+      data = db.prepare(`
+        SELECT entity, entity_type,
+               SUM(CASE WHEN dir='in'  THEN cnt ELSE 0 END) as inbound_vol,
+               SUM(CASE WHEN dir='out' THEN cnt ELSE 0 END) as outbound_vol,
+               SUM(cnt) as total_vol,
+               MIN(rec_date) as first_seen, MAX(rec_date) as last_seen
+        FROM (
+          SELECT assignee_canon as entity, assignee_type as entity_type, 'in' as dir,
+                 COUNT(*) as cnt, MIN(rec_date) as rec_date
+          FROM aom_events_clean
+          WHERE assignee_type='PRIVATE_CREDIT' AND rec_date BETWEEN ? AND ?
+          GROUP BY assignee_canon
+          UNION ALL
+          SELECT assignor_canon, assignor_type, 'out', COUNT(*), MIN(rec_date)
+          FROM aom_events_clean
+          WHERE assignor_type='PRIVATE_CREDIT' AND rec_date BETWEEN ? AND ?
+          GROUP BY assignor_canon
+        )
+        GROUP BY entity
+        HAVING total_vol >= 1
+        ORDER BY inbound_vol DESC
+        LIMIT 20
+      `).all(dr.start, dr.end, dr.start, dr.end) as any[];
+    }
+    setCached(cacheKey, data, 30 * 60 * 1000);
     res.json(data);
   });
 
   // ─── GET /api/deal-intelligence/special-servicers ────────────────────────
-  app.get('/api/deal-intelligence/special-servicers', (_req, res) => {
-    const KEY = '/api/deal-intelligence/special-servicers';
-    const cached = getCached(KEY);
+  app.get('/api/deal-intelligence/special-servicers', (req, res) => {
+    const dr = parseDateRange(req.query as Record<string, string>);
+    const cacheKey = makeCacheKey('/api/deal-intelligence/special-servicers', { start: dr.start, end: dr.end });
+    const cached = getCached(cacheKey);
     if (cached) return res.json(cached);
-    const data = db.prepare(`
-      SELECT entity, inbound_vol, outbound_vol, total_vol, first_seen, last_seen
-      FROM entity_nodes
-      WHERE entity IN (${specialSvcPlaceholders})
-      ORDER BY inbound_vol DESC
-    `).all(...SPECIAL_SERVICERS);
-    setCached(KEY, data);
+    let data: any[];
+    if (!dr.hasFilter) {
+      data = db.prepare(`
+        SELECT entity, inbound_vol, outbound_vol, total_vol, first_seen, last_seen
+        FROM entity_nodes WHERE entity IN (${specialSvcPlaceholders}) ORDER BY inbound_vol DESC
+      `).all(...SPECIAL_SERVICERS) as any[];
+    } else {
+      data = db.prepare(`
+        SELECT assignee_canon as entity,
+               COUNT(*) as inbound_vol, 0 as outbound_vol, COUNT(*) as total_vol,
+               MIN(rec_date) as first_seen, MAX(rec_date) as last_seen
+        FROM aom_events_clean
+        WHERE assignee_canon IN (${specialSvcPlaceholders})
+          AND rec_date BETWEEN ? AND ?
+        GROUP BY assignee_canon
+        ORDER BY inbound_vol DESC
+      `).all(...SPECIAL_SERVICERS, dr.start, dr.end) as any[];
+    }
+    setCached(cacheKey, data, 30 * 60 * 1000);
     res.json(data);
   });
 
   // ─── GET /api/deal-intelligence/bank-to-pe ────────────────────────────────
   app.get('/api/deal-intelligence/bank-to-pe', (req, res) => {
-    const { page = '1', limit = '50' } = req.query as Record<string, string>;
+    const { page = '1', limit = '25', start_date = '', end_date = '' } = req.query as Record<string, string>;
+    const dr = parseDateRange({ start_date, end_date });
     const pageNum  = Math.max(1, parseInt(page));
-    const limitNum = Math.min(parseInt(limit) || 50, 200);
+    const limitNum = Math.min(parseInt(limit) || 25, 200);
     const offset   = (pageNum - 1) * limitNum;
-    const cacheKey = makeCacheKey('/api/deal-intelligence/bank-to-pe', { page, limit });
+    const cacheKey = makeCacheKey('/api/deal-intelligence/bank-to-pe', { page, limit, start: dr.start, end: dr.end });
     const cached = getCached(cacheKey);
     if (cached) return res.json(cached);
-    const total = (diStmts.bankToPeCount.get() as any).n;
-    const rows  = diStmts.bankToPeRows.all(limitNum, offset);
+    const dateWhere = dr.hasFilter ? `AND c.rec_date BETWEEN '${dr.start}' AND '${dr.end}'` : '';
+    const total = (db.prepare(`
+      SELECT COUNT(*) as n FROM aom_events_clean c
+      WHERE c.assignor_type='BANK' AND c.assignee_type='PRIVATE_CREDIT'
+        AND c.txn_type='MARKET_TRANSFER' ${dateWhere}
+    `).get() as any).n;
+    const rows = db.prepare(`
+      SELECT c.cfn, c.rec_date,
+             c.assignor_canon AS seller, c.assignee_canon AS buyer,
+             c.assignor, c.assignee, c.rec_book, c.rec_page
+      FROM aom_events_clean c
+      WHERE c.assignor_type='BANK' AND c.assignee_type='PRIVATE_CREDIT'
+        AND c.txn_type='MARKET_TRANSFER' ${dateWhere}
+      ORDER BY c.rec_date DESC LIMIT ? OFFSET ?
+    `).all(limitNum, offset);
     const payload = { total, page: pageNum, limit: limitNum, pages: Math.ceil(total / limitNum), rows };
-    setCached(cacheKey, payload);
+    setCached(cacheKey, payload, 30 * 60 * 1000);
     res.json(payload);
   });
 
@@ -643,12 +800,23 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   });
 
   // ─── GET /api/deal-intelligence/recent-bank-to-pe ────────────────────────
-  app.get('/api/deal-intelligence/recent-bank-to-pe', (_req, res) => {
-    const KEY = '/api/deal-intelligence/recent-bank-to-pe';
-    const cached = getCached(KEY);
+  app.get('/api/deal-intelligence/recent-bank-to-pe', (req, res) => {
+    const dr = parseDateRange(req.query as Record<string, string>);
+    const cacheKey = makeCacheKey('/api/deal-intelligence/recent-bank-to-pe', { start: dr.start, end: dr.end });
+    const cached = getCached(cacheKey);
     if (cached) return res.json(cached);
-    const data = diStmts.recentBankToPe.all();
-    setCached(KEY, data);
+    const dateWhere = dr.hasFilter
+      ? `AND c.rec_date BETWEEN '${dr.start}' AND '${dr.end}'`
+      : `AND c.rec_date >= date('now', '-180 days')`;
+    const data = db.prepare(`
+      SELECT c.rec_date, c.assignor_canon AS seller, c.assignee_canon AS buyer, COUNT(*) AS n
+      FROM aom_events_clean c
+      WHERE c.assignor_type='BANK' AND c.assignee_type='PRIVATE_CREDIT'
+        AND c.txn_type='MARKET_TRANSFER' ${dateWhere}
+      GROUP BY c.assignor_canon, c.assignee_canon
+      ORDER BY n DESC LIMIT 10
+    `).all();
+    setCached(cacheKey, data, 30 * 60 * 1000);
     res.json(data);
   });
 

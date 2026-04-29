@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -13,7 +13,7 @@ import {
   ArrowRight, ChevronLeft, ChevronRight, ExternalLink,
   Flame, Shield, Eye, Info, ChevronDown, ChevronUp,
   Building2, MapPin, FileText, Activity, Link2, Hash, BookOpen,
-  HelpCircle,
+  HelpCircle, Calendar,
 } from 'lucide-react';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -24,6 +24,101 @@ const MONTH_LABELS: Record<string, string> = {
 function fmtMonth(m: string) {
   const [y, mo] = m.split('-');
   return `${MONTH_LABELS[mo]} ${y?.slice(2)}`;
+}
+function fmtDate(d: string) {
+  if (!d) return '';
+  const [y, m, day] = d.split('-');
+  return `${MONTH_LABELS[m] ?? m} ${parseInt(day, 10)}, ${y}`;
+}
+
+type DatePreset = '30d' | '90d' | '6m' | '12m' | 'ytd' | 'all' | 'custom';
+interface DateRange { start: string; end: string; preset: DatePreset; }
+
+function toISO(d: Date) { return d.toISOString().slice(0, 10); }
+function getPresetDates(preset: DatePreset): { start: string; end: string } {
+  const today = new Date();
+  const end = toISO(today);
+  if (preset === '30d')  { const s = new Date(today); s.setDate(s.getDate() - 30);  return { start: toISO(s), end }; }
+  if (preset === '90d')  { const s = new Date(today); s.setDate(s.getDate() - 90);  return { start: toISO(s), end }; }
+  if (preset === '6m')   { const s = new Date(today); s.setMonth(s.getMonth() - 6); return { start: toISO(s), end }; }
+  if (preset === '12m')  { const s = new Date(today); s.setFullYear(s.getFullYear() - 1); return { start: toISO(s), end }; }
+  if (preset === 'ytd')  { return { start: `${today.getFullYear()}-01-01`, end }; }
+  return { start: '', end: '' };
+}
+
+const DATE_PRESETS: { label: string; value: DatePreset }[] = [
+  { label: '30 Days', value: '30d' },
+  { label: '90 Days', value: '90d' },
+  { label: '6 Months', value: '6m' },
+  { label: '12 Months', value: '12m' },
+  { label: 'YTD', value: 'ytd' },
+  { label: 'All Time', value: 'all' },
+  { label: 'Custom', value: 'custom' },
+];
+
+// ── Date Range Picker ─────────────────────────────────────────────────────────
+function DateRangePicker({ range, onChange }: {
+  range: DateRange;
+  onChange: (r: DateRange) => void;
+}) {
+  const handlePreset = (preset: DatePreset) => {
+    if (preset === 'all') { onChange({ start: '', end: '', preset }); return; }
+    if (preset === 'custom') { onChange({ ...range, preset }); return; }
+    const { start, end } = getPresetDates(preset);
+    onChange({ start, end, preset });
+  };
+  const priorLabel = useMemo(() => {
+    if (!range.start || !range.end) return null;
+    const startMs = new Date(range.start).getTime();
+    const endMs   = new Date(range.end).getTime();
+    const days = Math.round((endMs - startMs) / 86400000);
+    const priorEnd   = toISO(new Date(startMs - 86400000));
+    const priorStart = toISO(new Date(startMs - 86400000 - days * 86400000));
+    return `vs. ${fmtDate(priorStart)} – ${fmtDate(priorEnd)} (prior ${days}d)`;
+  }, [range.start, range.end]);
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 bg-card border border-border rounded-xl px-4 py-3">
+      <Calendar size={13} className="text-muted-foreground/60 shrink-0" />
+      <span className="text-[11px] font-medium text-muted-foreground mr-1">Date range:</span>
+      <div className="flex gap-1 flex-wrap">
+        {DATE_PRESETS.map(p => (
+          <button
+            key={p.value}
+            onClick={() => handlePreset(p.value)}
+            className={`text-[11px] font-medium px-2.5 py-1 rounded-md border transition-colors ${
+              range.preset === p.value
+                ? 'bg-orange-500 text-white border-orange-500'
+                : 'bg-background text-muted-foreground border-border hover:border-orange-300 hover:text-orange-600'
+            }`}
+          >{p.label}</button>
+        ))}
+      </div>
+      {range.preset === 'custom' && (
+        <div className="flex items-center gap-1.5 ml-1">
+          <input type="date" value={range.start}
+            onChange={e => onChange({ ...range, start: e.target.value })}
+            className="text-[11px] border border-border rounded-md px-2 py-1 bg-background text-foreground"
+          />
+          <span className="text-[10px] text-muted-foreground">to</span>
+          <input type="date" value={range.end}
+            onChange={e => onChange({ ...range, end: e.target.value })}
+            className="text-[11px] border border-border rounded-md px-2 py-1 bg-background text-foreground"
+          />
+        </div>
+      )}
+      {range.start && range.end && range.preset !== 'all' && (
+        <div className="ml-auto flex flex-col items-end">
+          <span className="text-[10px] font-medium text-orange-600">
+            {fmtDate(range.start)} – {fmtDate(range.end)}
+          </span>
+          {priorLabel && (
+            <span className="text-[9px] text-muted-foreground/60">{priorLabel}</span>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ── Methodology explainer blocks ──────────────────────────────────────────────
@@ -163,11 +258,29 @@ function PressureBar({ inbound, outbound }: { inbound: number; outbound: number 
   );
 }
 
-function KpiCard({ label, value, sub, icon: Icon, accent, tooltip }: {
+function DeltaPill({ current, prior }: { current: number; prior: number }) {
+  const delta = current - prior;
+  const pct   = prior > 0 ? Math.round((delta / prior) * 100) : null;
+  if (delta === 0) return <span className="text-[9px] text-muted-foreground/50 font-mono">no change</span>;
+  const pos = delta > 0;
+  const color = pos ? 'text-emerald-600' : 'text-red-500';
+  const DirIcon = pos ? TrendingUp : TrendingDown;
+  return (
+    <span className={`inline-flex items-center gap-0.5 text-[9px] font-semibold ${color}`}>
+      <DirIcon size={9} />
+      {pos ? '+' : ''}{delta.toLocaleString()}
+      {pct !== null && <span className="opacity-70">({pos ? '+' : ''}{pct}%)</span>}
+    </span>
+  );
+}
+
+function KpiCard({ label, value, sub, icon: Icon, accent, tooltip, priorValue }: {
   label: string; value: any; sub?: string;
   icon: React.ElementType; accent: string; tooltip?: string;
+  priorValue?: number;
 }) {
   const [show, setShow] = useState(false);
+  const numVal = typeof value === 'string' ? parseInt(value.replace(/,/g, ''), 10) : value;
   return (
     <div className="bg-card border border-border rounded-xl p-5 relative">
       <div className="flex items-start justify-between mb-3">
@@ -191,6 +304,12 @@ function KpiCard({ label, value, sub, icon: Icon, accent, tooltip }: {
       <p className={`text-2xl font-bold ${accent}`}>{value ?? '—'}</p>
       <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium mt-0.5">{label}</p>
       {sub && <p className="text-[10px] text-muted-foreground/60 mt-1">{sub}</p>}
+      {priorValue !== undefined && numVal !== undefined && (
+        <div className="mt-1.5 flex items-center gap-1">
+          <DeltaPill current={numVal} prior={priorValue} />
+          <span className="text-[9px] text-muted-foreground/40">vs prior period</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -439,35 +558,52 @@ export default function DealIntelligence() {
   const [dealPage, setDealPage] = useState(1);
   const [selectedCfn, setSelectedCfn] = useState<string | null>(null);
 
+  // Date range state — default to last 90 days
+  const [dateRange, setDateRange] = useState<DateRange>(() => {
+    const { start, end } = getPresetDates('90d');
+    return { start, end, preset: '90d' };
+  });
+
+  const dateParams = dateRange.preset !== 'all' && dateRange.start && dateRange.end
+    ? `start_date=${dateRange.start}&end_date=${dateRange.end}`
+    : '';
+
+  const handleDateChange = (r: DateRange) => {
+    setDateRange(r);
+    setDealPage(1);
+  };
+
   const { data: summary, isLoading: sumLoading } = useQuery({
-    queryKey: ['/api/deal-intelligence/summary'],
-    queryFn: () => apiRequest('GET', '/api/deal-intelligence/summary').then(r => r.json()),
+    queryKey: ['/api/deal-intelligence/summary', dateParams],
+    queryFn: () => apiRequest('GET', `/api/deal-intelligence/summary${dateParams ? '?' + dateParams : ''}`).then(r => r.json()),
   });
   const { data: sellers, isLoading: sellLoading } = useQuery({
-    queryKey: ['/api/deal-intelligence/seller-pressure'],
-    queryFn: () => apiRequest('GET', '/api/deal-intelligence/seller-pressure').then(r => r.json()),
+    queryKey: ['/api/deal-intelligence/seller-pressure', dateParams],
+    queryFn: () => apiRequest('GET', `/api/deal-intelligence/seller-pressure${dateParams ? '?' + dateParams : ''}`).then(r => r.json()),
   });
   const { data: peList, isLoading: peLoading } = useQuery({
-    queryKey: ['/api/deal-intelligence/pe-competitive'],
-    queryFn: () => apiRequest('GET', '/api/deal-intelligence/pe-competitive').then(r => r.json()),
+    queryKey: ['/api/deal-intelligence/pe-competitive', dateParams],
+    queryFn: () => apiRequest('GET', `/api/deal-intelligence/pe-competitive${dateParams ? '?' + dateParams : ''}`).then(r => r.json()),
   });
   const { data: specialSvc, isLoading: svcLoading } = useQuery({
-    queryKey: ['/api/deal-intelligence/special-servicers'],
-    queryFn: () => apiRequest('GET', '/api/deal-intelligence/special-servicers').then(r => r.json()),
+    queryKey: ['/api/deal-intelligence/special-servicers', dateParams],
+    queryFn: () => apiRequest('GET', `/api/deal-intelligence/special-servicers${dateParams ? '?' + dateParams : ''}`).then(r => r.json()),
   });
   const { data: monthly, isLoading: mLoading } = useQuery({
     queryKey: ['/api/deal-intelligence/monthly'],
     queryFn: () => apiRequest('GET', '/api/deal-intelligence/monthly').then(r => r.json()),
   });
   const { data: dealLog, isLoading: dealLoading } = useQuery({
-    queryKey: ['/api/deal-intelligence/bank-to-pe', dealPage],
-    queryFn: () => apiRequest('GET', `/api/deal-intelligence/bank-to-pe?page=${dealPage}&limit=25`).then(r => r.json()),
+    queryKey: ['/api/deal-intelligence/bank-to-pe', dealPage, dateParams],
+    queryFn: () => apiRequest('GET', `/api/deal-intelligence/bank-to-pe?page=${dealPage}&limit=25${dateParams ? '&' + dateParams : ''}`).then(r => r.json()),
     placeholderData: (prev: any) => prev,
   });
   const { data: recentPairs } = useQuery({
-    queryKey: ['/api/deal-intelligence/recent-bank-to-pe'],
-    queryFn: () => apiRequest('GET', '/api/deal-intelligence/recent-bank-to-pe').then(r => r.json()),
+    queryKey: ['/api/deal-intelligence/recent-bank-to-pe', dateParams],
+    queryFn: () => apiRequest('GET', `/api/deal-intelligence/recent-bank-to-pe${dateParams ? '?' + dateParams : ''}`).then(r => r.json()),
   });
+
+  const prior = (summary as any)?.prior;
 
   // Max values for bar chart scaling
   const maxPeVol = Math.max(...((peList || []).map((r: any) => r.inbound_vol)), 1);
@@ -512,6 +648,9 @@ export default function DealIntelligence() {
         </MethodologyBox>
       </div>
 
+      {/* ── Date Range Picker ────────────────────────────────────────────── */}
+      <DateRangePicker range={dateRange} onChange={handleDateChange} />
+
       {/* ── KPI row ─────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         {sumLoading ? Array(5).fill(0).map((_,i) => <Skeleton key={i} className="h-28 rounded-xl" />) : (<>
@@ -521,14 +660,16 @@ export default function DealIntelligence() {
             sub="Direct bank-to-fund deal pipeline"
             icon={ArrowRight}
             accent="text-orange-400"
+            priorValue={prior?.bank_to_pe_total}
             tooltip="Counted when: seller entity type = BANK, buyer entity type = PRIVATE_CREDIT, and transaction type = MARKET_TRANSFER (both parties institutional). These are the most actionable deal signals — a regulated bank is voluntarily shedding mortgage debt to an alternative buyer, usually because the loan is stressed or the bank needs to reduce its CRE concentration."
           />
           <KpiCard
             label="Net Institutional Sellers"
             value={summary?.net_sellers_count?.toLocaleString()}
-            sub="Outbound > 1.5× inbound, min 20 txns"
+            sub="Outbound > 1.5× inbound, min 3 txns"
             icon={TrendingDown}
             accent="text-red-400"
+            priorValue={prior?.net_sellers_count}
             tooltip="Calculated as: count of institutions (banks, servicers, trusts) where total outbound assignments ÷ total inbound assignments > 1.5. The 1.5× threshold filters out normal portfolio churn and isolates entities in a sustained net-selling posture — consistent disposition pressure that signals capital stress or balance-sheet reduction."
           />
           <KpiCard
@@ -537,6 +678,7 @@ export default function DealIntelligence() {
             sub="Total loans transferred to workout servicers"
             icon={AlertTriangle}
             accent="text-amber-400"
+            priorValue={prior?.special_svc_vol}
             tooltip="Total inbound assignment volume for known special servicers (Mortgage Assets Mgmt, Select Portfolio Servicing, Carrington, Rushmore, etc.). Special servicers are hired specifically to manage non-performing and distressed loans. When their intake grows, it means upstream lenders are escalating problem loans — a leading indicator of distressed portfolio sale opportunities."
           />
           <KpiCard
@@ -545,6 +687,7 @@ export default function DealIntelligence() {
             sub="Distinct funds acquiring from institutions"
             icon={Users}
             accent="text-purple-400"
+            priorValue={prior?.active_pe_buyers}
             tooltip="Count of distinct private credit / PE fund entities that have received at least one assignment from an institutional seller (bank, servicer, or GSE). A higher number means more competition for distressed deals in this market. Track this figure over time — a rising count suggests the Miami-Dade distressed market is drawing new entrants."
           />
           <KpiCard
@@ -553,6 +696,7 @@ export default function DealIntelligence() {
             sub="Institution → private party outflows"
             icon={Flame}
             accent="text-rose-400"
+            priorValue={prior?.inst_out_total}
             tooltip="Counted when: seller entity type is institutional (bank, servicer, GSE, PE fund, or trust), AND buyer entity type is OTHER (a private individual, small LLC, HOA, or unrecognized entity). This pattern — called INSTITUTIONAL_OUT — represents the end of the distress cycle: the loan has left the formal financial system. Common scenarios: (1) REO disposal — bank foreclosed and sold the property, (2) NPL bulk sale to an individual investor at deep discount, (3) short-sale or deed-in-lieu settlement."
           />
         </>)}
