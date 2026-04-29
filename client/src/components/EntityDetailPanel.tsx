@@ -242,7 +242,7 @@ export default function EntityDetailPanel({ entityName, onClose, onNavigate }: P
         <div className="flex border-b border-border shrink-0 px-5 overflow-x-auto">
           {([
             { id: 'overview',      label: 'Overview',  icon: Network },
-            { id: 'sub-entities',  label: `Sub-entities${subCount !== null ? ` (${subCount})` : ''}`, icon: Layers },
+            { id: 'sub-entities',  label: `Legal Vehicles${subCount !== null ? ` (${subCount})` : ''}`, icon: Layers },
             { id: 'inbound',       label: `Inbound (${inbound.length}${inbound.length===500?'+':''})`,   icon: TrendingDown },
             { id: 'outbound',      label: `Outbound (${outbound.length}${outbound.length===500?'+':''})`, icon: TrendingUp },
           ] as const).map(t => (
@@ -389,7 +389,7 @@ export default function EntityDetailPanel({ entityName, onClose, onNavigate }: P
               <div className="px-5 py-3 bg-muted/10 border-b border-border/50 flex items-start gap-2">
                 <Info size={12} className="text-primary mt-0.5 shrink-0" />
                 <p className="text-[11px] text-muted-foreground leading-relaxed">
-                  <strong className="text-foreground">Sub-entities</strong> are the distinct legal vehicles (raw name variants) that appear
+                  <strong className="text-foreground">Legal Vehicles</strong> are the distinct legal entities that appear
                   in county records under the <span className="text-primary font-medium">{entityName}</span> canonical umbrella.
                   For trusts like TOWD POINT, each numbered series is a separate legal issuer but the same economic actor.
                   Understanding <em>which vehicle</em> buys from whom — and when — reveals how the program deploys capital across vintages.
