@@ -11,7 +11,7 @@ import {
 import {
   TrendingDown, TrendingUp, AlertTriangle, Target, Users,
   ArrowRight, ChevronLeft, ChevronRight, ExternalLink,
-  Flame, Shield, Eye, Info, ChevronDown, ChevronUp,
+  Shield, Eye, Info, ChevronDown, ChevronUp,
   Building2, MapPin, FileText, Activity, Link2, Hash, BookOpen,
   HelpCircle, Calendar,
 } from 'lucide-react';
@@ -562,7 +562,6 @@ function PeriodComparisonChart({ summary, currentStart, currentEnd, priorStart, 
 
   const metrics = [
     { key: 'bank_to_pe_total',   short: 'Bank→PE',        label: 'Bank → PE Transfers' },
-    { key: 'inst_out_total',     short: 'Distressed',     label: 'Distressed Dispositions' },
     { key: 'net_sellers_count',  short: 'Net Sellers',    label: 'Net Institutional Sellers' },
     { key: 'special_svc_vol',    short: 'Spec. Svc.',     label: 'Special Svc. Acquisitions' },
     { key: 'active_pe_buyers',   short: 'Active PE',      label: 'Active PE Buyers' },
@@ -771,7 +770,7 @@ export default function DealIntelligence() {
       <DateRangePicker range={dateRange} onChange={handleDateChange} />
 
       {/* ── KPI row ─────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {sumLoading ? Array(5).fill(0).map((_,i) => <Skeleton key={i} className="h-28 rounded-xl" />) : (<>
           <KpiCard
             label="Bank → PE Transfers"
@@ -808,15 +807,6 @@ export default function DealIntelligence() {
             accent="text-purple-400"
             priorValue={prior?.active_pe_buyers}
             tooltip="Count of distinct private credit / PE fund entities that have received at least one assignment from an institutional seller (bank, servicer, or GSE). A higher number means more competition for distressed deals in this market. Track this figure over time — a rising count suggests the Miami-Dade distressed market is drawing new entrants."
-          />
-          <KpiCard
-            label="Distressed Dispositions"
-            value={summary?.inst_out_total?.toLocaleString()}
-            sub="Institution → private party outflows"
-            icon={Flame}
-            accent="text-rose-400"
-            priorValue={prior?.inst_out_total}
-            tooltip="Counted when: seller entity type is institutional (bank, servicer, GSE, PE fund, or trust), AND buyer entity type is OTHER (a private individual, small LLC, HOA, or unrecognized entity). This pattern — called INSTITUTIONAL_OUT — represents the end of the distress cycle: the loan has left the formal financial system. Common scenarios: (1) REO disposal — bank foreclosed and sold the property, (2) NPL bulk sale to an individual investor at deep discount, (3) short-sale or deed-in-lieu settlement."
           />
         </>)}
       </div>
