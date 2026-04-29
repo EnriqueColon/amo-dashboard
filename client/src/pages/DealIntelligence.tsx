@@ -12,7 +12,8 @@ import {
   TrendingDown, TrendingUp, AlertTriangle, Target, Users,
   ArrowRight, ChevronLeft, ChevronRight, ExternalLink,
   Flame, Shield, Eye, Info, ChevronDown, ChevronUp,
-  Building2, MapPin, FileText, Activity, Link2, Hash,
+  Building2, MapPin, FileText, Activity, Link2, Hash, BookOpen,
+  HelpCircle,
 } from 'lucide-react';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -23,6 +24,124 @@ const MONTH_LABELS: Record<string, string> = {
 function fmtMonth(m: string) {
   const [y, mo] = m.split('-');
   return `${MONTH_LABELS[mo]} ${y?.slice(2)}`;
+}
+
+// ── Methodology explainer blocks ──────────────────────────────────────────────
+function MethodologyBox({ title, children }: { title: string; children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rounded-lg border border-blue-100 bg-blue-50/60 text-[11px]">
+      <button
+        className="w-full flex items-center gap-2 px-3 py-2 text-left text-blue-700 font-medium"
+        onClick={() => setOpen(v => !v)}
+      >
+        <HelpCircle size={12} className="shrink-0 text-blue-400" />
+        <span>{title}</span>
+        <span className="ml-auto text-blue-400">{open ? '▲ hide' : '▼ show'}</span>
+      </button>
+      {open && (
+        <div className="px-4 pb-3 pt-1 space-y-1.5 text-blue-800/80 leading-relaxed border-t border-blue-100">
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Inline callout used inside the deal detail panel
+function ClassificationRationale({ tx }: { tx: any }) {
+  const [open, setOpen] = useState(false);
+
+  const sellerType  = tx.assignor_type ?? 'UNKNOWN';
+  const buyerType   = tx.assignee_type ?? 'UNKNOWN';
+  const txnType     = tx.txn_type ?? 'UNKNOWN';
+
+  // Human-readable label for transaction type
+  const TXN_LABELS: Record<string, { label: string; color: string }> = {
+    MARKET_TRANSFER:   { label: 'Market Transfer',          color: 'text-emerald-600 bg-emerald-50 border-emerald-200' },
+    ORIGINATION:       { label: 'Origination / Intake',     color: 'text-blue-600 bg-blue-50 border-blue-200' },
+    INSTITUTIONAL_OUT: { label: 'Distressed Disposition',   color: 'text-rose-600 bg-rose-50 border-rose-200' },
+    MERS_RELEASE:      { label: 'MERS Release',             color: 'text-orange-600 bg-orange-50 border-orange-200' },
+    SELF_ASSIGN:       { label: 'Self-Assignment',          color: 'text-slate-500 bg-slate-50 border-slate-200' },
+    PRIVATE:           { label: 'Private Transfer',         color: 'text-slate-500 bg-slate-50 border-slate-200' },
+  };
+
+  const TYPE_LABELS: Record<string, string> = {
+    BANK: 'Commercial Bank', SERVICER: 'Mortgage Servicer',
+    PRIVATE_CREDIT: 'Private Credit / PE Fund', GSE: 'Government Agency (GSE)',
+    MERS: 'MERS Registry', TRUST: 'Securitization Trust', OTHER: 'Private / Non-institutional',
+  };
+
+  const txnMeta = TXN_LABELS[txnType] ?? { label: txnType, color: 'text-slate-500 bg-slate-50 border-slate-200' };
+
+  const reasonLines: string[] = [];
+  if (txnType === 'MARKET_TRANSFER' && sellerType === 'BANK' && buyerType === 'PRIVATE_CREDIT') {
+    reasonLines.push(
+      `This is a Bank → PE deal because: the seller (${tx.assignor_canon}) is classified as a commercial bank, and the buyer (${tx.assignee_canon}) is classified as a private credit / PE fund.`,
+      `Transaction type MARKET_TRANSFER means both parties are institutional (bank, fund, servicer, GSE, or trust) — confirming this is a true secondary-market sale of debt, not an origination or REO disposal.`,
+      `Why does this appear here? Banks rarely sell mortgage notes to PE funds unless the loan is stressed, non-performing, or the bank needs to reduce its CRE concentration and regulatory capital burden. PE funds acquire these at a discount and seek to work out or foreclose the underlying collateral.`,
+    );
+  } else if (txnType === 'INSTITUTIONAL_OUT') {
+    reasonLines.push(
+      `This is a Distressed Disposition because: ${tx.assignor_canon} is an institutional entity (${TYPE_LABELS[sellerType] ?? sellerType}), but the buyer (${tx.assignee_canon}) is a private / non-institutional party (${TYPE_LABELS[buyerType] ?? buyerType}).`,
+      `Institutions (banks, servicers, funds) almost never voluntarily sell performing mortgage notes directly to private individuals or small LLCs at face value. These transfers typically represent: (1) REO (Real Estate Owned) — the bank foreclosed and is disposing of the property, (2) an NPL sale at a steep discount, or (3) a short-sale / deed-in-lieu settlement.`,
+      `This signals the end of the distress cycle: the troubled asset has exited the formal financial system and entered the hands of a private buyer.`,
+    );
+  } else if (txnType === 'MARKET_TRANSFER') {
+    reasonLines.push(
+      `Transaction type MARKET_TRANSFER means both the seller (${TYPE_LABELS[sellerType] ?? sellerType}) and the buyer (${TYPE_LABELS[buyerType] ?? buyerType}) are institutional entities.`,
+      `This is a true secondary-market sale where one institution transfers a mortgage note to another. Neither party is the original borrower.`,
+    );
+  } else if (txnType === 'ORIGINATION') {
+    reasonLines.push(
+      `Transaction type ORIGINATION means the seller (${TYPE_LABELS[sellerType] ?? sellerType}) is a private / non-institutional party, and the buyer (${TYPE_LABELS[buyerType] ?? buyerType}) is institutional.`,
+      `This typically represents a new loan being originated — the borrower (a private party) assigns the mortgage to the lender, or a mortgage broker transfers a new loan to the final lender.`,
+    );
+  } else if (txnType === 'MERS_RELEASE') {
+    reasonLines.push(
+      `MERS (Mortgage Electronic Registration Systems) is a national registry used to avoid re-recording fees each time a mortgage is sold. This filing means MERS is stepping out of the chain and formally placing ${tx.assignee_canon} as the visible holder of record.`,
+      `This is not a true ownership transfer — the underlying beneficial owner was already ${tx.assignee_canon}. This is registry housekeeping, often done before a foreclosure or loan modification.`,
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white/70 text-[11px]">
+      <button
+        className="w-full flex items-center gap-2 px-3 py-2 text-left text-slate-600 font-medium"
+        onClick={() => setOpen(v => !v)}
+      >
+        <BookOpen size={11} className="shrink-0 text-slate-400" />
+        <span>Why is this transaction classified this way?</span>
+        <div className="ml-auto flex items-center gap-2">
+          <span className={`text-[10px] font-medium px-2 py-0.5 rounded border ${txnMeta.color}`}>{txnMeta.label}</span>
+          <span className="text-slate-400">{open ? '▲' : '▼'}</span>
+        </div>
+      </button>
+      {open && (
+        <div className="px-4 pb-3 pt-1 border-t border-slate-100 space-y-2">
+          {/* Classification data grid */}
+          <div className="grid grid-cols-3 gap-2 my-2">
+            {[
+              { label: 'Seller Entity Type', value: TYPE_LABELS[sellerType] ?? sellerType, mono: false },
+              { label: 'Transaction Type',   value: txnMeta.label,                         mono: false },
+              { label: 'Buyer Entity Type',  value: TYPE_LABELS[buyerType]  ?? buyerType,  mono: false },
+            ].map(({ label, value }) => (
+              <div key={label} className="bg-slate-50 rounded-md px-2.5 py-2">
+                <p className="text-[9px] text-slate-400 uppercase tracking-wider mb-0.5">{label}</p>
+                <p className="text-slate-700 font-semibold text-[11px]">{value}</p>
+              </div>
+            ))}
+          </div>
+          {/* Reasoning */}
+          <div className="space-y-1.5 text-slate-600 leading-relaxed">
+            {reasonLines.map((line, i) => (
+              <p key={i} className={i === 0 ? 'font-medium text-slate-700' : 'text-slate-500'}>{line}</p>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // Net-seller pressure bar: green = net buyer, red = net seller
@@ -165,6 +284,9 @@ function DealDetailPanel({ cfn, onClose }: { cfn: string; onClose: () => void })
               <ChevronUp size={14} />
             </button>
           </div>
+
+          {/* Classification Rationale */}
+          <ClassificationRationale tx={tx} />
 
           {/* Three-column layout */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -354,17 +476,40 @@ export default function DealIntelligence() {
     <div className="p-6 space-y-7 max-w-screen-xl mx-auto">
 
       {/* ── Header ──────────────────────────────────────────────────────── */}
-      <div>
-        <div className="flex items-center gap-2.5">
-          <div className="p-1.5 bg-orange-500/10 rounded-lg">
-            <Target size={16} className="text-orange-400" />
+      <div className="space-y-3">
+        <div>
+          <div className="flex items-center gap-2.5">
+            <div className="p-1.5 bg-orange-500/10 rounded-lg">
+              <Target size={16} className="text-orange-400" />
+            </div>
+            <h1 className="text-xl font-semibold">Deal Intelligence</h1>
           </div>
-          <h1 className="text-xl font-semibold">Deal Intelligence</h1>
+          <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
+            Distressed debt sourcing signals derived from Miami-Dade County public mortgage assignment filings.
+            Every metric on this page is computed from recorded assignments of mortgage — the legal documents
+            that transfer ownership of a mortgage note from one party to another.
+          </p>
         </div>
-        <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
-          Distressed debt sourcing signals for Miami-Dade County. Tracks institutional sellers under pressure,
-          private credit deal flow, special servicer acquisitions, and the bank→PE deal pipeline.
-        </p>
+
+        <MethodologyBox title="What is an assignment of mortgage — and why does it reveal distress? (click to expand)">
+          <p><strong>An assignment of mortgage</strong> is a public county record filed every time a mortgage (debt instrument) changes hands. It does <em>not</em> mean the property was sold — the borrower stays the same. What changes is <em>who holds the debt</em> and who has the right to collect payments or foreclose.</p>
+          <p><strong>Why this reveals distress:</strong> Banks and servicers routinely sell mortgages to each other as part of normal capital markets. But when a bank sells to a private credit / PE fund, or when an institution sells to a private non-institutional party, it almost always signals stress — the bank wants the loan off its books, often at a discount.</p>
+          <p className="font-medium text-blue-700">How transactions are classified on this page:</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 mt-1">
+            {[
+              ['Bank → PE Transfer',      'Institutional seller (bank) → institutional buyer (PE fund). True secondary market; bank offloading debt to alternative capital.'],
+              ['Distressed Disposition',  'Institutional seller → private / non-institutional buyer. REO sales, NPL disposals, short-sale settlements — the loan exits the formal system.'],
+              ['Market Transfer',         'Institution → institution (any type). Normal secondary market activity between regulated/professional participants.'],
+              ['MERS Release',            'MERS (a registry) steps out of the chain. Not a real sale — just making the actual owner visible in the public record.'],
+              ['Origination / Intake',    'Private party → institution. A new loan entering the system, or a broker transferring a freshly originated loan to the final lender.'],
+            ].map(([label, desc]) => (
+              <div key={label} className="flex gap-2">
+                <span className="font-semibold text-blue-700 shrink-0 w-44">{label}:</span>
+                <span>{desc}</span>
+              </div>
+            ))}
+          </div>
+        </MethodologyBox>
       </div>
 
       {/* ── KPI row ─────────────────────────────────────────────────────── */}
@@ -376,31 +521,31 @@ export default function DealIntelligence() {
             sub="Direct bank-to-fund deal pipeline"
             icon={ArrowRight}
             accent="text-orange-400"
-            tooltip="Total transactions where a bank sold directly to a private credit / PE fund. These are the most actionable deal signals — regulated sellers offloading to alternative buyers."
+            tooltip="Counted when: seller entity type = BANK, buyer entity type = PRIVATE_CREDIT, and transaction type = MARKET_TRANSFER (both parties institutional). These are the most actionable deal signals — a regulated bank is voluntarily shedding mortgage debt to an alternative buyer, usually because the loan is stressed or the bank needs to reduce its CRE concentration."
           />
           <KpiCard
             label="Net Institutional Sellers"
             value={summary?.net_sellers_count?.toLocaleString()}
-            sub="Outbound > 1.5× inbound"
+            sub="Outbound > 1.5× inbound, min 20 txns"
             icon={TrendingDown}
             accent="text-red-400"
-            tooltip="Institutions where outbound volume exceeds inbound by 1.5× or more. These entities are consistently shedding loans and are likely sources for portfolio acquisition opportunities."
+            tooltip="Calculated as: count of institutions (banks, servicers, trusts) where total outbound assignments ÷ total inbound assignments > 1.5. The 1.5× threshold filters out normal portfolio churn and isolates entities in a sustained net-selling posture — consistent disposition pressure that signals capital stress or balance-sheet reduction."
           />
           <KpiCard
             label="Special Svc. Acquisitions"
             value={summary?.special_svc_vol?.toLocaleString()}
-            sub="Total inbound to workout servicers"
+            sub="Total loans transferred to workout servicers"
             icon={AlertTriangle}
             accent="text-amber-400"
-            tooltip="Total loan volume acquired by known special servicers (Mortgage Assets Mgmt, Select Portfolio, Carrington, etc.). Rising numbers signal a growing distressed pipeline."
+            tooltip="Total inbound assignment volume for known special servicers (Mortgage Assets Mgmt, Select Portfolio Servicing, Carrington, Rushmore, etc.). Special servicers are hired specifically to manage non-performing and distressed loans. When their intake grows, it means upstream lenders are escalating problem loans — a leading indicator of distressed portfolio sale opportunities."
           />
           <KpiCard
             label="Active PE Buyers"
             value={summary?.active_pe_buyers?.toLocaleString()}
-            sub="Distinct funds buying from institutions"
+            sub="Distinct funds acquiring from institutions"
             icon={Users}
             accent="text-purple-400"
-            tooltip="Number of distinct private credit / PE funds that have acquired loans from institutional sellers. Indicates depth of alternative buyer competition in this market."
+            tooltip="Count of distinct private credit / PE fund entities that have received at least one assignment from an institutional seller (bank, servicer, or GSE). A higher number means more competition for distressed deals in this market. Track this figure over time — a rising count suggests the Miami-Dade distressed market is drawing new entrants."
           />
           <KpiCard
             label="Distressed Dispositions"
@@ -408,7 +553,7 @@ export default function DealIntelligence() {
             sub="Institution → private party outflows"
             icon={Flame}
             accent="text-rose-400"
-            tooltip="Institutional → non-institutional transfers (REO, distressed sales, short sales). These represent the end of the distress cycle — assets leaving the formal system."
+            tooltip="Counted when: seller entity type is institutional (bank, servicer, GSE, PE fund, or trust), AND buyer entity type is OTHER (a private individual, small LLC, HOA, or unrecognized entity). This pattern — called INSTITUTIONAL_OUT — represents the end of the distress cycle: the loan has left the formal financial system. Common scenarios: (1) REO disposal — bank foreclosed and sold the property, (2) NPL bulk sale to an individual investor at deep discount, (3) short-sale or deed-in-lieu settlement."
           />
         </>)}
       </div>
@@ -422,10 +567,13 @@ export default function DealIntelligence() {
               Monthly bank→PE transfers, distressed dispositions, and total market transfers
             </p>
           </div>
-          <div className="flex items-center gap-4 text-[10px] text-muted-foreground">
-            <span className="flex items-center gap-1.5"><span className="w-3 h-1.5 rounded-full bg-orange-400 inline-block" />Bank → PE</span>
-            <span className="flex items-center gap-1.5"><span className="w-3 h-1.5 rounded-full bg-rose-400 inline-block" />Inst. Out</span>
-            <span className="flex items-center gap-1.5"><span className="w-3 h-1.5 rounded-full bg-emerald-500/50 inline-block" />All Market Transfers</span>
+          <div className="flex flex-col gap-1 items-end text-[10px] text-muted-foreground">
+            <div className="flex items-center gap-4">
+              <span className="flex items-center gap-1.5"><span className="w-3 h-1.5 rounded-full bg-orange-400 inline-block" />Bank → PE (bank selling to PE fund)</span>
+              <span className="flex items-center gap-1.5"><span className="w-3 h-1.5 rounded-full bg-rose-400 inline-block" />Inst. Out (institution → private party)</span>
+              <span className="flex items-center gap-1.5"><span className="w-3 h-1.5 rounded-full bg-emerald-500/50 inline-block" />All Institution-to-Institution Transfers</span>
+            </div>
+            <span className="text-muted-foreground/50 text-[9px]">Each bar = number of recorded assignment filings that month</span>
           </div>
         </div>
         {mLoading ? <Skeleton className="h-52" /> : (
@@ -478,9 +626,16 @@ export default function DealIntelligence() {
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-3 text-[9px] text-muted-foreground mt-2 mb-3 px-1">
-            <span className="flex items-center gap-1"><span className="w-2 h-1.5 rounded-full bg-emerald-500/70 inline-block" />Inbound</span>
-            <span className="flex items-center gap-1"><span className="w-2 h-1.5 rounded-full bg-red-500/70 inline-block" />Outbound</span>
+          <div className="mt-2 mb-2">
+            <MethodologyBox title="How net seller pressure is calculated">
+              <p><strong>Inbound</strong> = total times this institution appeared as the buyer (grantee) on a recorded assignment. <strong>Outbound</strong> = total times it appeared as the seller (grantor).</p>
+              <p><strong>Net flow</strong> = Inbound − Outbound. A negative net (shown in red) means the institution is disposing of more loans than it is acquiring — a sustained selling posture. The bar chart splits the entity's total volume into its inbound and outbound share visually.</p>
+              <p>Institutions ranked highest here have the most motivation to sell portfolios — approach them proactively for deal sourcing.</p>
+            </MethodologyBox>
+          </div>
+          <div className="flex items-center gap-3 text-[9px] text-muted-foreground mt-1 mb-3 px-1">
+            <span className="flex items-center gap-1"><span className="w-2 h-1.5 rounded-full bg-emerald-500/70 inline-block" />Inbound (buying)</span>
+            <span className="flex items-center gap-1"><span className="w-2 h-1.5 rounded-full bg-red-500/70 inline-block" />Outbound (selling)</span>
             <span className="ml-auto">Net flow shown as ±</span>
           </div>
           {sellLoading ? <Skeleton className="h-72" /> : (
@@ -517,7 +672,12 @@ export default function DealIntelligence() {
             </div>
           </div>
 
-          <div className="mt-3 mb-2 px-2">
+          <div className="mt-2 mb-2 space-y-1.5">
+            <MethodologyBox title="What is a special servicer and why does their intake matter?">
+              <p><strong>Special servicers</strong> are mortgage companies hired specifically to manage non-performing or distressed loans — ones where the borrower has stopped paying, is in default, or is in foreclosure. They are different from regular servicers who collect payments on healthy loans.</p>
+              <p>When a bank can no longer manage a distressed loan internally, it transfers it to a special servicer. <strong>Rising inbound volume at special servicers</strong> means more banks are escalating problem loans — this is a leading indicator that a portfolio sale or bulk NPL auction is likely coming.</p>
+              <p>The inbound bar shows what percentage of each entity's total activity is acquisitions (as opposed to resales). A high acquisition share confirms they are actively taking on new distressed inventory.</p>
+            </MethodologyBox>
             <div className="flex items-center gap-1.5 text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
               <Eye size={10} className="shrink-0" />
               <span>When these entities acquire at increasing rates, distressed supply is building upstream — monitor for portfolio sale opportunities.</span>
@@ -629,17 +789,34 @@ export default function DealIntelligence() {
 
       {/* ── Bank → PE Deal Log ───────────────────────────────────────────── */}
       <div className="bg-card border border-border rounded-xl overflow-hidden">
-        <div className="px-5 py-4 border-b border-border">
+        <div className="px-5 py-4 border-b border-border space-y-3">
           <div className="flex items-start gap-2">
             <TrendingUp size={14} className="text-orange-400 mt-0.5 shrink-0" />
             <div>
               <h2 className="text-sm font-semibold text-foreground">Bank → PE Deal Log</h2>
               <p className="text-[10px] text-muted-foreground mt-0.5">
-                Every transaction where a bank sold directly to a private credit / PE fund.
+                Every recorded assignment of mortgage where a commercial bank transferred a mortgage note to a private credit or PE fund.
                 {dealLog && <span className="text-orange-400 ml-1">{dealLog.total.toLocaleString()} total transfers recorded.</span>}
               </p>
             </div>
           </div>
+          <MethodologyBox title="How does a transaction qualify for this log?">
+            <p>A filing appears in this table when all three conditions are met:</p>
+            <div className="space-y-1 mt-1">
+              {[
+                ['Seller entity type = BANK', 'The grantor (assignor) is identified as a commercial bank, investment bank, savings bank, or credit union — a regulated deposit-taking institution.'],
+                ['Buyer entity type = PRIVATE_CREDIT', 'The grantee (assignee) is identified as a private credit fund, PE firm, hedge fund, or alternative asset manager — an unregulated, non-bank capital pool.'],
+                ['Transaction type = MARKET_TRANSFER', 'Both parties are institutional, confirming this is a secondary-market sale, not an origination or REO disposal. Self-assignments are excluded.'],
+              ].map(([cond, desc]) => (
+                <div key={cond} className="flex gap-2">
+                  <span className="font-semibold text-blue-700 shrink-0">✓ {cond}:</span>
+                  <span>{desc}</span>
+                </div>
+              ))}
+            </div>
+            <p className="mt-1.5 font-medium text-blue-700">What does this transfer actually represent?</p>
+            <p>The bank is selling the <em>mortgage note</em> (the debt obligation), not the property. The borrower's property and monthly payment obligation remain unchanged — they just start paying a different entity. The PE fund now owns the debt and can: collect payments, negotiate a loan modification, sell the note again, or foreclose if the loan is non-performing. Click any row below and expand "Why is this classified this way?" for the full rationale on that specific filing.</p>
+          </MethodologyBox>
         </div>
 
         <div className="overflow-x-auto">
