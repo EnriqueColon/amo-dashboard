@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import CategoryBadge from '@/components/CategoryBadge';
+import ColHeader from '@/components/ColHeader';
 import { ChevronLeft, ChevronRight, Search, X } from 'lucide-react';
 
 const CATEGORIES = [
@@ -205,12 +206,24 @@ export default function Assignments() {
           <table className="w-full text-xs">
             <thead className="border-b border-border bg-muted/20">
               <tr className="text-muted-foreground">
-                <th className="px-3 py-2.5 text-left font-medium">CFN</th>
-                <th className="px-3 py-2.5 text-left font-medium">Date</th>
-                <th className="px-3 py-2.5 text-left font-medium">Grantor (Assignor)</th>
-                <th className="px-3 py-2.5 text-left font-medium">Grantee (Assignee)</th>
-                <th className="px-3 py-2.5 text-left font-medium">Address</th>
-                <th className="px-3 py-2.5 text-left font-medium">Book / Page</th>
+                <th className="px-3 py-2.5 text-left font-medium">
+                  <ColHeader label="CFN" tooltip="County Filing Number — the unique ID assigned by the Miami-Dade Clerk when the document was officially recorded. Click the CFN link to view the original document in the county portal." />
+                </th>
+                <th className="px-3 py-2.5 text-left font-medium">
+                  <ColHeader label="Date" tooltip="Recording date — when the assignment was stamped by the Miami-Dade County Clerk. This is slightly later than the execution/signing date on the document itself." />
+                </th>
+                <th className="px-3 py-2.5 text-left font-medium">
+                  <ColHeader label="Grantor (Assignor)" tooltip="The party transferring/selling the mortgage. This entity is giving up the right to collect or enforce the debt. Often a bank, servicer, or fund offloading a loan from its portfolio." />
+                </th>
+                <th className="px-3 py-2.5 text-left font-medium">
+                  <ColHeader label="Grantee (Assignee)" tooltip="The party receiving/buying the mortgage. This entity now holds the right to collect payments or foreclose. The identity of the grantee reveals who is acquiring distressed or performing debt." />
+                </th>
+                <th className="px-3 py-2.5 text-left font-medium">
+                  <ColHeader label="Address" tooltip="Property address of the collateral securing the mortgage being assigned. Miami-Dade county; full address may not always be captured on the filing." />
+                </th>
+                <th className="px-3 py-2.5 text-left font-medium">
+                  <ColHeader label="Book / Page" tooltip="Miami-Dade Official Records locator — the book and page number of the recorded instrument. Used internally by the Clerk's office as an alternate document reference." />
+                </th>
               </tr>
             </thead>
             <tbody>

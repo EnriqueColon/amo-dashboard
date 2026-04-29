@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import CategoryBadge from './CategoryBadge';
+import ColHeader from './ColHeader';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   X, ArrowRight, TrendingUp, TrendingDown, Network,
@@ -429,11 +430,21 @@ export default function EntityDetailPanel({ entityName, onClose, onNavigate }: P
               <table className="w-full text-xs">
                 <thead className="border-b border-border bg-muted/20">
                   <tr className="text-muted-foreground">
-                    <th className="px-3 py-2.5 text-left font-medium">CFN</th>
-                    <th className="px-3 py-2.5 text-left font-medium">Date</th>
-                    <th className="px-3 py-2.5 text-left font-medium">Assigned From (Seller)</th>
-                    <th className="px-3 py-2.5 text-center font-medium">Direction</th>
-                    <th className="px-3 py-2.5 text-left font-medium">Book / Page</th>
+                    <th className="px-3 py-2.5 text-left font-medium">
+                      <ColHeader label="CFN" tooltip="County Filing Number — the unique ID assigned by the Miami-Dade Clerk when the document was recorded. Click to view the original filing." />
+                    </th>
+                    <th className="px-3 py-2.5 text-left font-medium">
+                      <ColHeader label="Date" tooltip="Recording date — when the assignment was stamped by the Miami-Dade County Clerk." />
+                    </th>
+                    <th className="px-3 py-2.5 text-left font-medium">
+                      <ColHeader label="Assigned From (Seller)" tooltip="The entity that transferred the mortgage to this entity. They gave up the right to collect or enforce the debt." />
+                    </th>
+                    <th className="px-3 py-2.5 text-center font-medium">
+                      <ColHeader label="Direction" tooltip="Shows the flow of the assignment. '→ You' means this entity received (bought) the mortgage." />
+                    </th>
+                    <th className="px-3 py-2.5 text-left font-medium">
+                      <ColHeader label="Book / Page" tooltip="Miami-Dade Official Records locator — the book and page number of the recorded instrument." />
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -510,15 +521,19 @@ export default function EntityDetailPanel({ entityName, onClose, onNavigate }: P
                   <table className="w-full text-xs">
                     <thead className="border-b border-border bg-muted/20 sticky top-0 z-10">
                       <tr className="text-muted-foreground">
-                        <th className="px-3 py-2.5 text-left font-medium">Legal Vehicle (Raw Name)</th>
+                        <th className="px-3 py-2.5 text-left font-medium">
+                          <ColHeader label="Legal Vehicle (Raw Name)" tooltip="The exact name as it appears on the county filing — e.g. 'TOWD POINT MORTGAGE TRUST 2019 4'. Multiple such variants are grouped under this entity's canonical name for analysis." />
+                        </th>
                         <th className="px-3 py-2.5 text-right font-medium">
                           {subDirection === 'buyer'
-                            ? <span className="text-orange-500">Acquisitions</span>
-                            : <span className="text-blue-500">Dispositions</span>}
+                            ? <ColHeader label={<span className="text-orange-500">Acquisitions</span>} tooltip="Number of AMO filings in which this specific legal vehicle appeared as the Grantee (buyer). Each filing represents one mortgage transferred into this vehicle." />
+                            : <ColHeader label={<span className="text-blue-500">Dispositions</span>} tooltip="Number of AMO filings in which this specific legal vehicle appeared as the Grantor (seller). Each filing represents one mortgage transferred out of this vehicle." />}
                         </th>
-                        <th className="px-3 py-2.5 text-left font-medium">Active Period</th>
                         <th className="px-3 py-2.5 text-left font-medium">
-                          {subDirection === 'buyer' ? 'Bought from (top sources)' : 'Sold to (top destinations)'}
+                          <ColHeader label="Active Period" tooltip="Date range from this vehicle's first to most recent filing in the county record." />
+                        </th>
+                        <th className="px-3 py-2.5 text-left font-medium">
+                          <ColHeader label={subDirection === 'buyer' ? 'Bought from (top sources)' : 'Sold to (top destinations)'} tooltip={subDirection === 'buyer' ? 'The entities most frequently appearing as the seller on the other side of this vehicle\'s acquisitions.' : 'The entities most frequently appearing as the buyer on the other side of this vehicle\'s dispositions.'} />
                         </th>
                       </tr>
                     </thead>
@@ -543,11 +558,21 @@ export default function EntityDetailPanel({ entityName, onClose, onNavigate }: P
               <table className="w-full text-xs">
                 <thead className="border-b border-border bg-muted/20">
                   <tr className="text-muted-foreground">
-                    <th className="px-3 py-2.5 text-left font-medium">CFN</th>
-                    <th className="px-3 py-2.5 text-left font-medium">Date</th>
-                    <th className="px-3 py-2.5 text-left font-medium">Assigned To (Buyer)</th>
-                    <th className="px-3 py-2.5 text-center font-medium">Direction</th>
-                    <th className="px-3 py-2.5 text-left font-medium">Book / Page</th>
+                    <th className="px-3 py-2.5 text-left font-medium">
+                      <ColHeader label="CFN" tooltip="County Filing Number — the unique ID assigned by the Miami-Dade Clerk when the document was recorded. Click to view the original filing." />
+                    </th>
+                    <th className="px-3 py-2.5 text-left font-medium">
+                      <ColHeader label="Date" tooltip="Recording date — when the assignment was stamped by the Miami-Dade County Clerk." />
+                    </th>
+                    <th className="px-3 py-2.5 text-left font-medium">
+                      <ColHeader label="Assigned To (Buyer)" tooltip="The entity that received the mortgage from this entity. They now hold the right to collect payments or foreclose. Patterns here reveal this entity's preferred buyers or transfer strategy." />
+                    </th>
+                    <th className="px-3 py-2.5 text-center font-medium">
+                      <ColHeader label="Direction" tooltip="Shows the flow of the assignment. 'You →' means this entity assigned (sold) the mortgage outward." />
+                    </th>
+                    <th className="px-3 py-2.5 text-left font-medium">
+                      <ColHeader label="Book / Page" tooltip="Miami-Dade Official Records locator — the book and page number of the recorded instrument." />
+                    </th>
                   </tr>
                 </thead>
                 <tbody>

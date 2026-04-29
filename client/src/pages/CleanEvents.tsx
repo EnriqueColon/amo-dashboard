@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import CategoryBadge from '@/components/CategoryBadge';
+import ColHeader from '@/components/ColHeader';
 import {
   ChevronLeft, ChevronRight, Search, X, CheckCircle,
   ArrowRight, Info, TrendingUp, TrendingDown, Users, Filter, ChevronDown, ChevronUp,
@@ -445,29 +446,37 @@ export default function CleanEvents() {
           <table className="w-full text-xs">
             <thead className="border-b border-border bg-muted/20">
               <tr className="text-muted-foreground">
-                <th className="px-3 py-2.5 text-left font-medium">CFN</th>
-                <th className="px-3 py-2.5 text-left font-medium">Date</th>
+                <th className="px-3 py-2.5 text-left font-medium">
+                  <ColHeader label="CFN" tooltip="County Filing Number — the unique ID assigned by the Miami-Dade Clerk when the document was officially recorded. Click the CFN link to view the original document in the county portal." />
+                </th>
+                <th className="px-3 py-2.5 text-left font-medium">
+                  <ColHeader label="Date" tooltip="Recording date — when the assignment was stamped by the Miami-Dade County Clerk. Slightly later than the execution/signing date on the document itself." />
+                </th>
                 <th className="px-3 py-2.5 text-left font-medium">
                   <span className="flex items-center gap-1">
                     <TrendingUp size={10} className="text-orange-400" />
-                    Assignor <span className="text-muted-foreground/60 font-normal">(Seller)</span>
+                    <ColHeader label={<>Assignor <span className="text-muted-foreground/60 font-normal">(Seller)</span></>} tooltip="The party transferring/selling the mortgage. This entity gives up the right to collect or enforce the debt. Institutional assignors (banks, servicers, PE funds) are the primary signal for market activity." />
                   </span>
                 </th>
                 <th className="px-3 py-2.5 text-center font-medium w-6"></th>
                 <th className="px-3 py-2.5 text-left font-medium">
                   <span className="flex items-center gap-1">
                     <TrendingDown size={10} className="text-blue-400" />
-                    Assignee <span className="text-muted-foreground/60 font-normal">(Buyer)</span>
+                    <ColHeader label={<>Assignee <span className="text-muted-foreground/60 font-normal">(Buyer)</span></>} tooltip="The party receiving/buying the mortgage. This entity now holds the right to collect payments or foreclose. Tracking institutional assignees reveals who is actively acquiring mortgage debt." />
                   </span>
                 </th>
-                <th className="px-3 py-2.5 text-left font-medium">Type</th>
+                <th className="px-3 py-2.5 text-left font-medium">
+                  <ColHeader label="Type" tooltip="Transaction classification: Market Transfer (institution→institution), Origination (individual→institution, new supply entering), MERS Release (registry housekeeping), Self-Assign (administrative, same entity both sides), Inst. Out (institution→individual, e.g. REO/payoff), or Private (individual→individual)." />
+                </th>
                 <th className="px-3 py-2.5 text-center font-medium">
-                  <span className="flex items-center justify-center gap-1" title="Total parties on the filing">
+                  <span className="flex items-center justify-center gap-1">
                     <Users size={10} />
-                    Parties
+                    <ColHeader label="Parties" tooltip="Number of parties named on the original county filing document. Most assignments are 2-party (one seller, one buyer); more parties indicate co-assignments or complex structured deals." />
                   </span>
                 </th>
-                <th className="px-3 py-2.5 text-left font-medium">Book / Page</th>
+                <th className="px-3 py-2.5 text-left font-medium">
+                  <ColHeader label="Book / Page" tooltip="Miami-Dade Official Records locator — the book and page number of the recorded instrument. Used internally by the Clerk's office as an alternate document reference." />
+                </th>
               </tr>
             </thead>
             <tbody>

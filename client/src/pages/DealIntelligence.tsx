@@ -4,6 +4,7 @@ import { apiRequest } from '@/lib/queryClient';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import CategoryBadge from '@/components/CategoryBadge';
+import ColHeader from '@/components/ColHeader';
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip, Legend,
   ResponsiveContainer, CartesianGrid, Cell, ReferenceArea,
@@ -1106,17 +1107,29 @@ export default function DealIntelligence() {
           <table className="w-full text-xs">
             <thead className="border-b border-border bg-muted/20">
               <tr className="text-muted-foreground">
-                <th className="px-4 py-2.5 text-left font-medium">CFN</th>
-                <th className="px-4 py-2.5 text-left font-medium">Date</th>
                 <th className="px-4 py-2.5 text-left font-medium">
-                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-500 inline-block" />Bank (Seller)</span>
+                  <ColHeader label="CFN" tooltip="County Filing Number — the unique ID assigned by the Miami-Dade Clerk when the document was officially recorded. Click the CFN to view the original document." />
+                </th>
+                <th className="px-4 py-2.5 text-left font-medium">
+                  <ColHeader label="Date" tooltip="Recording date — when the assignment was stamped by the Miami-Dade County Clerk. Slightly later than the execution date on the document itself." />
+                </th>
+                <th className="px-4 py-2.5 text-left font-medium">
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-500 inline-block" />
+                    <ColHeader label="Bank (Seller)" tooltip="The bank or depository institution transferring the mortgage. Banks sell loans to manage balance-sheet exposure, meet capital requirements, or offload non-performing assets. Frequent selling by a bank signals portfolio stress or strategic exit." />
+                  </span>
                 </th>
                 <th className="px-2 py-2.5 text-center font-medium w-5"></th>
                 <th className="px-4 py-2.5 text-left font-medium">
-                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-purple-500 inline-block" />PE Fund (Buyer)</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-purple-500 inline-block" />
+                    <ColHeader label="PE Fund (Buyer)" tooltip="The private equity or private credit fund acquiring the mortgage. These deals signal active deployment of private capital into the distressed or performing mortgage market — often at a discount to face value." />
+                  </span>
                 </th>
-                <th className="px-4 py-2.5 text-left font-medium">Book / Page</th>
-                <th className="px-4 py-2.5 text-center font-medium w-16">Details</th>
+                <th className="px-4 py-2.5 text-left font-medium">
+                  <ColHeader label="Book / Page" tooltip="Miami-Dade Official Records locator — the book and page number of the recorded instrument. Used as an alternate document reference by the Clerk's office." />
+                </th>
+                <th className="px-4 py-2.5 text-center font-medium w-16">
+                  <ColHeader label="Details" tooltip="Click to open the full transaction detail panel, including classification rationale, counterparty history, and deal context." />
+                </th>
               </tr>
             </thead>
             <tbody>

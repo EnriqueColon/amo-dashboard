@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import CategoryBadge from '@/components/CategoryBadge';
 import EntityDetailPanel from '@/components/EntityDetailPanel';
+import ColHeader from '@/components/ColHeader';
 import { Search, ChevronRight, Info, Network } from 'lucide-react';
 
 const TYPE_FILTERS = ['', 'BANK', 'PRIVATE_CREDIT', 'TRUST', 'GSE', 'SERVICER', 'MERS', 'OTHER'];
@@ -86,18 +87,24 @@ export default function Entities() {
             <table className="w-full text-xs">
               <thead className="border-b border-border bg-muted/20">
                 <tr className="text-muted-foreground">
-                  <th className="px-3 py-2.5 text-left font-medium">Entity (Canonical)</th>
-                  <th className="px-3 py-2.5 text-left font-medium">Type</th>
-                  <th className="px-3 py-2.5 text-right font-medium">
-                    <span className="text-orange-600">Received</span>
+                  <th className="px-3 py-2.5 text-left font-medium">
+                    <ColHeader label="Entity (Canonical)" tooltip="The normalized, de-duplicated entity name. Multiple raw filing variants (e.g. 'BANK OF AMERICA N.A.', 'BK OF AMERICA') are merged into one canonical identity for analysis." />
+                  </th>
+                  <th className="px-3 py-2.5 text-left font-medium">
+                    <ColHeader label="Type" tooltip="Entity classification: Bank, Private Credit, Securitization Trust, GSE (government-sponsored), Servicer, MERS (registry), or Other. Used to derive transaction types and market-flow metrics." />
                   </th>
                   <th className="px-3 py-2.5 text-right font-medium">
-                    <span className="text-blue-600">Assigned</span>
+                    <ColHeader label={<span className="text-orange-600">Received</span>} tooltip="Total inbound assignments — times this entity appeared as the Grantee (buyer/receiver) on a Miami-Dade county filing. Includes originations, secondary-market purchases, and MERS releases." />
                   </th>
                   <th className="px-3 py-2.5 text-right font-medium">
-                    <span className="text-purple-600">Counterparties</span>
+                    <ColHeader label={<span className="text-blue-600">Assigned</span>} tooltip="Total outbound assignments — times this entity appeared as the Grantor (seller/transferor) on a filing. High outbound counts relative to inbound suggest net selling or portfolio wind-down." />
                   </th>
-                  <th className="px-3 py-2.5 text-left font-medium pl-4">Active Period</th>
+                  <th className="px-3 py-2.5 text-right font-medium">
+                    <ColHeader label={<span className="text-purple-600">Counterparties</span>} tooltip="Distinct canonical entities this entity has transacted with (either as buyer or seller). A higher number signals broader market participation or active dealer/intermediary behavior." />
+                  </th>
+                  <th className="px-3 py-2.5 text-left font-medium pl-4">
+                    <ColHeader label="Active Period" tooltip="Date span from this entity's first recorded Miami-Dade AMO filing to its most recent one." />
+                  </th>
                   <th className="px-3 py-2.5 text-right font-medium pr-4"></th>
                 </tr>
               </thead>
