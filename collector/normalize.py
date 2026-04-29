@@ -156,8 +156,24 @@ MANUAL_OVERRIDES = [
     (r'BRADESCO', 'BRADESCO BANK'),
     # Space Coast Credit Union (successor to Eastern Financial Federal CU)
     (r'SPACE\s+COAST\s+CREDIT', 'SPACE COAST CREDIT UNION'),
-    # AmeriHome / Western Alliance mortgage arm
-    (r'AMERIHOME\s+MORT', 'AMERIHOME MORTGAGE'),
+    # AmeriHome / Western Alliance mortgage arm (all spelling variants)
+    (r'AMERIHOME\s+M(ORT|TG)', 'AMERIHOME MORTGAGE'),
+    # New Residential Mortgage (servicing subsidiary of Rithm Capital — keep separate from parent REIT)
+    (r'NEW\s+RESIDENTIAL\s+MORTGAGE', 'NEW RESIDENTIAL MORTGAGE'),
+    # MidFirst Bank (large private bank)
+    (r'MIDFIRST', 'MIDFIRST BANK'),
+    # American Bancshares Mortgage (correspondent/originator)
+    (r'AMERICA[N]?\s+BANC\s*SHARES\s+MORTGAGE', 'AMERICAN BANCSHARES MORTGAGE'),
+    # Saluda Grade Mortgage Funding (securitization trust / non-QM funding vehicle)
+    (r'SALUDA\s+GRADE', 'SALUDA GRADE MORTGAGE FUNDING'),
+    # Pacific Life Insurance (large institutional insurer)
+    (r'PACIFIC\s+LIFE\s+INS', 'PACIFIC LIFE INSURANCE'),
+    # MTGLQ Investors (Goldman Sachs NPL acquisition vehicle)
+    (r'MTGLQ', 'MTGLQ INVESTORS'),
+    # Arixa Capital / Arixa Institutional Lending (private bridge lender — consolidate all sub-entities)
+    (r'ARIXA', 'ARIXA CAPITAL'),
+    # Athene Annuity (Apollo-backed institutional insurer / credit investor)
+    (r'ATHENE\s+ANNUITY|ATHENE\s+HOLDING', 'ATHENE ANNUITY'),
     # Truist (BB&T + SunTrust merger)
     (r'TRUIST', 'TRUIST BANK'),
     # Pacific Union Financial
@@ -189,7 +205,7 @@ ENTITY_TYPE_PATTERNS = [
     ('GSE',            r'FANNIE MAE|FREDDIE MAC|GINNIE MAE'),
     # MERS gets its own color in the UI
     ('MERS',           r'^MERS$|MORTGAGE ELECTRONIC'),
-    # Banks (commercial, investment, savings, credit unions)
+    # Banks (commercial, investment, savings, credit unions, institutional insurers acting as lenders)
     ('BANK',           r'WELLS FARGO|JPMORGAN CHASE|BANK OF AMERICA|US BANK|CITIBANK|'
                        r'DEUTSCHE BANK|GOLDMAN SACHS|WILMINGTON SAVINGS|BARCLAYS|'
                        r'MORGAN STANLEY|HSBC|REGIONS|TRUIST BANK|PNC|TD BANK|BB&T|SUNTRUST|'
@@ -201,25 +217,30 @@ ENTITY_TYPE_PATTERNS = [
                        r'FLAGSTAR|HEARTLAND|GLACIER|COLUMBIA BANKING|BANNER BANK|'
                        r'PACIFIC PREMIER|VALLEY NATIONAL|ENTERPRISE BANK|PROVIDENT|'
                        r'BRADESCO BANK|EASTERN FINANCIAL MORTGAGE|SPACE COAST CREDIT UNION|'
-                       r'DLJ MORTGAGE CAPITAL|PACIFIC UNION FINANCIAL|AMERITAS LIFE'),
+                       r'DLJ MORTGAGE CAPITAL|PACIFIC UNION FINANCIAL|AMERITAS LIFE|'
+                       r'MIDFIRST BANK|PACIFIC LIFE INSURANCE'),
     # Securitization trusts / structured finance vehicles
     # These are passive pools of loans — NOT active investment managers.
     ('TRUST',          r'MEB LOAN TRUST|TOWD POINT|CV3 ALPHA TRUST|'
                        r'US MORTGAGE RESOLUTION TRUST|US MTG RESOLUTION|'
                        r'1 SHARPE OPPORTUNITY TRUST|CHURCHILL FUNDING|'
                        r'NWL 2016 EVERGREEN|NWL COMPANY|'
-                       r'FIRSTKEY MORTGAGE|FIRSTKEY HOMES'),
+                       r'FIRSTKEY MORTGAGE|FIRSTKEY HOMES|'
+                       r'SALUDA GRADE MORTGAGE FUNDING'),
     # Private credit / active asset managers / PE funds
+    # NOTE: NEW RESIDENTIAL MORTGAGE (servicing arm) is in SERVICER below.
+    # Only RITHM CAPITAL (the parent REIT) stays here.
     ('PRIVATE_CREDIT', r'OAKTREE|TPG RE|CARLYLE|ATLAS SP|BLACKSTONE|APOLLO|KKR|ARES|'
                        r'PIMCO|CERBERUS|LONE STAR|FORTRESS|ANGELO GORDON|'
                        r'BENEFIT STREET|BAIN CAPITAL|CENTERBRIDGE|BROOKFIELD|'
                        r'STARWOOD|READY CAPITAL|MESA WEST|ACRES CAPITAL|TORCHLIGHT|'
                        r'LADDER CAPITAL|ARBOR REALTY|HUNT REAL ESTATE|'
                        r'BRIDGE INVESTMENT|THETIS ASSET|SCULPTOR|MARATHON ASSET|'
-                       r'RITHM CAPITAL|NEW RESIDENTIAL|ELLINGTON|'
+                       r'RITHM CAPITAL|ELLINGTON|'
                        r'TWO HARBORS|ANNALY|CHIMERA|AG MORTGAGE|CLAROS|'
-                       r'RRA CAPITAL|WATERFALL ASSET|AMERIHOME MORTGAGE|FIXED INCOME USA'),
-    # Mortgage servicers
+                       r'RRA CAPITAL|WATERFALL ASSET|FIXED INCOME USA|'
+                       r'MTGLQ INVESTORS|ARIXA CAPITAL|ATHENE ANNUITY'),
+    # Mortgage servicers and correspondent mortgage originators / banks
     ('SERVICER',       r'NEWREZ|SHELLPOINT|NATIONSTAR|MR\.? COOPER|LAKEVIEW LOAN|'
                        r'PHH MORTGAGE|FREEDOM MORTGAGE|PENNYMAC|SELECT PORTFOLIO|'
                        r'OCWEN|CARRINGTON MORTGAGE|ROUNDPOINT|PLANET HOME|RUSHMORE|'
@@ -229,7 +250,9 @@ ENTITY_TYPE_PATTERNS = [
                        r'COMPUTERSHARE|SOLUTIONSTAR|ALTISOURCE|'
                        r'LOANDEPOT|CALIBER HOME|HOME POINT CAPITAL|'
                        r'ROCKET MORTGAGE|UNITED WHOLESALE|UWM\b|'
-                       r'LOANCORE|CROSSCOUNTRY|CROSS COUNTRY MORTGAGE'),
+                       r'LOANCORE|CROSSCOUNTRY|CROSS COUNTRY MORTGAGE|'
+                       r'AMERIHOME MORTGAGE|NEW RESIDENTIAL MORTGAGE|'
+                       r'AMERICAN BANCSHARES MORTGAGE'),
 ]
 _TYPE_COMPILED = [(t, re.compile(p, re.IGNORECASE)) for t, p in ENTITY_TYPE_PATTERNS]
 

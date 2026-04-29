@@ -74,6 +74,10 @@ MANUAL_OVERRIDES: dict[str, str] = {
     'COMPUTERSHARE TRUST':          'SERVICER',
     'AMERIHOME MORTGAGE':           'SERVICER',
     'PACIFIC UNION FINANCIAL':      'SERVICER',
+    # New Residential Mortgage = servicing subsidiary of Rithm Capital, NOT the parent PE REIT
+    'NEW RESIDENTIAL MORTGAGE':     'SERVICER',
+    # Correspondent originators / mortgage banks
+    'AMERICAN BANCSHARES MORTGAGE': 'SERVICER',
     # ── Banks ────────────────────────────────────────────────────────────────
     'EASTERN FINANCIAL MORTGAGE':   'BANK',
     'EASTERN FINANCIAL':            'BANK',
@@ -82,6 +86,18 @@ MANUAL_OVERRIDES: dict[str, str] = {
     'SPACE COAST CREDIT UNION':     'BANK',
     'DLJ MORTGAGE CAPITAL':         'BANK',
     'TRUIST BANK':                  'BANK',
+    'MIDFIRST BANK':                'BANK',
+    # Pacific Life = large institutional insurer (regulated, not PE)
+    'PACIFIC LIFE INSURANCE':       'BANK',
+    # ── Securitization trusts ────────────────────────────────────────────────
+    'SALUDA GRADE MORTGAGE FUNDING': 'TRUST',
+    # ── Private credit (active managers) ────────────────────────────────────
+    # MTGLQ = Goldman Sachs NPL acquisition vehicle (confirmed PE/credit fund)
+    'MTGLQ INVESTORS':              'PRIVATE_CREDIT',
+    # Arixa Capital = private real estate bridge lender
+    'ARIXA CAPITAL':                'PRIVATE_CREDIT',
+    # Athene Annuity = Apollo-backed insurer / structured credit investor
+    'ATHENE ANNUITY':               'PRIVATE_CREDIT',
 }
 
 
