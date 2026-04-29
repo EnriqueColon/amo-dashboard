@@ -69,12 +69,12 @@ function DateRangePicker({ range, onChange }: {
   };
   const priorLabel = useMemo(() => {
     if (!range.start || !range.end) return null;
-    const startMs = new Date(range.start).getTime();
-    const endMs   = new Date(range.end).getTime();
-    const days = Math.round((endMs - startMs) / 86400000);
-    const priorEnd   = toISO(new Date(startMs - 86400000));
-    const priorStart = toISO(new Date(startMs - 86400000 - days * 86400000));
-    return `vs. ${fmtDate(priorStart)} – ${fmtDate(priorEnd)} (prior ${days}d)`;
+    const shiftYear = (iso: string) => {
+      const d = new Date(iso); d.setFullYear(d.getFullYear() - 1); return toISO(d);
+    };
+    const priorStart = shiftYear(range.start);
+    const priorEnd   = shiftYear(range.end);
+    return `vs. ${fmtDate(priorStart)} – ${fmtDate(priorEnd)} (prior year)`;
   }, [range.start, range.end]);
 
   return (
@@ -710,17 +710,14 @@ export default function DealIntelligence() {
 
   const prior = (summary as any)?.prior;
 
-  // Derived prior period dates for chart annotations
+  // Derived prior period dates = same window one year earlier (year-over-year)
   const { priorStart, priorEnd } = useMemo(() => {
     if (!dateRange.start || !dateRange.end || dateRange.preset === 'all')
       return { priorStart: '', priorEnd: '' };
-    const startMs = new Date(dateRange.start).getTime();
-    const endMs   = new Date(dateRange.end).getTime();
-    const days = Math.round((endMs - startMs) / 86400000);
-    return {
-      priorStart: toISO(new Date(startMs - 86400000 - days * 86400000)),
-      priorEnd:   toISO(new Date(startMs - 86400000)),
+    const shiftYear = (iso: string) => {
+      const d = new Date(iso); d.setFullYear(d.getFullYear() - 1); return toISO(d);
     };
+    return { priorStart: shiftYear(dateRange.start), priorEnd: shiftYear(dateRange.end) };
   }, [dateRange]);
 
   // Max values for bar chart scaling

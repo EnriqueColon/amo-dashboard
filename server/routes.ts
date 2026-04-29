@@ -643,16 +643,21 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   };
 
   // ── Date range helper ────────────────────────────────────────────────────
+  function shiftOneYearBack(iso: string): string {
+    const d = new Date(iso);
+    d.setUTCFullYear(d.getUTCFullYear() - 1);
+    return d.toISOString().slice(0, 10);
+  }
+
   function parseDateRange(query: Record<string, string>) {
     const start = query.start_date?.trim() || '';
     const end   = query.end_date?.trim()   || '';
     const valid = /^\d{4}-\d{2}-\d{2}$/.test(start) && /^\d{4}-\d{2}-\d{2}$/.test(end);
     if (!valid) return { hasFilter: false, start: '', end: '', priorStart: '', priorEnd: '', days: 0 };
-    const startMs = new Date(start).getTime();
-    const endMs   = new Date(end).getTime();
-    const days = Math.max(1, Math.round((endMs - startMs) / 86400000));
-    const priorEnd   = new Date(startMs - 86400000).toISOString().slice(0, 10);
-    const priorStart = new Date(startMs - 86400000 - days * 86400000).toISOString().slice(0, 10);
+    const days = Math.max(1, Math.round((new Date(end).getTime() - new Date(start).getTime()) / 86400000));
+    // Prior period = same calendar window one year earlier (year-over-year comparison)
+    const priorStart = shiftOneYearBack(start);
+    const priorEnd   = shiftOneYearBack(end);
     return { hasFilter: true, start, end, priorStart, priorEnd, days };
   }
 
