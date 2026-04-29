@@ -5,7 +5,7 @@ import CategoryBadge from './CategoryBadge';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   X, ArrowRight, TrendingUp, TrendingDown, Network,
-  Calendar, ChevronDown, ChevronUp,
+  Calendar, ChevronDown, ChevronUp, Layers, Info,
 } from 'lucide-react';
 
 // ── Stat pill ─────────────────────────────────────────────────────────────────
@@ -69,6 +69,78 @@ function TxnRow({ r, direction }: { r: any; direction: 'in' | 'out' }) {
   );
 }
 
+// ── Sub-entity row (expandable) ───────────────────────────────────────────────
+function SubEntityRow({ sub, direction }: { sub: any; direction: 'buyer' | 'seller' }) {
+  const [open, setOpen] = useState(false);
+  const dirColor  = direction === 'buyer' ? 'text-orange-500' : 'text-blue-500';
+  const dirLabel  = direction === 'buyer' ? 'bought from' : 'sold to';
+
+  return (
+    <>
+      <tr
+        onClick={() => setOpen(v => !v)}
+        className="border-b border-border/40 hover:bg-muted/20 cursor-pointer transition-colors group"
+      >
+        <td className="px-3 py-2.5 max-w-[240px]">
+          <div className="flex items-center gap-1.5">
+            {open
+              ? <ChevronUp size={11} className="text-muted-foreground/60 shrink-0" />
+              : <ChevronDown size={11} className="text-muted-foreground/60 shrink-0" />}
+            <span className="font-mono text-[11px] text-foreground truncate group-hover:text-primary transition-colors" title={sub.raw_name}>
+              {sub.raw_name}
+            </span>
+          </div>
+        </td>
+        <td className="px-3 py-2.5 text-right">
+          <span className={`font-mono text-xs font-semibold ${dirColor}`}>{sub.txn_count}</span>
+        </td>
+        <td className="px-3 py-2.5 text-muted-foreground text-[11px] whitespace-nowrap">
+          {sub.first_seen} → {sub.last_seen}
+        </td>
+        <td className="px-3 py-2.5">
+          {sub.counterparties.slice(0, 3).map((cp: any) => (
+            <div key={cp.entity} className="flex items-center gap-1 text-[10px]">
+              <span className="text-muted-foreground/60">{dirLabel}</span>
+              <span className="font-medium text-foreground truncate max-w-[130px]" title={cp.entity}>{cp.entity}</span>
+              <span className="text-muted-foreground/50 font-mono">({cp.n})</span>
+            </div>
+          ))}
+          {sub.counterparties.length === 0 && (
+            <span className="text-[10px] text-muted-foreground/40 italic">no data</span>
+          )}
+        </td>
+      </tr>
+      {open && (
+        <tr className="border-b border-border/30 bg-muted/10">
+          <td colSpan={4} className="px-5 py-3">
+            <p className="text-[10px] text-muted-foreground mb-2 font-medium uppercase tracking-wide">
+              {direction === 'buyer' ? 'All sellers into this vehicle' : 'All buyers from this vehicle'}
+            </p>
+            <div className="space-y-1.5">
+              {sub.counterparties.length === 0 && (
+                <p className="text-[11px] text-muted-foreground italic">No counterparty data available.</p>
+              )}
+              {sub.counterparties.map((cp: any) => (
+                <div key={cp.entity} className="flex items-center gap-2 text-[11px]">
+                  <div className="w-[180px] shrink-0 font-medium text-foreground truncate" title={cp.entity}>{cp.entity}</div>
+                  <div className="flex-1 h-1.5 bg-muted/30 rounded-full overflow-hidden max-w-[120px]">
+                    <div
+                      className={`h-full rounded-full ${direction === 'buyer' ? 'bg-orange-400/60' : 'bg-blue-400/60'}`}
+                      style={{ width: `${Math.min(100, (cp.n / sub.counterparties[0]?.n) * 100)}%` }}
+                    />
+                  </div>
+                  <span className="font-mono text-muted-foreground w-6 text-right">{cp.n}</span>
+                  <CategoryBadge category={cp.type} size="xs" />
+                </div>
+              ))}
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
 // ── Main panel ────────────────────────────────────────────────────────────────
 interface Props {
   entityName: string;
@@ -77,14 +149,22 @@ interface Props {
 }
 
 export default function EntityDetailPanel({ entityName, onClose, onNavigate }: Props) {
-  const [tab, setTab] = useState<'overview' | 'inbound' | 'outbound'>('overview');
+  const [tab, setTab] = useState<'overview' | 'inbound' | 'outbound' | 'sub-entities'>('overview');
   const [inboundExpanded, setInboundExpanded] = useState(true);
   const [outboundExpanded, setOutboundExpanded] = useState(true);
+  const [subDirection, setSubDirection] = useState<'buyer' | 'seller'>('buyer');
 
   const { data, isLoading } = useQuery({
     queryKey: ['/api/entity', entityName],
     queryFn: () => apiRequest('GET', `/api/entity/${encodeURIComponent(entityName)}`).then(r => r.json()),
     enabled: !!entityName,
+  });
+
+  const { data: subData, isLoading: subLoading } = useQuery({
+    queryKey: ['/api/entity-sub', entityName],
+    queryFn: () => apiRequest('GET', `/api/entity/${encodeURIComponent(entityName)}/sub-entities`).then(r => r.json()),
+    enabled: !!entityName && tab === 'sub-entities',
+    staleTime: 10 * 60 * 1000,
   });
 
   const node = data?.node;
@@ -95,6 +175,13 @@ export default function EntityDetailPanel({ entityName, onClose, onNavigate }: P
   const topReceivers: any[] = data?.top_receivers ?? [];
   const maxSender = topSenders[0]?.txn_count ?? 1;
   const maxReceiver = topReceivers[0]?.txn_count ?? 1;
+
+  const buyerSubs: any[]  = subData?.buyer_subs  ?? [];
+  const sellerSubs: any[] = subData?.seller_subs ?? [];
+  const activeSubs = subDirection === 'buyer' ? buyerSubs : sellerSubs;
+  // Unique raw name count (a name may appear in both buyer and seller subs)
+  const uniqueRawNames = new Set([...buyerSubs.map((s: any) => s.raw_name), ...sellerSubs.map((s: any) => s.raw_name)]);
+  const subCount = tab === 'sub-entities' && !subLoading ? uniqueRawNames.size : null;
 
   return (
     <div className="fixed inset-0 z-50 flex">
@@ -152,11 +239,12 @@ export default function EntityDetailPanel({ entityName, onClose, onNavigate }: P
         )}
 
         {/* ── Tabs ─────────────────────────────────────────────────────── */}
-        <div className="flex border-b border-border shrink-0 px-5">
+        <div className="flex border-b border-border shrink-0 px-5 overflow-x-auto">
           {([
-            { id: 'overview', label: 'Overview', icon: Network },
-            { id: 'inbound',  label: `Inbound (${inbound.length}${inbound.length===500?'+':''})`,   icon: TrendingDown },
-            { id: 'outbound', label: `Outbound (${outbound.length}${outbound.length===500?'+':''})`, icon: TrendingUp },
+            { id: 'overview',      label: 'Overview',  icon: Network },
+            { id: 'sub-entities',  label: `Sub-entities${subCount !== null ? ` (${subCount})` : ''}`, icon: Layers },
+            { id: 'inbound',       label: `Inbound (${inbound.length}${inbound.length===500?'+':''})`,   icon: TrendingDown },
+            { id: 'outbound',      label: `Outbound (${outbound.length}${outbound.length===500?'+':''})`, icon: TrendingUp },
           ] as const).map(t => (
             <button
               key={t.id}
@@ -290,6 +378,84 @@ export default function EntityDetailPanel({ entityName, onClose, onNavigate }: P
               </table>
               {inbound.length === 500 && (
                 <div className="px-5 py-3 text-xs text-muted-foreground border-t border-border">Showing first 500 records.</div>
+              )}
+            </div>
+          )}
+
+          {/* SUB-ENTITIES TAB */}
+          {tab === 'sub-entities' && (
+            <div className="flex flex-col h-full">
+              {/* Explainer */}
+              <div className="px-5 py-3 bg-muted/10 border-b border-border/50 flex items-start gap-2">
+                <Info size={12} className="text-primary mt-0.5 shrink-0" />
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  <strong className="text-foreground">Sub-entities</strong> are the distinct legal vehicles (raw name variants) that appear
+                  in county records under the <span className="text-primary font-medium">{entityName}</span> canonical umbrella.
+                  For trusts like TOWD POINT, each numbered series is a separate legal issuer but the same economic actor.
+                  Understanding <em>which vehicle</em> buys from whom — and when — reveals how the program deploys capital across vintages.
+                </p>
+              </div>
+
+              {/* Buyer / Seller toggle */}
+              <div className="flex items-center gap-2 px-5 py-2.5 border-b border-border/50 shrink-0">
+                <span className="text-[10px] text-muted-foreground mr-1">Role:</span>
+                {(['buyer', 'seller'] as const).map(d => (
+                  <button
+                    key={d}
+                    onClick={() => setSubDirection(d)}
+                    className={`px-3 py-1 rounded text-[11px] font-medium border transition-colors ${
+                      subDirection === d
+                        ? d === 'buyer' ? 'bg-orange-500/10 text-orange-600 border-orange-300' : 'bg-blue-500/10 text-blue-600 border-blue-300'
+                        : 'border-border text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    {d === 'buyer' ? `▼ As Buyer (${buyerSubs.length})` : `▲ As Seller (${sellerSubs.length})`}
+                  </button>
+                ))}
+                {!subLoading && (
+                  <span className="ml-auto text-[10px] text-muted-foreground">
+                    {activeSubs.length} vehicle{activeSubs.length !== 1 ? 's' : ''} · {activeSubs.reduce((s: number, r: any) => s + r.txn_count, 0).toLocaleString()} transactions
+                  </span>
+                )}
+              </div>
+
+              {/* Table */}
+              {subLoading ? (
+                <div className="p-5 space-y-2">
+                  {Array(8).fill(0).map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}
+                </div>
+              ) : activeSubs.length === 0 ? (
+                <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm p-10 text-center">
+                  <div>
+                    <Layers size={32} className="mx-auto mb-2 text-muted-foreground/30" />
+                    <p>No sub-entity data found for this role.</p>
+                    <p className="text-xs mt-1 text-muted-foreground/60">Try switching to the other role above.</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex-1 overflow-y-auto">
+                  <table className="w-full text-xs">
+                    <thead className="border-b border-border bg-muted/20 sticky top-0 z-10">
+                      <tr className="text-muted-foreground">
+                        <th className="px-3 py-2.5 text-left font-medium">Legal Vehicle (Raw Name)</th>
+                        <th className="px-3 py-2.5 text-right font-medium">
+                          {subDirection === 'buyer'
+                            ? <span className="text-orange-500">Acquisitions</span>
+                            : <span className="text-blue-500">Dispositions</span>}
+                        </th>
+                        <th className="px-3 py-2.5 text-left font-medium">Active Period</th>
+                        <th className="px-3 py-2.5 text-left font-medium">
+                          {subDirection === 'buyer' ? 'Bought from (top sources)' : 'Sold to (top destinations)'}
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {activeSubs.map((sub: any) => (
+                        <SubEntityRow key={sub.raw_name} sub={sub} direction={subDirection} />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </div>
           )}

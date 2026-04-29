@@ -303,6 +303,85 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     res.json({ name, node, classification, as_grantee, as_grantor, top_senders, top_receivers });
   });
 
+  // ─── GET /api/entity/:name/sub-entities ───────────────────────────────────
+  // Returns all raw name variants (legal vehicles) that canonicalize to this entity,
+  // with transaction counts, date ranges, and top counterparties per variant.
+  app.get('/api/entity/:name/sub-entities', (req, res) => {
+    const name = decodeURIComponent(req.params.name);
+    const cacheKey = `/api/entity/${name}/sub-entities`;
+    const cached = getCached(cacheKey);
+    if (cached) return res.json(cached);
+
+    // All raw names that appear as buyer (assignee) under this canonical
+    const buyerSubs = db.prepare(`
+      SELECT assignee AS raw_name,
+             COUNT(*)            AS txn_count,
+             MIN(rec_date)       AS first_seen,
+             MAX(rec_date)       AS last_seen,
+             assignee_type       AS entity_type
+      FROM aom_events_clean
+      WHERE assignee_canon = ?
+      GROUP BY assignee
+      ORDER BY txn_count DESC
+      LIMIT 100
+    `).all(name) as any[];
+
+    // Top sellers into each buyer sub-entity
+    const buyerCounterparties = db.prepare(`
+      SELECT assignee AS sub_name, assignor_canon AS counterparty,
+             assignor_type AS counterparty_type, COUNT(*) AS n
+      FROM aom_events_clean
+      WHERE assignee_canon = ?
+      GROUP BY assignee, assignor_canon
+      ORDER BY assignee, n DESC
+    `).all(name) as any[];
+
+    // All raw names that appear as seller (assignor) under this canonical
+    const sellerSubs = db.prepare(`
+      SELECT assignor AS raw_name,
+             COUNT(*)        AS txn_count,
+             MIN(rec_date)   AS first_seen,
+             MAX(rec_date)   AS last_seen,
+             assignor_type   AS entity_type
+      FROM aom_events_clean
+      WHERE assignor_canon = ?
+      GROUP BY assignor
+      ORDER BY txn_count DESC
+      LIMIT 100
+    `).all(name) as any[];
+
+    // Top buyers from each seller sub-entity
+    const sellerCounterparties = db.prepare(`
+      SELECT assignor AS sub_name, assignee_canon AS counterparty,
+             assignee_type AS counterparty_type, COUNT(*) AS n
+      FROM aom_events_clean
+      WHERE assignor_canon = ?
+      GROUP BY assignor, assignee_canon
+      ORDER BY assignor, n DESC
+    `).all(name) as any[];
+
+    // Attach top counterparties (max 5 per sub) to each sub-entity row
+    const buyerCpMap = new Map<string, any[]>();
+    for (const r of buyerCounterparties) {
+      if (!buyerCpMap.has(r.sub_name)) buyerCpMap.set(r.sub_name, []);
+      const arr = buyerCpMap.get(r.sub_name)!;
+      if (arr.length < 5) arr.push({ entity: r.counterparty, type: r.counterparty_type, n: r.n });
+    }
+    const sellerCpMap = new Map<string, any[]>();
+    for (const r of sellerCounterparties) {
+      if (!sellerCpMap.has(r.sub_name)) sellerCpMap.set(r.sub_name, []);
+      const arr = sellerCpMap.get(r.sub_name)!;
+      if (arr.length < 5) arr.push({ entity: r.counterparty, type: r.counterparty_type, n: r.n });
+    }
+
+    const buyer_subs  = buyerSubs.map(s  => ({ ...s, counterparties: buyerCpMap.get(s.raw_name)  ?? [] }));
+    const seller_subs = sellerSubs.map(s => ({ ...s, counterparties: sellerCpMap.get(s.raw_name) ?? [] }));
+
+    const payload = { name, buyer_subs, seller_subs };
+    setCached(cacheKey, payload, 30 * 60 * 1000);
+    res.json(payload);
+  });
+
   // ─── GET /api/collection-log ──────────────────────────────────────────────
   app.get('/api/collection-log', (_req, res) => {
     const KEY = '/api/collection-log';
