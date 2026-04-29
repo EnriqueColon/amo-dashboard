@@ -495,14 +495,14 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     instOutTotal: db.prepare(`SELECT COUNT(*) as n FROM aom_events_clean WHERE txn_type='INSTITUTIONAL_OUT'`),
     netSellersCount: db.prepare(`
       SELECT COUNT(*) as n FROM entity_nodes
-      WHERE entity_type IN ('BANK','SERVICER')
+      WHERE entity_type IN ('BANK','SERVICER','TRUST')
         AND outbound_vol > inbound_vol * 1.5
         AND total_vol >= 20
     `),
     activePeBuyers: db.prepare(`
       SELECT COUNT(DISTINCT assignee_canon) as n FROM aom_events_clean
       WHERE assignee_type='PRIVATE_CREDIT'
-        AND assignor_type IN ('BANK','SERVICER','GSE')
+        AND assignor_type IN ('BANK','SERVICER','GSE','TRUST')
     `),
     sellerPressure: db.prepare(`
       SELECT entity, entity_type,
@@ -510,7 +510,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
              (outbound_vol - inbound_vol) AS net_outbound,
              first_seen, last_seen
       FROM entity_nodes
-      WHERE entity_type IN ('BANK','SERVICER')
+      WHERE entity_type IN ('BANK','SERVICER','TRUST')
         AND total_vol >= 20
       ORDER BY net_outbound DESC
       LIMIT 25

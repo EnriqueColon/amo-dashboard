@@ -7,7 +7,7 @@ import CategoryBadge from '@/components/CategoryBadge';
 import EntityDetailPanel from '@/components/EntityDetailPanel';
 import { Search, ChevronRight, Info, Network } from 'lucide-react';
 
-const TYPE_FILTERS = ['', 'BANK', 'PRIVATE_CREDIT', 'GSE', 'SERVICER', 'MERS', 'OTHER'];
+const TYPE_FILTERS = ['', 'BANK', 'PRIVATE_CREDIT', 'TRUST', 'GSE', 'SERVICER', 'MERS', 'OTHER'];
 
 export default function Entities() {
   const [search, setSearch] = useState('');

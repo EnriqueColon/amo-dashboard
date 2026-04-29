@@ -83,6 +83,17 @@ function getTransactionNarrative(row: {
       icon: Repeat2,
       accentClass: 'text-emerald-400',
     };
+    if (at === 'TRUST' || bt === 'TRUST') {
+      const trustName = at === 'TRUST' ? assignor_canon : assignee_canon;
+      const trustDir  = at === 'TRUST' ? 'selling / winding down' : 'acquiring';
+      return {
+        headline: `Securitization trust ${trustDir}`,
+        what: `${trustName} is a structured finance vehicle — a securitization trust or SPV that holds a pool of mortgage loans, not an active investment manager. It is ${trustDir} this position. These trusts are commonly managed by a bank trustee (e.g. US Bank, Wilmington Savings) on behalf of bond investors.`,
+        why: 'Trust vehicles appear when legacy securitization pools transfer loans — often as part of NPL dispositions, trust unwinds, or resolution processes. Activity here signals distressed loan supply entering or leaving structured vehicles.',
+        icon: TrendingUp,
+        accentClass: 'text-teal-500',
+      };
+    }
     if (at === 'PRIVATE_CREDIT' || bt === 'PRIVATE_CREDIT') {
       const pcName = at === 'PRIVATE_CREDIT' ? assignor_canon : assignee_canon;
       const pcDir  = at === 'PRIVATE_CREDIT' ? 'selling' : 'acquiring';

@@ -9,6 +9,7 @@ import { ChevronLeft, ChevronRight, Search, X } from 'lucide-react';
 
 const CATEGORIES = [
   { value: 'PRIVATE_CREDIT', label: 'Private Credit' },
+  { value: 'TRUST',          label: 'Sec. Trust' },
   { value: 'BANK',           label: 'Bank' },
   { value: 'GSE',            label: 'GSE' },
   { value: 'SERVICER',       label: 'Servicer' },

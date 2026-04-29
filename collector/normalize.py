@@ -202,7 +202,14 @@ ENTITY_TYPE_PATTERNS = [
                        r'PACIFIC PREMIER|VALLEY NATIONAL|ENTERPRISE BANK|PROVIDENT|'
                        r'BRADESCO BANK|EASTERN FINANCIAL MORTGAGE|SPACE COAST CREDIT UNION|'
                        r'DLJ MORTGAGE CAPITAL|PACIFIC UNION FINANCIAL|AMERITAS LIFE'),
-    # Private credit / asset managers / structured credit trusts
+    # Securitization trusts / structured finance vehicles
+    # These are passive pools of loans — NOT active investment managers.
+    ('TRUST',          r'MEB LOAN TRUST|TOWD POINT|CV3 ALPHA TRUST|'
+                       r'US MORTGAGE RESOLUTION TRUST|US MTG RESOLUTION|'
+                       r'1 SHARPE OPPORTUNITY TRUST|CHURCHILL FUNDING|'
+                       r'NWL 2016 EVERGREEN|NWL COMPANY|'
+                       r'FIRSTKEY MORTGAGE|FIRSTKEY HOMES'),
+    # Private credit / active asset managers / PE funds
     ('PRIVATE_CREDIT', r'OAKTREE|TPG RE|CARLYLE|ATLAS SP|BLACKSTONE|APOLLO|KKR|ARES|'
                        r'PIMCO|CERBERUS|LONE STAR|FORTRESS|ANGELO GORDON|'
                        r'BENEFIT STREET|BAIN CAPITAL|CENTERBRIDGE|BROOKFIELD|'
@@ -211,8 +218,7 @@ ENTITY_TYPE_PATTERNS = [
                        r'BRIDGE INVESTMENT|THETIS ASSET|SCULPTOR|MARATHON ASSET|'
                        r'RITHM CAPITAL|NEW RESIDENTIAL|ELLINGTON|'
                        r'TWO HARBORS|ANNALY|CHIMERA|AG MORTGAGE|CLAROS|'
-                       r'TOWD POINT|MEB LOAN TRUST|RRA CAPITAL|1 SHARPE OPPORTUNITY|'
-                       r'WATERFALL ASSET|AMERIHOME MORTGAGE|FIXED INCOME USA'),
+                       r'RRA CAPITAL|WATERFALL ASSET|AMERIHOME MORTGAGE|FIXED INCOME USA'),
     # Mortgage servicers
     ('SERVICER',       r'NEWREZ|SHELLPOINT|NATIONSTAR|MR\.? COOPER|LAKEVIEW LOAN|'
                        r'PHH MORTGAGE|FREEDOM MORTGAGE|PENNYMAC|SELECT PORTFOLIO|'
@@ -235,7 +241,7 @@ def classify_canonical(name: str) -> str:
             return etype
     return 'OTHER'
 
-_INST_TYPES = {'BANK', 'SERVICER', 'PRIVATE_CREDIT', 'GSE'}
+_INST_TYPES = {'BANK', 'SERVICER', 'PRIVATE_CREDIT', 'GSE', 'TRUST'}
 
 def get_txn_type(assignor_canon: str, assignee_canon: str,
                  assignor_type: str, assignee_type: str) -> str:
@@ -535,12 +541,12 @@ def build_normalized_tables():
         CASE
             WHEN assignor_canon = assignee_canon THEN 'SELF_ASSIGN'
             WHEN assignor_type  = 'MERS'         THEN 'MERS_RELEASE'
-            WHEN assignor_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE')
-             AND assignee_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE') THEN 'MARKET_TRANSFER'
-            WHEN assignor_type NOT IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','MERS')
-             AND assignee_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE') THEN 'ORIGINATION'
-            WHEN assignor_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE')
-             AND assignee_type NOT IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','MERS') THEN 'INSTITUTIONAL_OUT'
+            WHEN assignor_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST')
+             AND assignee_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST') THEN 'MARKET_TRANSFER'
+            WHEN assignor_type NOT IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST','MERS')
+             AND assignee_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST') THEN 'ORIGINATION'
+            WHEN assignor_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST')
+             AND assignee_type NOT IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST','MERS') THEN 'INSTITUTIONAL_OUT'
             ELSE 'PRIVATE'
         END
     """)

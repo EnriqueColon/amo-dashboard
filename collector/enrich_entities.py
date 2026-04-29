@@ -21,7 +21,7 @@ OPENAI_KEY = os.environ.get('OPENAI_API_KEY', '')
 MIN_VOL    = 3      # skip entities with fewer total transactions
 BATCH_SIZE = 60     # names per GPT request
 
-VALID_TYPES = {'BANK', 'SERVICER', 'PRIVATE_CREDIT', 'GSE', 'MERS', 'OTHER'}
+VALID_TYPES = {'BANK', 'SERVICER', 'PRIVATE_CREDIT', 'GSE', 'MERS', 'TRUST', 'OTHER'}
 
 # ── Fast rule-based pre-classification ────────────────────────────────────────
 GSE_PATTERN = re.compile(
@@ -36,56 +36,52 @@ MERS_PATTERN = re.compile(r'^MERS$|MORTGAGE ELECTRONIC', re.IGNORECASE)
 # ── Manual overrides — corrections that the LLM gets wrong ────────────────────
 # Applied BEFORE the LLM pass; these always win.
 MANUAL_OVERRIDES: dict[str, str] = {
-    # Bridge / private lenders misclassified as SERVICER
+    # ── Securitization trusts / structured finance vehicles ──────────────────
+    # These are PASSIVE pools of loans held in trust, not active investment firms.
+    'MEB LOAN TRUST':               'TRUST',
+    'TOWD POINT':                   'TRUST',
+    'CV3 ALPHA TRUST':              'TRUST',
+    'US MORTGAGE RESOLUTION TRUST': 'TRUST',
+    'US RESOLUTION':                'TRUST',
+    'US MTG RESOLUTION':            'TRUST',
+    '1 SHARPE OPPORTUNITY TRUST':   'TRUST',
+    'CHURCHILL FUNDING I':          'TRUST',
+    'NWL 2016 EVERGREEN':           'TRUST',
+    'NWL COMPANY':                  'TRUST',
+    'FIRSTKEY MORTGAGE':            'TRUST',
+    'FIRSTKEY HOMES':               'TRUST',
+    # ── Active private credit / asset managers ───────────────────────────────
     'KIAVI FUNDING':                'PRIVATE_CREDIT',
     'ANCHOR LOANS':                 'PRIVATE_CREDIT',
     'FIGURE LENDING':               'PRIVATE_CREDIT',
-    'FIRSTKEY':                     'PRIVATE_CREDIT',
-    'FIRSTKEY MORTGAGE':            'PRIVATE_CREDIT',
     'VELOCITY COMMERCIAL CAPITAL':  'PRIVATE_CREDIT',
     'VELOCITY COMMERCIAL':          'PRIVATE_CREDIT',
     'REVERSE MORTGAGE FUNDING':     'PRIVATE_CREDIT',
-    'FINANCE OF AMERICA REVERSE':   'SERVICER',      # reverse mortgage servicer, not PE
     'ELS HOLDINGS':                 'PRIVATE_CREDIT',
     'ALTO CAPITAL':                 'PRIVATE_CREDIT',
     'CITY FIRST':                   'PRIVATE_CREDIT',
-    'CHURCHILL FUNDING I':          'PRIVATE_CREDIT',
-    'NWL 2016 EVERGREEN':           'PRIVATE_CREDIT',
-    'NWL COMPANY':                  'PRIVATE_CREDIT',
     'PACIFIC ASSET HOLDING':        'PRIVATE_CREDIT',
-    'TOWD POINT':                   'PRIVATE_CREDIT',
     'LADDER CRE FINANCE REIT':      'PRIVATE_CREDIT',
     'BANKWARD':                     'PRIVATE_CREDIT',
-    # Correspondent mortgage banks misclassified as PRIVATE_CREDIT
+    'RRA CAPITAL':                  'PRIVATE_CREDIT',
+    'WATERFALL ASSET MANAGEMENT':   'PRIVATE_CREDIT',
+    'FIXED INCOME USA':             'PRIVATE_CREDIT',
+    # ── Servicers ────────────────────────────────────────────────────────────
+    'FINANCE OF AMERICA REVERSE':   'SERVICER',
     'PARAMOUNT RESIDENTIAL MORTGAGE': 'SERVICER',
     'PARAMOUNT RESIDENTIAL':          'SERVICER',
-    # Citi mortgage-servicing arm misclassified as OTHER
     'CITIMORTGAGE':                 'SERVICER',
     'COMPUTERSHARE TRUST':          'SERVICER',
-    # US Mortgage Resolution entities — distressed debt
-    'US MORTGAGE RESOLUTION TRUST': 'PRIVATE_CREDIT',
-    'US RESOLUTION':                'PRIVATE_CREDIT',
-    # Eastern Financial (South FL credit union mortgage arm) — institutional lender
+    'AMERIHOME MORTGAGE':           'SERVICER',
+    'PACIFIC UNION FINANCIAL':      'SERVICER',
+    # ── Banks ────────────────────────────────────────────────────────────────
     'EASTERN FINANCIAL MORTGAGE':   'BANK',
     'EASTERN FINANCIAL':            'BANK',
-    # Bradesco (Brazilian bank with FL operations)
     'BRADESCO BANK':                'BANK',
     'BRADESCO':                     'BANK',
-    # Space Coast Credit Union (successor to Eastern Financial Federal CU)
     'SPACE COAST CREDIT UNION':     'BANK',
-    # Structured credit / distressed trusts
-    'MEB LOAN TRUST':               'PRIVATE_CREDIT',
-    'RRA CAPITAL':                  'PRIVATE_CREDIT',
-    '1 SHARPE OPPORTUNITY TRUST':   'PRIVATE_CREDIT',
-    'WATERFALL ASSET MANAGEMENT':   'PRIVATE_CREDIT',
-    'AMERIHOME MORTGAGE':           'SERVICER',
-    'FIXED INCOME USA':             'PRIVATE_CREDIT',
-    # DLJ Mortgage Capital (Credit Suisse/UBS legacy vehicle)
     'DLJ MORTGAGE CAPITAL':         'BANK',
-    # Truist
     'TRUIST BANK':                  'BANK',
-    # Pacific Union Financial (correspondent lender)
-    'PACIFIC UNION FINANCIAL':      'SERVICER',
 }
 
 
@@ -108,9 +104,10 @@ Classify each entity name as exactly one of:
 
   BANK           – commercial bank, savings bank, investment bank, trust company, credit union
   SERVICER       – mortgage servicer, loan servicer, mortgage originator / lender
-  PRIVATE_CREDIT – private equity firm, hedge fund, asset manager, or REIT that invests in mortgage/real-estate debt
+  PRIVATE_CREDIT – private equity firm, hedge fund, ACTIVE asset manager, or REIT that invests in mortgage/real-estate debt
   GSE            – government-sponsored enterprise or federal agency (Fannie Mae, Freddie Mac, Ginnie Mae, HUD, FHA, VA, FDIC, SBA)
   MERS           – Mortgage Electronic Registration Systems ONLY
+  TRUST          – securitization vehicle, mortgage loan trust, CLO, structured finance SPV, or resolution trust (e.g. "XYZ Loan Trust", "XYZ Mortgage Trust", "XYZ Opportunity Trust", "ABC Resolution Trust"). These are PASSIVE legal vehicles that hold pools of loans — they are NOT operating companies.
   OTHER          – individual person, small LLC, HOA, law firm, title company, local government, city/county, or truly cannot be determined
 
 Classification rules:
@@ -118,6 +115,7 @@ Classification rules:
 - Generic holding companies with no recognizable brand → OTHER
 - "ASSETS MANAGEMENT" standalone → OTHER
 - If a name contains "BANK" but is clearly a small local LLC → OTHER
+- Any entity whose name ends in "LOAN TRUST", "MORTGAGE TRUST", "ASSET TRUST", or "RESOLUTION TRUST" → TRUST
 - Respond ONLY with a valid JSON array: [{"name":"...","type":"BANK"}, ...]
 - No explanation, no markdown fences, no extra text — only the JSON array."""
 
@@ -273,12 +271,12 @@ def enrich(force_reclassify: bool = False):
             CASE
                 WHEN assignor_canon = assignee_canon THEN 'SELF_ASSIGN'
                 WHEN assignor_type  = 'MERS'         THEN 'MERS_RELEASE'
-                WHEN assignor_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE')
-                 AND assignee_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE') THEN 'MARKET_TRANSFER'
-                WHEN assignor_type NOT IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','MERS')
-                 AND assignee_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE') THEN 'ORIGINATION'
-                WHEN assignor_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE')
-                 AND assignee_type NOT IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','MERS') THEN 'INSTITUTIONAL_OUT'
+                WHEN assignor_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST')
+                 AND assignee_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST') THEN 'MARKET_TRANSFER'
+                WHEN assignor_type NOT IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST','MERS')
+                 AND assignee_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST') THEN 'ORIGINATION'
+                WHEN assignor_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST')
+                 AND assignee_type NOT IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST','MERS') THEN 'INSTITUTIONAL_OUT'
                 ELSE 'PRIVATE'
             END
         """)
