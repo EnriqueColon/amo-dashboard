@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Search, ZoomIn, ZoomOut, RotateCcw, Info, X } from 'lucide-react';
+import { Search, ZoomIn, ZoomOut, RotateCcw, Info, X, BookOpen, ChevronDown, ChevronUp, Move, MousePointer, GitMerge, Sliders } from 'lucide-react';
 import * as d3 from 'd3';
 
 // ── Fuzzy search helpers ────────────────────────────────────────────────────
@@ -96,6 +96,7 @@ export default function MarketRelationships() {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [suggestionIdx, setSuggestionIdx]     = useState(-1);
   const [institutionalOnly, setInstitutionalOnly] = useState(false);
+  const [showGuide, setShowGuide]       = useState(false);
   const [hovered, setHovered]           = useState<NodeDatum | null>(null);
   const [tooltipPos, setTooltipPos]     = useState({ x: 0, y: 0 });
   const [selected, setSelected]         = useState<string | null>(null);
@@ -474,13 +475,107 @@ export default function MarketRelationships() {
           <span>{institutionalOnly ? '⬡ Inst. only' : '⬡ All nodes'}</span>
         </button>
 
-        {/* Zoom controls */}
+        {/* Guide toggle + Zoom controls */}
         <div className="flex items-center gap-1 ml-auto">
+          <button
+            onClick={() => setShowGuide(v => !v)}
+            title="How to read this graph"
+            className={`flex items-center gap-1 h-7 px-2 rounded border text-[10px] transition-colors mr-1
+              ${showGuide ? 'bg-primary/15 text-primary border-primary/40' : 'border-border text-muted-foreground hover:text-foreground'}`}
+          >
+            <BookOpen size={11} />
+            <span className="hidden sm:inline">How to read</span>
+            {showGuide ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+          </button>
           <Button size="sm" variant="ghost" onClick={() => doZoom('in')}  className="h-7 w-7 p-0"><ZoomIn  size={13}/></Button>
           <Button size="sm" variant="ghost" onClick={() => doZoom('out')} className="h-7 w-7 p-0"><ZoomOut size={13}/></Button>
           <Button size="sm" variant="ghost" onClick={() => doZoom('reset')} className="h-7 w-7 p-0"><RotateCcw size={12}/></Button>
         </div>
       </div>
+
+      {/* ── How to read this graph ───────────────────────────────────── */}
+      {showGuide && (
+        <div className="border-b border-border bg-amber-50/60 px-5 py-4 flex-shrink-0">
+          <div className="max-w-5xl space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                  <GitMerge size={13} className="text-primary" />
+                  How to read this graph
+                </h2>
+                <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
+                  This is a <strong>force-directed network</strong> of every canonical entity in the Miami-Dade AMO (Assignment of Mortgage) database.
+                  Each node is an entity; each line is a relationship where assignments have flowed between them.
+                  Self-assignments (same entity on both sides) are excluded to reduce noise.
+                </p>
+              </div>
+              <button onClick={() => setShowGuide(false)} className="text-muted-foreground hover:text-foreground flex-shrink-0 mt-0.5">
+                <X size={13} />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {/* Nodes */}
+              <div className="bg-white/80 border border-border rounded-lg p-3 space-y-1.5">
+                <div className="flex items-center gap-1.5 text-[11px] font-semibold text-foreground">
+                  <span className="w-3 h-3 rounded-full bg-primary/60 inline-block flex-shrink-0" />
+                  Nodes (circles)
+                </div>
+                <ul className="text-[10px] text-muted-foreground space-y-1 leading-relaxed">
+                  <li>• Each circle = one canonical entity (bank, PE fund, servicer, etc.)</li>
+                  <li>• <strong>Size</strong> = total transaction volume — larger circles are more active in the market</li>
+                  <li>• <strong>Color</strong> = entity type (see legend below)</li>
+                </ul>
+              </div>
+
+              {/* Edges */}
+              <div className="bg-white/80 border border-border rounded-lg p-3 space-y-1.5">
+                <div className="flex items-center gap-1.5 text-[11px] font-semibold text-foreground">
+                  <span className="w-6 h-0.5 bg-slate-400 inline-block flex-shrink-0" />
+                  Lines (edges)
+                </div>
+                <ul className="text-[10px] text-muted-foreground space-y-1 leading-relaxed">
+                  <li>• Each line = at least one AMO filing where the two entities transacted</li>
+                  <li>• <strong>Thickness</strong> = number of transactions between the pair — thicker = more deals</li>
+                  <li>• Lines are undirected; direction detail is in the Entities tab</li>
+                </ul>
+              </div>
+
+              {/* Interaction */}
+              <div className="bg-white/80 border border-border rounded-lg p-3 space-y-1.5">
+                <div className="flex items-center gap-1.5 text-[11px] font-semibold text-foreground">
+                  <MousePointer size={11} className="text-primary flex-shrink-0" />
+                  Interaction
+                </div>
+                <ul className="text-[10px] text-muted-foreground space-y-1 leading-relaxed">
+                  <li>• <strong>Hover</strong> a node to see volume, connections, and active dates</li>
+                  <li>• <strong>Click</strong> a node to highlight its direct connections and dim everything else</li>
+                  <li>• <strong>Drag</strong> any node to reposition it manually</li>
+                  <li>• <strong>Scroll / pinch</strong> to zoom; drag the background to pan</li>
+                </ul>
+              </div>
+
+              {/* Filters */}
+              <div className="bg-white/80 border border-border rounded-lg p-3 space-y-1.5">
+                <div className="flex items-center gap-1.5 text-[11px] font-semibold text-foreground">
+                  <Sliders size={11} className="text-primary flex-shrink-0" />
+                  Controls
+                </div>
+                <ul className="text-[10px] text-muted-foreground space-y-1 leading-relaxed">
+                  <li>• <strong>Min txns</strong> — hide edges with fewer than N transactions; raise to declutter</li>
+                  <li>• <strong>Period</strong> — limit to filings within the last 30 or 90 days</li>
+                  <li>• <strong>Focus</strong> — search for an entity to center the graph on it and its neighbors</li>
+                  <li>• <strong>Inst. only</strong> — hide individual/private-party nodes</li>
+                </ul>
+              </div>
+            </div>
+
+            <p className="text-[10px] text-muted-foreground/70 italic">
+              Tip: Start with <strong>Min txns ≥ 20</strong> and <strong>Inst. only</strong> enabled for the clearest view of institutional market activity. Use the Focus search to isolate a specific fund or bank.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* ── Legend ───────────────────────────────────────────────────── */}
       <div className="flex items-center gap-4 px-5 py-1.5 border-b border-border bg-card/60 flex-shrink-0 flex-wrap">
