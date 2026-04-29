@@ -2,6 +2,10 @@ import type { Express } from 'express';
 import type { Server } from 'http';
 import { getDb } from './db';
 import { fetchFDICFinancials } from './fdic';
+import {
+  getCached, setCached, clearCache, getCacheStats,
+  makeCacheKey, DEFAULT_TTL_MS, STATS_TTL_MS,
+} from './cache';
 
 export async function registerRoutes(httpServer: Server, app: Express) {
   const db = getDb();
@@ -81,8 +85,25 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     collectionLog:       db.prepare('SELECT date_from, date_to, records_found, status FROM collection_log ORDER BY date_from DESC'),
   };
 
+  // ─── POST /api/cache/bust ─────────────────────────────────────────────────
+  // Call this after running normalize.py to immediately serve fresh data.
+  app.post('/api/cache/bust', (_req, res) => {
+    const cleared = clearCache();
+    console.log(`[cache] busted — ${cleared} entries cleared`);
+    res.json({ ok: true, cleared });
+  });
+
+  // ─── GET /api/cache/stats ─────────────────────────────────────────────────
+  app.get('/api/cache/stats', (_req, res) => {
+    res.json(getCacheStats());
+  });
+
   // ─── GET /api/stats ───────────────────────────────────────────────────────
   app.get('/api/stats', (_req, res) => {
+    const KEY = '/api/stats';
+    const cached = getCached(KEY);
+    if (cached) return res.json(cached);
+
     const total               = (stmts.statsTotal.get() as any).n;
     const { min_date, max_date } = stmts.statsRange.get() as any;
     const unique_grantors     = (stmts.statsGrantors.get() as any).n;
@@ -94,14 +115,20 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const txn_breakdown       = stmts.statsTxnBreakdown.all();
     const collection_log_count = (stmts.statsLogCount.get() as any).n;
     const last_collected      = (stmts.statsLastCollected.get() as any)?.dt;
-    // unique_cfns kept for backward compat — raw table enforces 1 row per CFN
     const unique_cfns = total;
-    res.json({ total, unique_cfns, unique_entities, self_assigns, min_date, max_date, unique_grantors, unique_grantees, private_credit_txns, market_transfers, txn_breakdown, collection_log_count, last_collected });
+    const payload = { total, unique_cfns, unique_entities, self_assigns, min_date, max_date, unique_grantors, unique_grantees, private_credit_txns, market_transfers, txn_breakdown, collection_log_count, last_collected };
+    setCached(KEY, payload, STATS_TTL_MS);
+    res.json(payload);
   });
 
   // ─── GET /api/monthly-volume ──────────────────────────────────────────────
   app.get('/api/monthly-volume', (_req, res) => {
-    res.json(stmts.monthlyVolume.all());
+    const KEY = '/api/monthly-volume';
+    const cached = getCached(KEY);
+    if (cached) return res.json(cached);
+    const data = stmts.monthlyVolume.all();
+    setCached(KEY, data);
+    res.json(data);
   });
 
   // ─── GET /api/top-assignors ───────────────────────────────────────────────
@@ -123,17 +150,22 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const limitNum = Math.min(parseInt(limit) || 50, 500);
     const offset = (pageNum - 1) * limitNum;
 
-    let where: string[] = [];
-    let params: any[] = [];
-
-    if (grantor) { where.push("UPPER(a.grantor) LIKE UPPER(?)"); params.push(`%${grantor}%`); }
-    if (grantee) { where.push("UPPER(a.grantee) LIKE UPPER(?)"); params.push(`%${grantee}%`); }
-    if (start_date) { where.push("a.rec_date >= ?"); params.push(start_date); }
-    if (end_date) { where.push("a.rec_date <= ?"); params.push(end_date); }
     // category can be a single string or array (multi-select)
     const categories = category
       ? (Array.isArray(category) ? category : [category])
       : (req.query['category[]'] ? (Array.isArray(req.query['category[]']) ? req.query['category[]'] : [req.query['category[]']]) : []);
+
+    const cacheKey = makeCacheKey('/api/assignments', { grantor, grantee, start_date, end_date, categories, page, limit });
+    const cached = getCached(cacheKey);
+    if (cached) return res.json(cached);
+
+    let where: string[] = [];
+    let params: any[] = [];
+
+    if (grantor)    { where.push("UPPER(a.grantor) LIKE UPPER(?)"); params.push(`%${grantor}%`); }
+    if (grantee)    { where.push("UPPER(a.grantee) LIKE UPPER(?)"); params.push(`%${grantee}%`); }
+    if (start_date) { where.push("a.rec_date >= ?"); params.push(start_date); }
+    if (end_date)   { where.push("a.rec_date <= ?"); params.push(end_date); }
     if (categories.length > 0) {
       const placeholders = categories.map(() => '?').join(', ');
       where.push(`(ec_g.category IN (${placeholders}) OR ec_a.category IN (${placeholders}))`);
@@ -141,13 +173,15 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     }
 
     const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const needsJoin   = categories.length > 0;
 
-    const countSql = `
-      SELECT COUNT(*) as n FROM assignments a
-      LEFT JOIN entity_classifications ec_g ON UPPER(a.grantor)=UPPER(ec_g.name)
-      LEFT JOIN entity_classifications ec_a ON UPPER(a.grantee)=UPPER(ec_a.name)
-      ${whereClause}
-    `;
+    // For unfiltered queries, skip the expensive entity_classifications JOIN on the count
+    const countSql = needsJoin
+      ? `SELECT COUNT(*) as n FROM assignments a
+         LEFT JOIN entity_classifications ec_g ON UPPER(a.grantor)=UPPER(ec_g.name)
+         LEFT JOIN entity_classifications ec_a ON UPPER(a.grantee)=UPPER(ec_a.name)
+         ${whereClause}`
+      : `SELECT COUNT(*) as n FROM assignments a ${whereClause}`;
     const total = (db.prepare(countSql).get(...params) as any).n;
 
     const dataSql = `
@@ -163,17 +197,24 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     `;
     const rows = db.prepare(dataSql).all(...params, limitNum, offset);
 
-    res.json({ total, page: pageNum, limit: limitNum, pages: Math.ceil(total / limitNum), rows });
+    const payload = { total, page: pageNum, limit: limitNum, pages: Math.ceil(total / limitNum), rows };
+    setCached(cacheKey, payload);
+    res.json(payload);
   });
 
   // ─── GET /api/entities ────────────────────────────────────────────────────
   app.get('/api/entities', (req, res) => {
     const { category } = req.query as Record<string, string>;
+    const cacheKey = makeCacheKey('/api/entities', { category });
+    const cached = getCached(cacheKey);
+    if (cached) return res.json(cached);
     let sql = 'SELECT name, category, sub_category FROM entity_classifications';
     const params: any[] = [];
     if (category) { sql += ' WHERE category = ?'; params.push(category); }
     sql += ' ORDER BY category, name';
-    res.json(db.prepare(sql).all(...params));
+    const data = db.prepare(sql).all(...params);
+    setCached(cacheKey, data);
+    res.json(data);
   });
 
   // ─── GET /api/flow-matrix ─────────────────────────────────────────────────
@@ -264,7 +305,12 @@ export async function registerRoutes(httpServer: Server, app: Express) {
 
   // ─── GET /api/collection-log ──────────────────────────────────────────────
   app.get('/api/collection-log', (_req, res) => {
-    res.json(stmts.collectionLog.all());
+    const KEY = '/api/collection-log';
+    const cached = getCached(KEY);
+    if (cached) return res.json(cached);
+    const data = stmts.collectionLog.all();
+    setCached(KEY, data, STATS_TTL_MS);
+    res.json(data);
   });
 
   // ─── GET /api/private-credit ──────────────────────────────────────────────
@@ -273,19 +319,32 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const pageNum  = Math.max(1, parseInt(page));
     const limitNum = Math.min(parseInt(limit) || 50, 500);
     const offset   = (pageNum - 1) * limitNum;
-    const total    = (stmts.privateCreditTotal.get() as any).n;
-    const rows     = stmts.privateCreditRows.all(limitNum, offset);
-    res.json({ total, page: pageNum, limit: limitNum, pages: Math.ceil(total / limitNum), rows });
+    const cacheKey = makeCacheKey('/api/private-credit', { page, limit });
+    const cached = getCached(cacheKey);
+    if (cached) return res.json(cached);
+    const total = (stmts.privateCreditTotal.get() as any).n;
+    const rows  = stmts.privateCreditRows.all(limitNum, offset);
+    const payload = { total, page: pageNum, limit: limitNum, pages: Math.ceil(total / limitNum), rows };
+    setCached(cacheKey, payload);
+    res.json(payload);
   });
 
   // ─── GET /api/private-credit/top-grantees ─────────────────────────────────
   app.get('/api/private-credit/top-grantees', (_req, res) => {
-    res.json(stmts.privateCreditTopGrantees.all());
+    const KEY = '/api/private-credit/top-grantees';
+    const cached = getCached(KEY);
+    if (cached) return res.json(cached);
+    const data = stmts.privateCreditTopGrantees.all();
+    setCached(KEY, data);
+    res.json(data);
   });
 
 
   // ─── GET /api/network-stats ───────────────────────────────────────────────
   app.get('/api/network-stats', (_req, res) => {
+    const KEY = '/api/network-stats';
+    const cached = getCached(KEY);
+    if (cached) return res.json(cached);
     const clean_total    = (stmts.networkStats.get() as any)?.n ?? 0;
     const node_count     = (stmts.nodeCount.get() as any)?.n ?? 0;
     const edge_count     = (stmts.edgeCount.get() as any)?.n ?? 0;
@@ -293,7 +352,9 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const top_acquirers  = stmts.topAcquirers.all();
     const top_sellers    = stmts.topSellers.all();
     const most_connected = stmts.mostConnected.all();
-    res.json({ clean_total, raw_total, node_count, edge_count, top_acquirers, top_sellers, most_connected });
+    const payload = { clean_total, raw_total, node_count, edge_count, top_acquirers, top_sellers, most_connected };
+    setCached(KEY, payload);
+    res.json(payload);
   });
 
   // ─── GET /api/network-graph ───────────────────────────────────────────────
@@ -362,6 +423,10 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const limitNum = Math.min(parseInt(limit) || 50, 500);
     const offset = (pageNum - 1) * limitNum;
 
+    const cacheKey = makeCacheKey('/api/clean-events', { assignor, assignee, start_date, end_date, txn_type, page, limit });
+    const cached = getCached(cacheKey);
+    if (cached) return res.json(cached);
+
     const where: string[] = [];
     const params: any[] = [];
     if (assignor)    { where.push("UPPER(assignor_canon) LIKE UPPER(?)"); params.push(`%${assignor}%`); }
@@ -379,12 +444,17 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       ORDER BY rec_date DESC LIMIT ? OFFSET ?
     `).all(...params, limitNum, offset);
 
-    res.json({ total, page: pageNum, limit: limitNum, pages: Math.ceil(total / limitNum), rows });
+    const payload = { total, page: pageNum, limit: limitNum, pages: Math.ceil(total / limitNum), rows };
+    setCached(cacheKey, payload);
+    res.json(payload);
   });
 
   // ─── GET /api/entity-nodes ────────────────────────────────────────────────
   app.get('/api/entity-nodes', (req, res) => {
     const { q, type } = req.query as Record<string, string>;
+    const cacheKey = makeCacheKey('/api/entity-nodes', { q, type });
+    const cached = getCached(cacheKey);
+    if (cached) return res.json(cached);
     let sql = 'SELECT entity, inbound_vol, outbound_vol, total_vol, degree, entity_type, first_seen, last_seen FROM entity_nodes';
     const params: any[] = [];
     const where: string[] = [];
@@ -392,7 +462,9 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     if (type) { where.push('entity_type = ?'); params.push(type); }
     if (where.length) sql += ` WHERE ${where.join(' AND ')}`;
     sql += ' ORDER BY total_vol DESC LIMIT 200';
-    res.json(db.prepare(sql).all(...params));
+    const data = db.prepare(sql).all(...params);
+    setCached(cacheKey, data);
+    res.json(data);
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -493,38 +565,55 @@ export async function registerRoutes(httpServer: Server, app: Express) {
 
   // ─── GET /api/deal-intelligence/summary ───────────────────────────────────
   app.get('/api/deal-intelligence/summary', (_req, res) => {
-    const bank_to_pe_total  = (diStmts.bankToPeTotal.get()    as any).n;
-    const inst_out_total    = (diStmts.instOutTotal.get()      as any).n;
-    const net_sellers_count = (diStmts.netSellersCount.get()   as any).n;
-    const active_pe_buyers  = (diStmts.activePeBuyers.get()    as any).n;
-
+    const KEY = '/api/deal-intelligence/summary';
+    const cached = getCached(KEY);
+    if (cached) return res.json(cached);
+    const bank_to_pe_total  = (diStmts.bankToPeTotal.get()  as any).n;
+    const inst_out_total    = (diStmts.instOutTotal.get()    as any).n;
+    const net_sellers_count = (diStmts.netSellersCount.get() as any).n;
+    const active_pe_buyers  = (diStmts.activePeBuyers.get() as any).n;
     const special_svc_vol = (db.prepare(`
       SELECT COALESCE(SUM(inbound_vol),0) as n FROM entity_nodes
       WHERE entity IN (${specialSvcPlaceholders})
     `).get(...SPECIAL_SERVICERS) as any).n;
-
-    res.json({ bank_to_pe_total, inst_out_total, net_sellers_count, active_pe_buyers, special_svc_vol });
+    const payload = { bank_to_pe_total, inst_out_total, net_sellers_count, active_pe_buyers, special_svc_vol };
+    setCached(KEY, payload);
+    res.json(payload);
   });
 
   // ─── GET /api/deal-intelligence/seller-pressure ───────────────────────────
   app.get('/api/deal-intelligence/seller-pressure', (_req, res) => {
-    res.json(diStmts.sellerPressure.all());
+    const KEY = '/api/deal-intelligence/seller-pressure';
+    const cached = getCached(KEY);
+    if (cached) return res.json(cached);
+    const data = diStmts.sellerPressure.all();
+    setCached(KEY, data);
+    res.json(data);
   });
 
   // ─── GET /api/deal-intelligence/pe-competitive ────────────────────────────
   app.get('/api/deal-intelligence/pe-competitive', (_req, res) => {
-    res.json(diStmts.peCompetitive.all());
+    const KEY = '/api/deal-intelligence/pe-competitive';
+    const cached = getCached(KEY);
+    if (cached) return res.json(cached);
+    const data = diStmts.peCompetitive.all();
+    setCached(KEY, data);
+    res.json(data);
   });
 
   // ─── GET /api/deal-intelligence/special-servicers ────────────────────────
   app.get('/api/deal-intelligence/special-servicers', (_req, res) => {
-    const rows = db.prepare(`
+    const KEY = '/api/deal-intelligence/special-servicers';
+    const cached = getCached(KEY);
+    if (cached) return res.json(cached);
+    const data = db.prepare(`
       SELECT entity, inbound_vol, outbound_vol, total_vol, first_seen, last_seen
       FROM entity_nodes
       WHERE entity IN (${specialSvcPlaceholders})
       ORDER BY inbound_vol DESC
     `).all(...SPECIAL_SERVICERS);
-    res.json(rows);
+    setCached(KEY, data);
+    res.json(data);
   });
 
   // ─── GET /api/deal-intelligence/bank-to-pe ────────────────────────────────
@@ -533,25 +622,43 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const pageNum  = Math.max(1, parseInt(page));
     const limitNum = Math.min(parseInt(limit) || 50, 200);
     const offset   = (pageNum - 1) * limitNum;
-    const total    = (diStmts.bankToPeCount.get() as any).n;
-    const rows     = diStmts.bankToPeRows.all(limitNum, offset);
-    res.json({ total, page: pageNum, limit: limitNum, pages: Math.ceil(total / limitNum), rows });
+    const cacheKey = makeCacheKey('/api/deal-intelligence/bank-to-pe', { page, limit });
+    const cached = getCached(cacheKey);
+    if (cached) return res.json(cached);
+    const total = (diStmts.bankToPeCount.get() as any).n;
+    const rows  = diStmts.bankToPeRows.all(limitNum, offset);
+    const payload = { total, page: pageNum, limit: limitNum, pages: Math.ceil(total / limitNum), rows };
+    setCached(cacheKey, payload);
+    res.json(payload);
   });
 
   // ─── GET /api/deal-intelligence/monthly ───────────────────────────────────
   app.get('/api/deal-intelligence/monthly', (_req, res) => {
-    res.json(diStmts.monthlyDistressed.all());
+    const KEY = '/api/deal-intelligence/monthly';
+    const cached = getCached(KEY);
+    if (cached) return res.json(cached);
+    const data = diStmts.monthlyDistressed.all();
+    setCached(KEY, data);
+    res.json(data);
   });
 
   // ─── GET /api/deal-intelligence/recent-bank-to-pe ────────────────────────
   app.get('/api/deal-intelligence/recent-bank-to-pe', (_req, res) => {
-    res.json(diStmts.recentBankToPe.all());
+    const KEY = '/api/deal-intelligence/recent-bank-to-pe';
+    const cached = getCached(KEY);
+    if (cached) return res.json(cached);
+    const data = diStmts.recentBankToPe.all();
+    setCached(KEY, data);
+    res.json(data);
   });
 
   // ─── GET /api/deal-intelligence/deal-detail/:cfn ──────────────────────────
   // Returns full filing + relationship intelligence for a single Bank→PE deal
   app.get('/api/deal-intelligence/deal-detail/:cfn', (req, res) => {
     const cfn = req.params.cfn;
+    const cacheKey = `/api/deal-intelligence/deal-detail/${cfn}`;
+    const cached = getCached(cacheKey);
+    if (cached) return res.json(cached);
 
     const transaction = db.prepare(`
       SELECT c.cfn, c.rec_date, c.assignor, c.assignee,
@@ -615,7 +722,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       GROUP BY month ORDER BY month DESC LIMIT 24
     `).all(seller, buyer) as any[];
 
-    res.json({
+    const payload = {
       transaction,
       relationship: {
         total_deals: totalPairDeals,
@@ -629,7 +736,9 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       buyer_profile:  buyerProfile,
       seller_other_buyers: sellerOtherBuyers,
       buyer_other_sellers: buyerOtherSellers,
-    });
+    };
+    setCached(cacheKey, payload);
+    res.json(payload);
   });
 
   // ─── GET /api/fdic/financials ─────────────────────────────────────────────

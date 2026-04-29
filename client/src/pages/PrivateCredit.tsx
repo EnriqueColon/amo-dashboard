@@ -28,11 +28,12 @@ function TxnBadge({ type }: { type: string }) {
 export default function PrivateCredit() {
   const [page, setPage] = useState(1);
 
-  const { data, isLoading } = useQuery({
+  const { data: _data, isLoading } = useQuery({
     queryKey: ['/api/private-credit', page],
     queryFn: () => apiRequest('GET', `/api/private-credit?page=${page}&limit=50`).then(r => r.json()),
     keepPreviousData: true,
   } as any);
+  const data = _data as any;
 
   const { data: assignees } = useQuery({
     queryKey: ['/api/private-credit/top-grantees'],
