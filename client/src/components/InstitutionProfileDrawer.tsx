@@ -60,6 +60,80 @@ function percentileRank(value: number, sortedValues: number[]): number {
   return Math.round((below / sortedValues.length) * 100)
 }
 
+// ── Peer metric interpretation config ────────────────────────────────────────
+// direction: 'high-risk' = high percentile means MORE stress/exposure (bad for bank, good PE target)
+//            'high-good' = high percentile means stronger performance (good for bank, bad PE target)
+type PeerMetricMeta = {
+  direction: 'high-risk' | 'high-good'
+  thresholds: Array<{ min: number; label: string; colorClass: string }>
+  hint: string // shown below label in the section header
+}
+
+const PEER_META: Record<string, PeerMetricMeta> = {
+  'CRE / Assets': {
+    direction: 'high-risk',
+    hint: 'High percentile = more CRE-concentrated than peers → elevated exposure',
+    thresholds: [
+      { min: 75, label: 'High Exposure',   colorClass: 'bg-red-50 text-red-600 border-red-200' },
+      { min: 50, label: 'Moderate',        colorClass: 'bg-amber-50 text-amber-600 border-amber-200' },
+      { min: 25, label: 'Below Average',   colorClass: 'bg-slate-50 text-slate-500 border-slate-200' },
+      { min: 0,  label: 'Low Exposure',    colorClass: 'bg-green-50 text-green-600 border-green-200' },
+    ],
+  },
+  'NPL Ratio': {
+    direction: 'high-risk',
+    hint: 'High percentile = more problem loans than peers → increased credit stress',
+    thresholds: [
+      { min: 75, label: 'Elevated Stress',  colorClass: 'bg-red-50 text-red-600 border-red-200' },
+      { min: 50, label: 'Above Average',    colorClass: 'bg-amber-50 text-amber-600 border-amber-200' },
+      { min: 25, label: 'Below Average',    colorClass: 'bg-slate-50 text-slate-500 border-slate-200' },
+      { min: 0,  label: 'Clean Book',       colorClass: 'bg-green-50 text-green-600 border-green-200' },
+    ],
+  },
+  'Net Income': {
+    direction: 'high-good',
+    hint: 'High percentile = more profitable than peers → less likely to sell at discount',
+    thresholds: [
+      { min: 75, label: 'Top Performer',   colorClass: 'bg-green-50 text-green-600 border-green-200' },
+      { min: 50, label: 'Above Average',   colorClass: 'bg-slate-50 text-slate-500 border-slate-200' },
+      { min: 25, label: 'Below Average',   colorClass: 'bg-amber-50 text-amber-600 border-amber-200' },
+      { min: 0,  label: 'Underperformer', colorClass: 'bg-red-50 text-red-600 border-red-200' },
+    ],
+  },
+  'NIM': {
+    direction: 'high-good',
+    hint: 'High percentile = wider net interest margin than peers → healthier spread income',
+    thresholds: [
+      { min: 75, label: 'High Margin',     colorClass: 'bg-green-50 text-green-600 border-green-200' },
+      { min: 50, label: 'Average',         colorClass: 'bg-slate-50 text-slate-500 border-slate-200' },
+      { min: 25, label: 'Thin Margin',     colorClass: 'bg-amber-50 text-amber-600 border-amber-200' },
+      { min: 0,  label: 'Compressed',      colorClass: 'bg-red-50 text-red-600 border-red-200' },
+    ],
+  },
+}
+
+function getPeerInterpretation(metric: string, pct: number) {
+  const meta = PEER_META[metric]
+  if (!meta) return null
+  for (const t of meta.thresholds) {
+    if (pct >= t.min) return { label: t.label, colorClass: t.colorClass }
+  }
+  return null
+}
+
+function PercentileBadge({ metric, pct }: { metric: string; pct: number }) {
+  const interp = getPeerInterpretation(metric, pct)
+  if (!interp) return <span className="font-medium tabular-nums">{pct}th percentile</span>
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className="font-medium tabular-nums text-slate-700">{pct}th pct.</span>
+      <span className={`inline-block text-[10px] font-medium px-1.5 py-0.5 rounded border leading-none ${interp.colorClass}`}>
+        {interp.label}
+      </span>
+    </span>
+  )
+}
+
 export type InstitutionProfileRow = {
   id: string
   name: string
@@ -180,11 +254,11 @@ export function InstitutionProfileDrawer({
       `Capital Ratio Used: ${capitalUsedVal}% (${capitalLabel})`,
       "", "Earnings:", "",
       `ROA: ${roa}%`, `Net Income (TTM): ${netIncomeTTM}`, `NIM: ${nim}%`, `Earnings Buffer: ${earningsBuffer}%`,
-      "", "Peer Positioning:", "",
-      `CRE / Assets Percentile: ${creAssetsPct === "—" ? "—" : `${creAssetsPct}th`}`,
-      `NPL Ratio Percentile: ${nplPct === "—" ? "—" : `${nplPct}th`}`,
-      `Net Income Percentile: ${netIncomePct === "—" ? "—" : `${netIncomePct}th`}`,
-      `NIM Percentile: ${nimPct === "—" ? "—" : `${nimPct}th`}`,
+      "", "Peer Positioning (vs. selected cohort):", "",
+      `CRE / Assets: ${creAssetsPct === "—" ? "—" : `${creAssetsPct}th pct. — ${getPeerInterpretation('CRE / Assets', creAssetsPct as number)?.label ?? ""} (↑ high = more concentrated)`}`,
+      `NPL Ratio: ${nplPct === "—" ? "—" : `${nplPct}th pct. — ${getPeerInterpretation('NPL Ratio', nplPct as number)?.label ?? ""} (↑ high = more stressed)`}`,
+      `Net Income: ${netIncomePct === "—" ? "—" : `${netIncomePct}th pct. — ${getPeerInterpretation('Net Income', netIncomePct as number)?.label ?? ""} (↑ high = more profitable)`}`,
+      `NIM: ${nimPct === "—" ? "—" : `${nimPct}th pct. — ${getPeerInterpretation('NIM', nimPct as number)?.label ?? ""} (↑ high = wider margin)`}`,
     ]
     return lines.join("\n")
   }, [rowForCopy, cohort, asOfQuarter])
@@ -294,12 +368,33 @@ export function InstitutionProfileDrawer({
                     </div>
                   </div>
                   <div>
-                    <h4 className="text-xs font-semibold uppercase tracking-wide text-primary mb-2">Peer Positioning</h4>
-                    <div className="space-y-1.5 text-sm text-slate-700">
-                      <p className="flex justify-between"><span className="text-slate-500"><DefTerm term="CRE / Assets">CRE / Assets</DefTerm></span><span className="font-medium tabular-nums">{rowForCopy.creConcentration != null ? `${percentileRank(rowForCopy.creConcentration, cohort.map((r) => r.creConcentration).filter((v): v is number => v != null && Number.isFinite(v)))}th` : "—"} percentile</span></p>
-                      <p className="flex justify-between"><span className="text-slate-500"><DefTerm term="NPL Ratio">NPL Ratio</DefTerm></span><span className="font-medium tabular-nums">{rowForCopy.nplRatio != null ? `${percentileRank(rowForCopy.nplRatio, cohort.map((r) => r.nplRatio).filter((v): v is number => v != null && Number.isFinite(v)))}th` : "—"} percentile</span></p>
-                      <p className="flex justify-between"><span className="text-slate-500"><DefTerm term="Net Income">Net Income</DefTerm></span><span className="font-medium tabular-nums">{rowForCopy.netIncomeTTM != null ? `${percentileRank(rowForCopy.netIncomeTTM, cohort.map((r) => r.netIncomeTTM).filter((v): v is number => v != null && Number.isFinite(v)))}th` : "—"} percentile</span></p>
-                      <p className="flex justify-between"><span className="text-slate-500"><DefTerm term="NIM">NIM</DefTerm></span><span className="font-medium tabular-nums">{rowForCopy.nimLatest != null ? `${percentileRank(rowForCopy.nimLatest, cohort.map((r) => r.nimLatest).filter((v): v is number => v != null && Number.isFinite(v)))}th` : "—"} percentile</span></p>
+                    <h4 className="text-xs font-semibold uppercase tracking-wide text-primary mb-1">Peer Positioning</h4>
+                    <p className="text-[10px] text-slate-400 mb-2.5 leading-snug">
+                      Ranked within the selected cohort.&nbsp;
+                      <span className="text-red-500 font-medium">Red = stress indicator</span> · <span className="text-green-600 font-medium">Green = strength indicator</span>
+                    </p>
+                    <div className="space-y-2 text-sm text-slate-700">
+                      {(() => {
+                        const creVals = cohort.map((r) => r.creConcentration).filter((v): v is number => v != null && Number.isFinite(v))
+                        const nplVals = cohort.map((r) => r.nplRatio).filter((v): v is number => v != null && Number.isFinite(v))
+                        const niVals  = cohort.map((r) => r.netIncomeTTM).filter((v): v is number => v != null && Number.isFinite(v))
+                        const nimVals = cohort.map((r) => r.nimLatest).filter((v): v is number => v != null && Number.isFinite(v))
+                        const rows2 = [
+                          { label: 'CRE / Assets', hint: PEER_META['CRE / Assets'].hint, pct: rowForCopy.creConcentration != null ? percentileRank(rowForCopy.creConcentration, creVals) : null },
+                          { label: 'NPL Ratio',    hint: PEER_META['NPL Ratio'].hint,    pct: rowForCopy.nplRatio != null      ? percentileRank(rowForCopy.nplRatio, nplVals) : null },
+                          { label: 'Net Income',   hint: PEER_META['Net Income'].hint,   pct: rowForCopy.netIncomeTTM != null  ? percentileRank(rowForCopy.netIncomeTTM, niVals) : null },
+                          { label: 'NIM',          hint: PEER_META['NIM'].hint,          pct: rowForCopy.nimLatest != null     ? percentileRank(rowForCopy.nimLatest, nimVals) : null },
+                        ]
+                        return rows2.map(({ label, hint, pct }) => (
+                          <div key={label} className="rounded-md bg-slate-50 border border-slate-100 px-3 py-2">
+                            <div className="flex items-center justify-between">
+                              <span className="text-slate-600 font-medium text-[13px]"><DefTerm term={label}>{label}</DefTerm></span>
+                              {pct != null ? <PercentileBadge metric={label} pct={pct} /> : <span className="text-slate-400">—</span>}
+                            </div>
+                            <p className="text-[10px] text-slate-400 mt-0.5 leading-snug">{hint}</p>
+                          </div>
+                        ))
+                      })()}
                     </div>
                   </div>
                 </>
@@ -354,10 +449,25 @@ function PeerPositioningComparisonChart({ rows, cohort }: { rows: InstitutionPro
         <Legend verticalAlign="top" align="left" wrapperStyle={{ fontSize: "12px", color: "#334155", paddingBottom: "8px" }} formatter={(value) => <span className="text-slate-700">{value}</span>} />
         <Tooltip content={({ active, payload, label }) => {
           if (!active || !payload?.length) return null
+          const metricStr = String(label)
+          const meta = PEER_META[metricStr]
           return (
-            <div className="rounded-md border border-slate-200 bg-white px-3 py-2 shadow-sm text-sm">
-              <p className="font-medium text-slate-800">{String(label)}</p>
-              {payload.map((item) => <p key={item.dataKey as string} className="text-slate-600">{item.name}: {item.value == null ? "—" : `${item.value}th percentile`}</p>)}
+            <div className="rounded-md border border-slate-200 bg-white px-3 py-2 shadow-sm text-sm max-w-[260px]">
+              <p className="font-medium text-slate-800 mb-1">{metricStr}</p>
+              {payload.map((item) => {
+                const pct = item.value as number | null
+                const interp = pct != null ? getPeerInterpretation(metricStr, pct) : null
+                return (
+                  <div key={item.dataKey as string} className="flex items-center justify-between gap-3 py-0.5">
+                    <span className="text-slate-600 text-xs">{item.name}</span>
+                    <span className="flex items-center gap-1.5 text-xs">
+                      <span className="tabular-nums">{pct == null ? "—" : `${pct}th`}</span>
+                      {interp && <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${interp.colorClass}`}>{interp.label}</span>}
+                    </span>
+                  </div>
+                )
+              })}
+              {meta && <p className="text-[10px] text-slate-400 mt-1.5 leading-snug border-t border-slate-100 pt-1.5">{meta.hint}</p>}
             </div>
           )
         }} />
@@ -370,7 +480,11 @@ function PeerPositioningComparisonChart({ rows, cohort }: { rows: InstitutionPro
     <>
       <div className="rounded-lg border border-slate-200/80 bg-white p-4">
         <h4 className="text-xs font-semibold uppercase tracking-wide text-primary mb-1">Peer Positioning Comparison</h4>
-        <p className="text-xs text-slate-500 mb-3">Percentile ranking by metric across the selected cohort.</p>
+        <p className="text-xs text-slate-500 mb-1">Percentile ranking within the selected cohort. Hover bars for interpretation.</p>
+        <div className="flex flex-wrap gap-x-4 gap-y-0.5 mb-3 text-[10px] text-slate-500">
+          <span><span className="text-red-500 font-medium">CRE / Assets · NPL Ratio</span> — higher percentile = more stressed / concentrated (distressed opportunity signal)</span>
+          <span><span className="text-green-600 font-medium">Net Income · NIM</span> — higher percentile = stronger earnings (less likely to need to sell)</span>
+        </div>
         <button type="button" className="w-full rounded-md border border-dashed border-slate-200 p-1 text-left transition hover:border-primary/40 cursor-zoom-in" onClick={() => setIsExpanded(true)} aria-label="Expand peer positioning chart" title="Click to enlarge chart">
           <div className="h-[260px] min-h-[260px] w-full">{renderChart(260)}</div>
         </button>
@@ -501,9 +615,9 @@ function ComparisonTable({ rows, cohort, formatAssets, formatQuarter, formatDeci
     { key: "Net Income (TTM)", fn: (r) => r.netIncomeTTM != null ? formatMoney(r.netIncomeTTM) : "—" },
     { key: "NIM", fn: (r) => r.nimLatest != null ? r.nimLatest.toFixed(2) + "%" : "—" },
     { key: "Earnings Buffer", fn: (r) => r.earningsBufferPct != null ? r.earningsBufferPct.toFixed(1) + "%" : "—" },
-    { section: "Peer Positioning", key: "CRE / Assets", fn: (r) => r.creConcentration != null ? `${percentileRank(r.creConcentration, cohort.map((c) => c.creConcentration).filter((v): v is number => v != null && Number.isFinite(v)))}th percentile` : "—" },
-    { key: "NPL Ratio", fn: (r) => r.nplRatio != null ? `${percentileRank(r.nplRatio, cohort.map((c) => c.nplRatio).filter((v): v is number => v != null && Number.isFinite(v)))}th percentile` : "—" },
-    { key: "NIM", fn: (r) => r.nimLatest != null ? `${percentileRank(r.nimLatest, cohort.map((c) => c.nimLatest).filter((v): v is number => v != null && Number.isFinite(v)))}th percentile` : "—" },
+    { section: "Peer Positioning", key: "CRE / Assets", fn: (r) => { const pct = r.creConcentration != null ? percentileRank(r.creConcentration, cohort.map((c) => c.creConcentration).filter((v): v is number => v != null && Number.isFinite(v))) : null; if (pct == null) return "—"; const i = getPeerInterpretation('CRE / Assets', pct); return `${pct}th pct. — ${i?.label ?? ""}`; } },
+    { key: "NPL Ratio", fn: (r) => { const pct = r.nplRatio != null ? percentileRank(r.nplRatio, cohort.map((c) => c.nplRatio).filter((v): v is number => v != null && Number.isFinite(v))) : null; if (pct == null) return "—"; const i = getPeerInterpretation('NPL Ratio', pct); return `${pct}th pct. — ${i?.label ?? ""}`; } },
+    { key: "NIM", fn: (r) => { const pct = r.nimLatest != null ? percentileRank(r.nimLatest, cohort.map((c) => c.nimLatest).filter((v): v is number => v != null && Number.isFinite(v))) : null; if (pct == null) return "—"; const i = getPeerInterpretation('NIM', pct); return `${pct}th pct. — ${i?.label ?? ""}`; } },
   ]
 
   let currentSection = ""
