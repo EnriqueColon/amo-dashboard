@@ -96,7 +96,7 @@ export default function MarketRelationships() {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [suggestionIdx, setSuggestionIdx]     = useState(-1);
   const [institutionalOnly, setInstitutionalOnly] = useState(false);
-  const [showGuide, setShowGuide]       = useState(false);
+  const [showGuide, setShowGuide]       = useState(true);
   const [hovered, setHovered]           = useState<NodeDatum | null>(null);
   const [tooltipPos, setTooltipPos]     = useState({ x: 0, y: 0 });
   const [selected, setSelected]         = useState<string | null>(null);
