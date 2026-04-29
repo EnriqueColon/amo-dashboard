@@ -5,8 +5,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import CategoryBadge from '@/components/CategoryBadge';
 import {
-  AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip,
-  ResponsiveContainer, CartesianGrid, Cell,
+  AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip, Legend,
+  ResponsiveContainer, CartesianGrid, Cell, ReferenceArea,
 } from 'recharts';
 import {
   TrendingDown, TrendingUp, AlertTriangle, Target, Users,
@@ -553,6 +553,112 @@ function DealDetailPanel({ cfn, onClose }: { cfn: string; onClose: () => void })
   );
 }
 
+// ── Period vs Prior comparison chart ─────────────────────────────────────────
+function PeriodComparisonChart({ summary, currentStart, currentEnd, priorStart, priorEnd }: {
+  summary: any; currentStart: string; currentEnd: string; priorStart: string; priorEnd: string;
+}) {
+  const prior = summary?.prior;
+  if (!prior) return null;
+
+  const metrics = [
+    { key: 'bank_to_pe_total',   short: 'Bank→PE',        label: 'Bank → PE Transfers' },
+    { key: 'inst_out_total',     short: 'Distressed',     label: 'Distressed Dispositions' },
+    { key: 'net_sellers_count',  short: 'Net Sellers',    label: 'Net Institutional Sellers' },
+    { key: 'special_svc_vol',    short: 'Spec. Svc.',     label: 'Special Svc. Acquisitions' },
+    { key: 'active_pe_buyers',   short: 'Active PE',      label: 'Active PE Buyers' },
+  ];
+
+  const data = metrics.map(m => ({
+    name:    m.short,
+    label:   m.label,
+    current: summary[m.key] ?? 0,
+    prior:   prior[m.key]   ?? 0,
+  }));
+
+  const CustomTooltip = ({ active, payload, label }: any) => {
+    if (!active || !payload?.length) return null;
+    const row = data.find(d => d.name === label);
+    const curr = payload.find((p: any) => p.dataKey === 'current')?.value ?? 0;
+    const prev = payload.find((p: any) => p.dataKey === 'prior')?.value ?? 0;
+    const delta = curr - prev;
+    const pct   = prev > 0 ? Math.round((delta / prev) * 100) : null;
+    return (
+      <div className="bg-white border border-border rounded-lg p-3 text-[11px] shadow-xl min-w-[180px]">
+        <p className="font-semibold text-foreground mb-2">{row?.label}</p>
+        <div className="space-y-1">
+          <div className="flex justify-between gap-4">
+            <span className="text-orange-500 font-medium">Current</span>
+            <span className="font-mono font-semibold">{curr.toLocaleString()}</span>
+          </div>
+          <div className="flex justify-between gap-4">
+            <span className="text-slate-400">Prior period</span>
+            <span className="font-mono">{prev.toLocaleString()}</span>
+          </div>
+          <div className="border-t border-border pt-1 mt-1 flex justify-between gap-4">
+            <span className="text-muted-foreground">Change</span>
+            <span className={`font-semibold font-mono ${delta > 0 ? 'text-emerald-600' : delta < 0 ? 'text-red-500' : 'text-muted-foreground'}`}>
+              {delta > 0 ? '+' : ''}{delta.toLocaleString()}{pct !== null ? ` (${delta > 0 ? '+' : ''}${pct}%)` : ''}
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="bg-card border border-border rounded-xl p-5">
+      <div className="flex items-start justify-between mb-4">
+        <div>
+          <h2 className="text-sm font-semibold text-foreground">Period Comparison</h2>
+          <p className="text-[10px] text-muted-foreground mt-0.5">
+            Current window vs identical prior window — all five distress signals side by side
+          </p>
+        </div>
+        <div className="flex items-center gap-4 text-[10px]">
+          <span className="flex items-center gap-1.5">
+            <span className="w-3 h-3 rounded-sm bg-orange-400 inline-block" />
+            <span className="font-medium text-orange-600">{currentStart && currentEnd ? `${fmtDate(currentStart)} – ${fmtDate(currentEnd)}` : 'Current'}</span>
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="w-3 h-3 rounded-sm bg-slate-300 inline-block" />
+            <span className="text-muted-foreground">{priorStart && priorEnd ? `${fmtDate(priorStart)} – ${fmtDate(priorEnd)}` : 'Prior'}</span>
+          </span>
+        </div>
+      </div>
+      <ResponsiveContainer width="100%" height={200}>
+        <BarChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }} barGap={4} barCategoryGap="30%">
+          <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+          <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#64748b' }} tickLine={false} axisLine={false} />
+          <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} axisLine={false} width={32}
+            tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(1)}k` : v} />
+          <Tooltip content={<CustomTooltip />} cursor={{ fill: '#f8fafc' }} />
+          <Bar dataKey="prior"   name="Prior period" fill="#cbd5e1" radius={[3,3,0,0]} maxBarSize={40} />
+          <Bar dataKey="current" name="Current"       fill="#fb923c" radius={[3,3,0,0]} maxBarSize={40} />
+        </BarChart>
+      </ResponsiveContainer>
+      {/* Delta summary row */}
+      <div className="grid grid-cols-5 gap-2 mt-3 pt-3 border-t border-border">
+        {data.map(d => {
+          const delta = d.current - d.prior;
+          const pct   = d.prior > 0 ? Math.round((delta / d.prior) * 100) : null;
+          const pos   = delta > 0;
+          return (
+            <div key={d.name} className="text-center">
+              <p className="text-[9px] text-muted-foreground/60 uppercase tracking-wider mb-0.5">{d.name}</p>
+              <p className={`text-[11px] font-bold ${pos ? 'text-emerald-600' : delta < 0 ? 'text-red-500' : 'text-slate-400'}`}>
+                {delta === 0 ? '—' : `${pos ? '+' : ''}${delta.toLocaleString()}`}
+              </p>
+              {pct !== null && delta !== 0 && (
+                <p className={`text-[9px] ${pos ? 'text-emerald-500' : 'text-red-400'}`}>{pos ? '+' : ''}{pct}%</p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function DealIntelligence() {
   const [dealPage, setDealPage] = useState(1);
@@ -604,6 +710,19 @@ export default function DealIntelligence() {
   });
 
   const prior = (summary as any)?.prior;
+
+  // Derived prior period dates for chart annotations
+  const { priorStart, priorEnd } = useMemo(() => {
+    if (!dateRange.start || !dateRange.end || dateRange.preset === 'all')
+      return { priorStart: '', priorEnd: '' };
+    const startMs = new Date(dateRange.start).getTime();
+    const endMs   = new Date(dateRange.end).getTime();
+    const days = Math.round((endMs - startMs) / 86400000);
+    return {
+      priorStart: toISO(new Date(startMs - 86400000 - days * 86400000)),
+      priorEnd:   toISO(new Date(startMs - 86400000)),
+    };
+  }, [dateRange]);
 
   // Max values for bar chart scaling
   const maxPeVol = Math.max(...((peList || []).map((r: any) => r.inbound_vol)), 1);
@@ -702,26 +821,42 @@ export default function DealIntelligence() {
         </>)}
       </div>
 
+      {/* ── Period Comparison (only when a date range is selected) ──────── */}
+      {prior && (
+        <PeriodComparisonChart
+          summary={summary}
+          currentStart={dateRange.start}
+          currentEnd={dateRange.end}
+          priorStart={priorStart}
+          priorEnd={priorEnd}
+        />
+      )}
+
       {/* ── Distressed Signal Trend ──────────────────────────────────────── */}
       <div className="bg-card border border-border rounded-xl p-5">
         <div className="flex items-start justify-between mb-4">
           <div>
             <h2 className="text-sm font-semibold text-foreground">Distressed Activity Trend</h2>
             <p className="text-[10px] text-muted-foreground mt-0.5">
-              Monthly bank→PE transfers, distressed dispositions, and total market transfers
+              Full monthly history — shaded bands highlight the selected window and its comparison period
             </p>
           </div>
           <div className="flex flex-col gap-1 items-end text-[10px] text-muted-foreground">
             <div className="flex items-center gap-4">
-              <span className="flex items-center gap-1.5"><span className="w-3 h-1.5 rounded-full bg-orange-400 inline-block" />Bank → PE (bank selling to PE fund)</span>
-              <span className="flex items-center gap-1.5"><span className="w-3 h-1.5 rounded-full bg-rose-400 inline-block" />Inst. Out (institution → private party)</span>
-              <span className="flex items-center gap-1.5"><span className="w-3 h-1.5 rounded-full bg-emerald-500/50 inline-block" />All Institution-to-Institution Transfers</span>
+              <span className="flex items-center gap-1.5"><span className="w-3 h-1.5 rounded-full bg-orange-400 inline-block" />Bank → PE</span>
+              <span className="flex items-center gap-1.5"><span className="w-3 h-1.5 rounded-full bg-rose-400 inline-block" />Inst. Out</span>
+              <span className="flex items-center gap-1.5"><span className="w-3 h-1.5 rounded-full bg-emerald-500/50 inline-block" />All Mkt Transfers</span>
+              {dateRange.preset !== 'all' && dateRange.start && (
+                <>
+                  <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-orange-200/70 inline-block border border-orange-300" />Current window</span>
+                  <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-slate-200/70 inline-block border border-slate-300" />Prior window</span>
+                </>
+              )}
             </div>
-            <span className="text-muted-foreground/50 text-[9px]">Each bar = number of recorded assignment filings that month</span>
           </div>
         </div>
         {mLoading ? <Skeleton className="h-52" /> : (
-          <ResponsiveContainer width="100%" height={220}>
+          <ResponsiveContainer width="100%" height={230}>
             <AreaChart data={monthly || []} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
               <defs>
                 <linearGradient id="gradMT" x1="0" y1="0" x2="0" y2="1">
@@ -733,13 +868,13 @@ export default function DealIntelligence() {
                   <stop offset="95%" stopColor="#fb923c" stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(220 12% 22%)" vertical={false} />
+              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
               <XAxis dataKey="month" tickFormatter={fmtMonth}
                 tick={{ fontSize: 10, fill: '#64748b' }} tickLine={false} axisLine={false} />
               <YAxis tick={{ fontSize: 10, fill: '#64748b' }} tickLine={false} axisLine={false} width={36}
                 tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(1)}k` : v} />
               <Tooltip
-                contentStyle={{ background: 'hsl(220 18% 13%)', border: '1px solid hsl(220 12% 22%)', borderRadius: 8, fontSize: 11 }}
+                contentStyle={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 11 }}
                 labelFormatter={fmtMonth}
                 formatter={(v: any, name: string) => [
                   v.toLocaleString(),
@@ -748,6 +883,24 @@ export default function DealIntelligence() {
                     : 'Inst. Out (Distressed)',
                 ]}
               />
+              {/* Prior period band */}
+              {priorStart && priorEnd && (
+                <ReferenceArea
+                  x1={priorStart.slice(0,7)} x2={priorEnd.slice(0,7)}
+                  fill="#94a3b8" fillOpacity={0.1}
+                  stroke="#94a3b8" strokeOpacity={0.3} strokeWidth={1}
+                  label={{ value: 'Prior', position: 'insideTopLeft', fontSize: 9, fill: '#94a3b8' }}
+                />
+              )}
+              {/* Current period band */}
+              {dateRange.start && dateRange.end && dateRange.preset !== 'all' && (
+                <ReferenceArea
+                  x1={dateRange.start.slice(0,7)} x2={dateRange.end.slice(0,7)}
+                  fill="#fb923c" fillOpacity={0.1}
+                  stroke="#fb923c" strokeOpacity={0.4} strokeWidth={1}
+                  label={{ value: 'Current', position: 'insideTopLeft', fontSize: 9, fill: '#fb923c' }}
+                />
+              )}
               <Area dataKey="market_transfers" stroke="#10b981" strokeWidth={1.5} fill="url(#gradMT)" dot={false} />
               <Area dataKey="inst_out"         stroke="#fb7185" strokeWidth={1.5} fill="none" dot={false} strokeDasharray="4 2" />
               <Area dataKey="bank_to_pe"       stroke="#fb923c" strokeWidth={2}   fill="url(#gradBPE)" dot={false} />
