@@ -143,6 +143,8 @@ export async function registerRoutes(httpServer: Server, app: Express) {
 
   // ─── GET /api/assignments ─────────────────────────────────────────────────
   // Supports: grantor, grantee, start_date, end_date, category, page, limit
+  // Types come from aom_events_clean joined on CFN — accurate canonical types,
+  // no more UNCLASSIFIED for known entities.
   app.get('/api/assignments', (req, res) => {
     const { grantor, grantee, start_date, end_date, page = '1', limit = '50' } = req.query as Record<string, string>;
     const category = req.query['category'] as string | string[] | undefined;
@@ -150,7 +152,6 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const limitNum = Math.min(parseInt(limit) || 50, 500);
     const offset = (pageNum - 1) * limitNum;
 
-    // category can be a single string or array (multi-select)
     const categories = category
       ? (Array.isArray(category) ? category : [category])
       : (req.query['category[]'] ? (Array.isArray(req.query['category[]']) ? req.query['category[]'] : [req.query['category[]']]) : []);
@@ -159,39 +160,38 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const cached = getCached(cacheKey);
     if (cached) return res.json(cached);
 
-    let where: string[] = [];
-    let params: any[] = [];
+    const where: string[] = [];
+    const params: any[] = [];
 
     if (grantor)    { where.push("UPPER(a.grantor) LIKE UPPER(?)"); params.push(`%${grantor}%`); }
     if (grantee)    { where.push("UPPER(a.grantee) LIKE UPPER(?)"); params.push(`%${grantee}%`); }
     if (start_date) { where.push("a.rec_date >= ?"); params.push(start_date); }
     if (end_date)   { where.push("a.rec_date <= ?"); params.push(end_date); }
     if (categories.length > 0) {
+      // Filter using canonical types from aom_events_clean
       const placeholders = categories.map(() => '?').join(', ');
-      where.push(`(ec_g.category IN (${placeholders}) OR ec_a.category IN (${placeholders}))`);
+      where.push(`(c.assignor_type IN (${placeholders}) OR c.assignee_type IN (${placeholders}))`);
       params.push(...categories, ...categories);
     }
 
     const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
-    const needsJoin   = categories.length > 0;
 
-    // For unfiltered queries, skip the expensive entity_classifications JOIN on the count
-    const countSql = needsJoin
+    // COUNT: join aom_events_clean on CFN (indexed, fast) only when filtering by category
+    const countSql = categories.length > 0
       ? `SELECT COUNT(*) as n FROM assignments a
-         LEFT JOIN entity_classifications ec_g ON UPPER(a.grantor)=UPPER(ec_g.name)
-         LEFT JOIN entity_classifications ec_a ON UPPER(a.grantee)=UPPER(ec_a.name)
+         LEFT JOIN aom_events_clean c ON a.cfn = c.cfn
          ${whereClause}`
       : `SELECT COUNT(*) as n FROM assignments a ${whereClause}`;
     const total = (db.prepare(countSql).get(...params) as any).n;
 
+    // DATA: always join aom_events_clean to get canonical types per CFN
     const dataSql = `
       SELECT a.cfn, a.rec_date, a.grantor, a.grantee, a.address,
         a.rec_book, a.rec_page, a.misc_ref, a.legal_desc,
-        COALESCE(ec_g.category,'UNCLASSIFIED') as grantor_category,
-        COALESCE(ec_a.category,'UNCLASSIFIED') as grantee_category
+        COALESCE(c.assignor_type, 'UNCLASSIFIED') as grantor_category,
+        COALESCE(c.assignee_type, 'UNCLASSIFIED') as grantee_category
       FROM assignments a
-      LEFT JOIN entity_classifications ec_g ON UPPER(a.grantor)=UPPER(ec_g.name)
-      LEFT JOIN entity_classifications ec_a ON UPPER(a.grantee)=UPPER(ec_a.name)
+      LEFT JOIN aom_events_clean c ON a.cfn = c.cfn
       ${whereClause}
       ORDER BY a.rec_date DESC LIMIT ? OFFSET ?
     `;
