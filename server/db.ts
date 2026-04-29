@@ -1,7 +1,8 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 
-const DB_PATH = process.env.AMO_DB_PATH || path.resolve('/home/user/workspace/miami_dade_amo/miami_dade_amo.db');
+const DB_PATH = process.env.AMO_DB_PATH
+  || path.resolve(process.cwd(), 'miami_dade_amo.db');
 
 let _db: Database.Database | null = null;
 
@@ -10,6 +11,8 @@ export function getDb(): Database.Database {
     _db = new Database(DB_PATH);
     _db.pragma('journal_mode = WAL');
     _db.pragma('cache_size = -32000');
+
+    // Base schema — CREATE TABLE IF NOT EXISTS is safe on existing DBs
     _db.exec(`
       CREATE TABLE IF NOT EXISTS assignments (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -44,6 +47,7 @@ export function getDb(): Database.Database {
         assignor TEXT, assignee TEXT,
         assignor_canon TEXT, assignee_canon TEXT,
         assignor_type TEXT, assignee_type TEXT,
+        txn_type TEXT,
         rec_book TEXT, rec_page TEXT, total_parties INTEGER
       );
       CREATE TABLE IF NOT EXISTS entity_relationships (
@@ -62,12 +66,22 @@ export function getDb(): Database.Database {
       CREATE INDEX IF NOT EXISTS idx_clean_assignor_type ON aom_events_clean(assignor_type);
       CREATE INDEX IF NOT EXISTS idx_clean_assignee_type ON aom_events_clean(assignee_type);
       CREATE INDEX IF NOT EXISTS idx_clean_date ON aom_events_clean(rec_date);
+      CREATE INDEX IF NOT EXISTS idx_clean_txn_type ON aom_events_clean(txn_type);
       CREATE INDEX IF NOT EXISTS idx_entity_class_name ON entity_classifications(name);
       CREATE INDEX IF NOT EXISTS idx_entity_nodes_type ON entity_nodes(entity_type);
       CREATE INDEX IF NOT EXISTS idx_entity_nodes_inbound ON entity_nodes(inbound_vol DESC);
       CREATE INDEX IF NOT EXISTS idx_entity_nodes_outbound ON entity_nodes(outbound_vol DESC);
       CREATE INDEX IF NOT EXISTS idx_entity_nodes_total ON entity_nodes(total_vol DESC);
     `);
+
+    // Migration: add txn_type to existing databases that predate the column.
+    // ALTER TABLE ADD COLUMN throws if the column already exists — we catch and ignore.
+    try {
+      _db.exec(`ALTER TABLE aom_events_clean ADD COLUMN txn_type TEXT`);
+      console.log('[db] migrated: added txn_type column to aom_events_clean');
+    } catch (_e) {
+      // Column already present — nothing to do
+    }
   }
   return _db;
 }

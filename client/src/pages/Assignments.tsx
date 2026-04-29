@@ -82,7 +82,7 @@ export default function Assignments() {
       <div>
         <div className="flex items-center gap-2">
           <h1 className="text-xl font-semibold">Raw Assignments</h1>
-          <span className="text-[10px] font-semibold bg-amber-900/30 text-amber-400 border border-amber-800/40 rounded-full px-2 py-0.5">INCLUDES MIRROR ENTRIES</span>
+          <span className="text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200 rounded-full px-2 py-0.5">INCLUDES MIRROR ENTRIES</span>
         </div>
         <p className="text-sm text-muted-foreground mt-0.5">
           {data

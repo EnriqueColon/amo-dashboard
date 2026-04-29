@@ -89,13 +89,13 @@ export default function Entities() {
                   <th className="px-3 py-2.5 text-left font-medium">Entity (Canonical)</th>
                   <th className="px-3 py-2.5 text-left font-medium">Type</th>
                   <th className="px-3 py-2.5 text-right font-medium">
-                    <span className="text-orange-400/80">Received</span>
+                    <span className="text-orange-600">Received</span>
                   </th>
                   <th className="px-3 py-2.5 text-right font-medium">
-                    <span className="text-blue-400/80">Assigned</span>
+                    <span className="text-blue-600">Assigned</span>
                   </th>
                   <th className="px-3 py-2.5 text-right font-medium">
-                    <span className="text-purple-400/80">Counterparties</span>
+                    <span className="text-purple-600">Counterparties</span>
                   </th>
                   <th className="px-3 py-2.5 text-left font-medium pl-4">Active Period</th>
                   <th className="px-3 py-2.5 text-right font-medium pr-4"></th>
@@ -129,13 +129,13 @@ export default function Entities() {
                         <td className="px-3 py-2.5">
                           <CategoryBadge category={e.entity_type} size="xs" />
                         </td>
-                        <td className="px-3 py-2.5 text-right font-mono text-orange-400/80">
+                        <td className="px-3 py-2.5 text-right font-mono text-orange-600">
                           {e.inbound_vol.toLocaleString()}
                         </td>
-                        <td className="px-3 py-2.5 text-right font-mono text-blue-400/80">
+                        <td className="px-3 py-2.5 text-right font-mono text-blue-600">
                           {e.outbound_vol.toLocaleString()}
                         </td>
-                        <td className="px-3 py-2.5 text-right font-mono text-purple-400/80">
+                        <td className="px-3 py-2.5 text-right font-mono text-purple-600">
                           {e.degree.toLocaleString()}
                         </td>
                         <td className="px-3 py-2.5 pl-4 text-muted-foreground whitespace-nowrap">
@@ -170,11 +170,11 @@ export default function Entities() {
                 {search && ` · matching "${search}"`}
               </span>
               <span>
-                Total received: <span className="text-orange-400/80 font-mono">
+                Total received: <span className="text-orange-600 font-mono">
                   {filtered.reduce((s: number, e: any) => s + e.inbound_vol, 0).toLocaleString()}
                 </span>
                 {' · '}
-                Total assigned: <span className="text-blue-400/80 font-mono">
+                Total assigned: <span className="text-blue-600 font-mono">
                   {filtered.reduce((s: number, e: any) => s + e.outbound_vol, 0).toLocaleString()}
                 </span>
               </span>
