@@ -488,41 +488,51 @@ def build_normalized_tables():
             last_seen      TEXT
         );
     """)
+    # Build entity_nodes from aom_events_clean directly so every canonical entity
+    # is included — even those that only appear in self-assign transactions (which
+    # are excluded from entity_relationships to avoid noise in the graph).
     conn.execute("""
         INSERT OR REPLACE INTO entity_nodes
-        WITH out AS (
-            SELECT source_entity as entity,
-                   SUM(transaction_count) as outbound,
-                   COUNT(DISTINCT target_entity) as out_degree,
-                   MIN(first_seen_date) as first_seen,
-                   MAX(last_seen_date) as last_seen
-            FROM entity_relationships GROUP BY source_entity
+        WITH all_entities AS (
+            SELECT assignor_canon AS entity FROM aom_events_clean
+            UNION
+            SELECT assignee_canon FROM aom_events_clean
         ),
-        inn AS (
-            SELECT target_entity as entity,
-                   SUM(transaction_count) as inbound,
-                   COUNT(DISTINCT source_entity) as in_degree,
-                   MIN(first_seen_date) as first_seen,
-                   MAX(last_seen_date) as last_seen
-            FROM entity_relationships GROUP BY target_entity
+        out_stats AS (
+            SELECT assignor_canon AS entity,
+                   COUNT(*) AS outbound_vol,
+                   COUNT(DISTINCT assignee_canon) AS out_degree,
+                   MIN(rec_date) AS first_seen,
+                   MAX(rec_date) AS last_seen
+            FROM aom_events_clean GROUP BY assignor_canon
+        ),
+        in_stats AS (
+            SELECT assignee_canon AS entity,
+                   COUNT(*) AS inbound_vol,
+                   COUNT(DISTINCT assignor_canon) AS in_degree,
+                   MIN(rec_date) AS first_seen,
+                   MAX(rec_date) AS last_seen
+            FROM aom_events_clean GROUP BY assignee_canon
         ),
         types AS (
-            SELECT assignee_canon as entity, assignee_type as etype
+            SELECT assignee_canon AS entity, assignee_type AS etype
             FROM aom_events_clean GROUP BY assignee_canon
             UNION
             SELECT assignor_canon, assignor_type FROM aom_events_clean GROUP BY assignor_canon
         )
         SELECT
-            COALESCE(out.entity, inn.entity) as entity,
-            COALESCE(out.outbound, 0) as outbound_vol,
-            COALESCE(inn.inbound, 0) as inbound_vol,
-            COALESCE(out.outbound, 0) + COALESCE(inn.inbound, 0) as total_vol,
-            COALESCE(out.out_degree, 0) + COALESCE(inn.in_degree, 0) as degree,
-            COALESCE(t.etype, 'OTHER') as entity_type,
-            COALESCE(out.first_seen, inn.first_seen) as first_seen,
-            COALESCE(inn.last_seen, out.last_seen) as last_seen
-        FROM out FULL OUTER JOIN inn ON out.entity = inn.entity
-        LEFT JOIN types t ON t.entity = COALESCE(out.entity, inn.entity)
+            ae.entity,
+            COALESCE(o.outbound_vol, 0) AS outbound_vol,
+            COALESCE(i.inbound_vol,  0) AS inbound_vol,
+            COALESCE(o.outbound_vol, 0) + COALESCE(i.inbound_vol, 0) AS total_vol,
+            COALESCE(o.out_degree,   0) + COALESCE(i.in_degree,   0) AS degree,
+            COALESCE(t.etype, 'OTHER') AS entity_type,
+            COALESCE(o.first_seen, i.first_seen) AS first_seen,
+            COALESCE(i.last_seen,  o.last_seen)  AS last_seen
+        FROM all_entities ae
+        LEFT JOIN out_stats o ON ae.entity = o.entity
+        LEFT JOIN in_stats  i ON ae.entity = i.entity
+        LEFT JOIN types     t ON ae.entity = t.entity
     """)
     conn.commit()
 

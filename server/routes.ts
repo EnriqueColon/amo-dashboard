@@ -530,18 +530,64 @@ export async function registerRoutes(httpServer: Server, app: Express) {
 
   // ─── GET /api/entity-nodes ────────────────────────────────────────────────
   app.get('/api/entity-nodes', (req, res) => {
-    const { q, type } = req.query as Record<string, string>;
-    const cacheKey = makeCacheKey('/api/entity-nodes', { q, type });
+    const { q, type, limit: limitParam } = req.query as Record<string, string>;
+    const limitNum = Math.min(parseInt(limitParam) || 5000, 25000);
+    const cacheKey = makeCacheKey('/api/entity-nodes', { q, type, limit: String(limitNum) });
     const cached = getCached(cacheKey);
     if (cached) return res.json(cached);
-    let sql = 'SELECT entity, inbound_vol, outbound_vol, total_vol, degree, entity_type, first_seen, last_seen FROM entity_nodes';
+
+    // Primary source: entity_nodes (pre-aggregated by pipeline)
+    // UNION with any canonical entities in aom_events_clean that the pipeline missed
+    // (e.g. entities that only appear in self-assign transactions)
     const params: any[] = [];
     const where: string[] = [];
     if (q)    { where.push('UPPER(entity) LIKE UPPER(?)'); params.push(`%${q}%`); }
     if (type) { where.push('entity_type = ?'); params.push(type); }
-    if (where.length) sql += ` WHERE ${where.join(' AND ')}`;
-    sql += ' ORDER BY total_vol DESC LIMIT 200';
-    const data = db.prepare(sql).all(...params);
+    const whereClause = where.length ? ` WHERE ${where.join(' AND ')}` : '';
+
+    const sql = `
+      SELECT entity, inbound_vol, outbound_vol, total_vol, degree, entity_type, first_seen, last_seen
+      FROM entity_nodes ${whereClause}
+      UNION
+      SELECT entity, inbound_vol, outbound_vol,
+             inbound_vol + outbound_vol as total_vol,
+             in_deg + out_deg as degree,
+             entity_type, first_seen, last_seen
+      FROM (
+        SELECT ae.entity,
+               COALESCE(i.cnt, 0) as inbound_vol,
+               COALESCE(o.cnt, 0) as outbound_vol,
+               COALESCE(i.deg, 0) as in_deg,
+               COALESCE(o.deg, 0) as out_deg,
+               COALESCE(i.fs, o.fs) as first_seen,
+               COALESCE(i.ls, o.ls) as last_seen,
+               COALESCE(t.etype, 'OTHER') as entity_type
+        FROM (
+          SELECT assignor_canon as entity FROM aom_events_clean
+          UNION SELECT assignee_canon FROM aom_events_clean
+        ) ae
+        LEFT JOIN (
+          SELECT assignee_canon as entity, COUNT(*) as cnt, COUNT(DISTINCT assignor_canon) as deg,
+                 MIN(rec_date) as fs, MAX(rec_date) as ls
+          FROM aom_events_clean GROUP BY assignee_canon
+        ) i ON ae.entity = i.entity
+        LEFT JOIN (
+          SELECT assignor_canon as entity, COUNT(*) as cnt, COUNT(DISTINCT assignee_canon) as deg,
+                 MIN(rec_date) as fs, MAX(rec_date) as ls
+          FROM aom_events_clean GROUP BY assignor_canon
+        ) o ON ae.entity = o.entity
+        LEFT JOIN (
+          SELECT assignee_canon as entity, assignee_type as etype FROM aom_events_clean GROUP BY assignee_canon
+          UNION SELECT assignor_canon, assignor_type FROM aom_events_clean GROUP BY assignor_canon
+        ) t ON ae.entity = t.entity
+        WHERE ae.entity NOT IN (SELECT entity FROM entity_nodes)
+          AND ae.entity != 'UNKNOWN' ${where.length ? `AND ${where.map(w => w.replace('entity', 'ae.entity')).join(' AND ')}` : ''}
+      )
+      ORDER BY total_vol DESC
+      LIMIT ${limitNum}
+    `;
+
+    const data = db.prepare(sql).all(...params, ...(where.length ? params : []));
     setCached(cacheKey, data);
     res.json(data);
   });
