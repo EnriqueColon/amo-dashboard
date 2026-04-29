@@ -8,7 +8,7 @@ import * as d3 from 'd3';
 
 // ── Fuzzy search helpers ────────────────────────────────────────────────────
 function fuzzyScore(query: string, target: string): number {
-  if (!query) return 0;
+  if (!query || !target) return -1;
   const q = query.toUpperCase();
   const t = target.toUpperCase();
   if (t === q) return 1000;
@@ -116,7 +116,7 @@ export default function MarketRelationships() {
     staleTime: Infinity,
   });
   const allEntityNames = useMemo<string[]>(() =>
-    (allEntitiesData ?? []).map((e: any) => e.entity as string),
+    (allEntitiesData ?? []).map((e: any) => (e.entity ?? e.name) as string).filter(Boolean),
     [allEntitiesData]
   );
 
