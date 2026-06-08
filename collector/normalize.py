@@ -4,10 +4,14 @@ AMO Normalization Pipeline
 1. Canonical entity name mapping (typo correction + suffix stripping)
 2. Per-CFN transaction deduplication → aom_events_clean
 3. Entity relationship edge list → entity_relationships
+4. Multi-signal entity type classification:
+   manual overrides → FDIC match → suffix signals → behavioral → regex → default
 """
 import sqlite3
 import re
 import os
+import time
+import requests
 from collections import defaultdict
 
 DB = os.environ.get('AMO_DB_PATH', '/opt/amo-dashboard/miami_dade_amo.db')
@@ -266,6 +270,276 @@ def classify_canonical(name: str) -> str:
 
 _INST_TYPES = {'BANK', 'SERVICER', 'PRIVATE_CREDIT', 'GSE', 'TRUST'}
 
+# ── Suffix signal extraction ─────────────────────────────────────────────────
+# Captures classification-relevant information from raw filing names BEFORE
+# legal suffixes are stripped during canonicalization.
+
+_BANKING_SUFFIX_RE = re.compile(
+    r'NATIONAL BANKING ASSOCIATION|NATIONAL BANKING ASSOC|'
+    r'NATIONAL ASSOCIATION|FEDERAL SAVINGS BANK|FEDERAL SAVINGS|'
+    r'FEDERAL BANK|SAVINGS BANK|STATE BANK|CREDIT UNION|'
+    r'STATE CHARTERED BANK|BANKING ASSOCIATION',
+    re.IGNORECASE
+)
+_TRUSTEE_ROLE_RE = re.compile(
+    r'AS TRUSTEE|AS INDENTURE TRUSTEE|AS COLLATERAL AGENT|'
+    r'AS ADMINISTRATIVE AGENT|AS AGENT',
+    re.IGNORECASE
+)
+_TRUST_NAME_RE = re.compile(
+    r'LOAN TRUST|MORTGAGE TRUST|ASSET TRUST|RESOLUTION TRUST|'
+    r'OPPORTUNITY TRUST|PASS.THROUGH CERT',
+    re.IGNORECASE
+)
+_GSE_SUFFIX_RE = re.compile(
+    r'SECRETARY OF HOUSING|HOUSING AND URBAN DEV|'
+    r'FEDERAL HOUSING ADMIN|VETERANS AFFAIRS|\bHUD\b|\bFHA\b|\bFDIC\b',
+    re.IGNORECASE
+)
+
+
+def extract_suffix_signals(raw_name: str) -> dict:
+    """Extract classification signals from a raw filing name before suffix stripping."""
+    upper = (raw_name or '').upper()
+    return {
+        'has_banking_suffix': bool(_BANKING_SUFFIX_RE.search(upper)),
+        'has_trustee_role':   bool(_TRUSTEE_ROLE_RE.search(upper)),
+        'has_trust_name':     bool(_TRUST_NAME_RE.search(upper)),
+        'has_gse_suffix':     bool(_GSE_SUFFIX_RE.search(upper)),
+    }
+
+
+# ── FDIC institution cross-reference ─────────────────────────────────────────
+
+FDIC_API_URL = 'https://banks.data.fdic.gov/api/institutions'
+FDIC_CACHE_MAX_AGE_DAYS = 30
+
+
+def build_fdic_lookup(conn) -> set:
+    """Fetch FDIC-insured institution names and canonicalize them for matching.
+    Caches in a SQLite table; re-fetches if stale or empty."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS fdic_institution_cache (
+            canonical_name TEXT PRIMARY KEY,
+            raw_name       TEXT,
+            cert           TEXT,
+            fetched_at     TEXT
+        )
+    """)
+
+    row = conn.execute(
+        "SELECT fetched_at FROM fdic_institution_cache LIMIT 1"
+    ).fetchone()
+    if row:
+        try:
+            age_days = (time.time() - time.mktime(time.strptime(row[0], '%Y-%m-%d'))) / 86400
+            if age_days < FDIC_CACHE_MAX_AGE_DAYS:
+                cached = conn.execute("SELECT canonical_name FROM fdic_institution_cache").fetchall()
+                print(f"  FDIC cache hit: {len(cached)} institutions (age {age_days:.0f}d)")
+                return {r[0] for r in cached}
+        except (ValueError, TypeError):
+            pass
+
+    try:
+        print("  Fetching FDIC institution list...")
+        resp = requests.get(
+            FDIC_API_URL,
+            params={
+                'filters': 'ACTIVE:1',
+                'fields': 'CERT,NAME',
+                'limit': '10000',
+                'format': 'json',
+            },
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json().get('data', [])
+
+        today = time.strftime('%Y-%m-%d')
+        rows = []
+        canonical_set = set()
+        for item in data:
+            d = item.get('data', item)
+            raw = (d.get('NAME') or '').strip()
+            cert = str(d.get('CERT', ''))
+            if raw:
+                canon = canonicalize(raw)
+                canonical_set.add(canon)
+                rows.append((canon, raw, cert, today))
+
+        conn.execute("DELETE FROM fdic_institution_cache")
+        conn.executemany(
+            "INSERT OR IGNORE INTO fdic_institution_cache (canonical_name, raw_name, cert, fetched_at) VALUES (?,?,?,?)",
+            rows
+        )
+        conn.commit()
+        print(f"  Cached {len(canonical_set)} FDIC institutions")
+        return canonical_set
+
+    except Exception as e:
+        print(f"  [WARN] FDIC fetch failed: {e} — continuing without FDIC data")
+        cached = conn.execute("SELECT canonical_name FROM fdic_institution_cache").fetchall()
+        if cached:
+            print(f"  Using stale FDIC cache ({len(cached)} institutions)")
+            return {r[0] for r in cached}
+        return set()
+
+
+def fdic_classify(canonical_name: str, fdic_set: set) -> str | None:
+    """Return 'BANK' if the canonical name matches an FDIC-insured institution."""
+    if canonical_name in fdic_set:
+        return 'BANK'
+    return None
+
+
+# ── Behavioral classification ─────────────────────────────────────────────────
+
+def behavioral_classify(entity: str, conn) -> str | None:
+    """Classify based on transaction patterns in aom_events_clean."""
+    stats = conn.execute("""
+        SELECT
+            COALESCE(SUM(CASE WHEN assignee_canon = ? THEN 1 END), 0),
+            COALESCE(SUM(CASE WHEN assignor_canon = ? THEN 1 END), 0),
+            COUNT(DISTINCT CASE WHEN assignee_canon = ? THEN assignor_canon END),
+            COUNT(DISTINCT CASE WHEN assignor_canon = ? THEN assignee_canon END),
+            COALESCE(SUM(CASE WHEN assignee_canon = ? AND assignor_type = 'MERS' THEN 1 END), 0),
+            COALESCE(SUM(CASE WHEN assignee_canon = ? AND assignor_canon = assignee_canon THEN 1 END), 0)
+        FROM aom_events_clean
+    """, (entity, entity, entity, entity, entity, entity)).fetchone()
+
+    inbound, outbound, in_cp, out_cp, from_mers, self_assigns = stats
+    total = inbound + outbound
+
+    if total < 3:
+        return None
+
+    # SERVICER: frequently receives from MERS (nominee releases)
+    if from_mers >= 3 and from_mers / max(inbound, 1) > 0.15:
+        return 'SERVICER'
+
+    # TRUST: almost exclusively receives, rarely or never assigns out,
+    # limited number of counterparties feeding it
+    non_self_out = outbound - self_assigns
+    if inbound >= 3 and non_self_out <= 1 and in_cp <= 5:
+        return 'TRUST'
+
+    # BANK: high volume, balanced in/out flow, many unique counterparties
+    if total >= 10 and in_cp >= 5 and out_cp >= 3 and outbound >= 2:
+        return 'BANK'
+
+    return None
+
+
+# ── Confidence waterfall resolver ─────────────────────────────────────────────
+
+CONFIDENCE_ORDER = [
+    'manual_override',
+    'fdic_match',
+    'suffix_gse',
+    'suffix_banking',
+    'suffix_trust_name',
+    'behavioral',
+    'regex_rule',
+    'default',
+]
+
+
+def resolve_entity_type(entity: str, suffix_signals: dict,
+                        fdic_set: set, conn) -> tuple:
+    """Classify an entity using all available signals.
+    Returns (entity_type, confidence_source)."""
+
+    # 1. Manual overrides from enrich_entities (imported inline to avoid circular dep)
+    for key, val in _MANUAL_TYPE_OVERRIDES.items():
+        if key in entity.upper():
+            return val, 'manual_override'
+
+    # 2. GSE suffix (raw name had HUD/FHA/FDIC etc.)
+    if suffix_signals.get('has_gse_suffix'):
+        return 'GSE', 'suffix_gse'
+
+    # 3. FDIC institution match
+    t = fdic_classify(entity, fdic_set)
+    if t:
+        return t, 'fdic_match'
+
+    # 4. Banking suffix ("National Association", "Federal Savings Bank", etc.)
+    #    Only if the entity doesn't have a trust name (banks act as trustees)
+    if suffix_signals.get('has_banking_suffix') and not suffix_signals.get('has_trust_name'):
+        return 'BANK', 'suffix_banking'
+
+    # 5. Trust vehicle name pattern ("XYZ Loan Trust", etc.)
+    if suffix_signals.get('has_trust_name'):
+        return 'TRUST', 'suffix_trust_name'
+
+    # 6. Behavioral analysis from transaction patterns
+    t = behavioral_classify(entity, conn)
+    if t:
+        return t, 'behavioral'
+
+    # 7. Existing regex rule patterns
+    t = classify_canonical(entity)
+    if t != 'OTHER':
+        return t, 'regex_rule'
+
+    return 'OTHER', 'default'
+
+
+# Consolidated manual type overrides — single source of truth used by both
+# normalize.py and enrich_entities.py. Keyed by substring match on UPPER name.
+_MANUAL_TYPE_OVERRIDES: dict[str, str] = {
+    # Securitization trusts / structured finance vehicles
+    'MEB LOAN TRUST':               'TRUST',
+    'TOWD POINT':                   'TRUST',
+    'CV3 ALPHA TRUST':              'TRUST',
+    'US MORTGAGE RESOLUTION TRUST': 'TRUST',
+    'US RESOLUTION':                'TRUST',
+    'US MTG RESOLUTION':            'TRUST',
+    '1 SHARPE OPPORTUNITY TRUST':   'TRUST',
+    'CHURCHILL FUNDING I':          'TRUST',
+    'NWL 2016 EVERGREEN':           'TRUST',
+    'NWL COMPANY':                  'TRUST',
+    'FIRSTKEY MORTGAGE':            'TRUST',
+    'FIRSTKEY HOMES':               'TRUST',
+    'SALUDA GRADE MORTGAGE FUNDING': 'TRUST',
+    # Private credit / active asset managers
+    'KIAVI FUNDING':                'PRIVATE_CREDIT',
+    'ANCHOR LOANS':                 'PRIVATE_CREDIT',
+    'FIGURE LENDING':               'PRIVATE_CREDIT',
+    'VELOCITY COMMERCIAL':          'PRIVATE_CREDIT',
+    'REVERSE MORTGAGE FUNDING':     'PRIVATE_CREDIT',
+    'ELS HOLDINGS':                 'PRIVATE_CREDIT',
+    'ALTO CAPITAL':                 'PRIVATE_CREDIT',
+    'CITY FIRST':                   'PRIVATE_CREDIT',
+    'PACIFIC ASSET HOLDING':        'PRIVATE_CREDIT',
+    'LADDER CRE FINANCE REIT':      'PRIVATE_CREDIT',
+    'BANKWARD':                     'PRIVATE_CREDIT',
+    'RRA CAPITAL':                  'PRIVATE_CREDIT',
+    'WATERFALL ASSET MANAGEMENT':   'PRIVATE_CREDIT',
+    'FIXED INCOME USA':             'PRIVATE_CREDIT',
+    'MTGLQ INVESTORS':              'PRIVATE_CREDIT',
+    'ARIXA CAPITAL':                'PRIVATE_CREDIT',
+    'ATHENE ANNUITY':               'PRIVATE_CREDIT',
+    # Servicers
+    'FINANCE OF AMERICA REVERSE':   'SERVICER',
+    'PARAMOUNT RESIDENTIAL':        'SERVICER',
+    'CITIMORTGAGE':                 'SERVICER',
+    'COMPUTERSHARE TRUST':          'SERVICER',
+    'AMERIHOME MORTGAGE':           'SERVICER',
+    'PACIFIC UNION FINANCIAL':      'SERVICER',
+    'NEW RESIDENTIAL MORTGAGE':     'SERVICER',
+    'AMERICAN BANCSHARES MORTGAGE': 'SERVICER',
+    # Banks
+    'EASTERN FINANCIAL':            'BANK',
+    'BRADESCO':                     'BANK',
+    'SPACE COAST CREDIT UNION':     'BANK',
+    'DLJ MORTGAGE CAPITAL':         'BANK',
+    'TRUIST BANK':                  'BANK',
+    'MIDFIRST BANK':                'BANK',
+    'PACIFIC LIFE INSURANCE':       'BANK',
+}
+
+
 def get_txn_type(assignor_canon: str, assignee_canon: str,
                  assignor_type: str, assignee_type: str) -> str:
     if assignor_canon == assignee_canon:
@@ -321,33 +595,52 @@ def build_normalized_tables():
     conn = sqlite3.connect(DB)
     conn.execute('PRAGMA journal_mode=WAL')
 
+    # ── Step 0: Collect suffix signals from ALL raw filing names ───────────
+    print("Extracting suffix signals from raw filings...")
+    entity_signals: dict = defaultdict(lambda: {
+        'has_banking_suffix': False,
+        'has_trustee_role': False,
+        'has_trust_name': False,
+        'has_gse_suffix': False,
+    })
+
+    all_raw = conn.execute(
+        "SELECT DISTINCT grantor FROM assignments WHERE grantor IS NOT NULL "
+        "UNION "
+        "SELECT DISTINCT grantee FROM assignments WHERE grantee IS NOT NULL"
+    ).fetchall()
+
+    for (raw_name,) in all_raw:
+        canon = canonicalize(raw_name)
+        signals = extract_suffix_signals(raw_name)
+        for key, val in signals.items():
+            if val:
+                entity_signals[canon][key] = True
+
+    n_with_signals = sum(1 for s in entity_signals.values() if any(s.values()))
+    print(f"  Scanned {len(all_raw)} raw names → {n_with_signals} entities with suffix signals")
+
+    # ── Step 1: Build aom_events_clean ─────────────────────────────────────
     print("Building aom_events_clean...")
 
-    # aom_events_clean: one canonical record per CFN
-    # Strategy: for each CFN, find the DOMINANT direction
-    # (the one assignee that appears in the most rows, paired with a canonical assignor)
-    # For CFNs with a single assignor→grantee pair repeated N times, just pick the canonical pair
     conn.executescript("""
         DROP TABLE IF EXISTS aom_events_clean;
         CREATE TABLE aom_events_clean (
             cfn            TEXT PRIMARY KEY,
             rec_date       TEXT,
-            assignor       TEXT,  -- raw, dominant assignor name
-            assignee       TEXT,  -- raw, dominant assignee name
+            assignor       TEXT,
+            assignee       TEXT,
             assignor_canon TEXT,
             assignee_canon TEXT,
             assignor_type  TEXT,
             assignee_type  TEXT,
-            txn_type       TEXT,  -- MARKET_TRANSFER | ORIGINATION | SELF_ASSIGN | MERS_RELEASE | PRIVATE | OTHER
+            txn_type       TEXT,
             rec_book       TEXT,
             rec_page       TEXT,
-            total_parties  INTEGER  -- how many raw rows were rolled up
+            total_parties  INTEGER
         );
     """)
 
-    # For each CFN: pick the dominant (assignor, grantee) direction.
-    # "Dominant" = the pair where grantee appears the most times.
-    # If there's a clear majority grantee, that's the real transaction target.
     rows = conn.execute("""
         SELECT a.cfn,
                a.rec_date,
@@ -370,8 +663,6 @@ def build_normalized_tables():
 
     print(f"  Loaded {len(rows)} raw rows")
 
-    # Group by CFN, find dominant grantee
-    from collections import defaultdict
     cfn_groups: dict = defaultdict(list)
     for row in rows:
         cfn_groups[row[0]].append(row)
@@ -382,24 +673,19 @@ def build_normalized_tables():
     for cfn, entries in cfn_groups.items():
         total_parties = entries[0][8]
 
-        # Count grantee occurrences per CFN
         grantee_counts: dict = defaultdict(list)
         for e in entries:
             grantee_counts[e[3]].append(e)
 
-        # Pick dominant grantee (most rows)
         dominant_grantee, dominant_rows = max(grantee_counts.items(), key=lambda x: len(x[1]))
-        
-        # Pick the dominant assignor: the one that appears most as grantor among dominant rows
+
         assignor_counts: dict = defaultdict(int)
         for e in dominant_rows:
-            # Skip if assignor == grantee (self-assignment / mirror)
             if (e[2] or '').strip().upper() != (dominant_grantee or '').strip().upper():
                 assignor_counts[e[2]] += 1
 
         if assignor_counts:
             dominant_assignor = max(assignor_counts, key=assignor_counts.get)
-            # Get type info for dominant assignor
             assignor_entry = next((e for e in dominant_rows if e[2] == dominant_assignor), dominant_rows[0])
             assignor_type = assignor_entry[6]
         else:
@@ -407,7 +693,6 @@ def build_normalized_tables():
             dominant_assignor = assignor_entry[2] or 'UNKNOWN'
             assignor_type = assignor_entry[6] or 'OTHER'
 
-        # Get grantee type
         grantee_type = dominant_rows[0][7]
         rec_date = entries[0][1]
         rec_book = entries[0][4]
@@ -539,22 +824,48 @@ def build_normalized_tables():
     n_nodes = conn.execute("SELECT COUNT(*) FROM entity_nodes").fetchone()[0]
     print(f"  entity_nodes: {n_nodes} rows")
 
-    # ── Post-classification: assign entity types from canonical name patterns ──
-    print("Classifying entity types...")
+    # ── Multi-signal entity type classification ─────────────────────────────
+    print("Classifying entity types (multi-signal pipeline)...")
+
+    # Fetch FDIC institution list for bank identification
+    fdic_set = build_fdic_lookup(conn)
+
+    # Ensure entity_classifications has confidence_source column
+    try:
+        conn.execute("ALTER TABLE entity_classifications ADD COLUMN confidence_source TEXT")
+    except Exception:
+        pass
+
     all_nodes = conn.execute("SELECT entity FROM entity_nodes").fetchall()
     type_updates = []
-    for (entity,) in all_nodes:
-        etype = classify_canonical(entity)
-        if etype != 'OTHER':
-            type_updates.append((etype, entity))
+    classification_upserts = []
+    source_counts: dict = defaultdict(int)
 
-    if type_updates:
-        conn.executemany(
-            "UPDATE entity_nodes SET entity_type = ? WHERE entity = ?",
-            type_updates
-        )
-        conn.commit()
-        print(f"  Classified {len(type_updates)} entities (out of {n_nodes})")
+    for (entity,) in all_nodes:
+        signals = entity_signals.get(entity, {
+            'has_banking_suffix': False, 'has_trustee_role': False,
+            'has_trust_name': False, 'has_gse_suffix': False,
+        })
+        etype, source = resolve_entity_type(entity, signals, fdic_set, conn)
+        source_counts[source] += 1
+        type_updates.append((etype, entity))
+        classification_upserts.append((entity, etype, source))
+
+    conn.executemany(
+        "UPDATE entity_nodes SET entity_type = ? WHERE entity = ?",
+        type_updates
+    )
+    conn.executemany("""
+        INSERT INTO entity_classifications (name, category, confidence_source)
+        VALUES (?, ?, ?)
+        ON CONFLICT(name) DO UPDATE SET category = excluded.category,
+                                        confidence_source = excluded.confidence_source
+    """, classification_upserts)
+    conn.commit()
+
+    non_other = sum(1 for etype, _ in type_updates if etype != 'OTHER')
+    print(f"  Classified {non_other} entities (out of {n_nodes})")
+    print(f"  Signal sources: {dict(source_counts)}")
 
     # Propagate updated types back into aom_events_clean and re-derive txn_type
     conn.execute("""
@@ -568,7 +879,6 @@ def build_normalized_tables():
             'OTHER'
         )
     """)
-    # Re-derive txn_type now that types are finalized
     conn.execute("""
         UPDATE aom_events_clean SET txn_type =
         CASE

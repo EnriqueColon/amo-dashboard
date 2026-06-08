@@ -1,12 +1,14 @@
 """
-Entity Enrichment Pipeline
---------------------------
-Step 1 — Rule-based     : instant classification for GSEs and MERS
-Step 2 — GPT-4o-mini    : batch-classifies remaining entities by canonical name
-Step 3 — entity_classifications cache : persists across future normalize runs
-Step 4 — Propagate      : updates entity_nodes + aom_events_clean
+Entity Enrichment Pipeline (LLM Fallback)
+------------------------------------------
+Runs AFTER normalize.py's multi-signal classification pipeline.
+Only sends entities to GPT-4o-mini that couldn't be classified by:
+  manual overrides → FDIC match → suffix signals → behavioral patterns → regex rules
 
-Run after normalize.py. Safe to re-run — skips already-cached entities.
+Step 1 — Skip high-confidence classifications from normalize.py
+Step 2 — GPT-4o-mini for remaining entities typed OTHER with no confident source
+Step 3 — Cache results in entity_classifications
+Step 4 — Propagate to entity_nodes + aom_events_clean
 """
 import sqlite3
 import os
@@ -18,12 +20,15 @@ import requests
 
 DB         = os.environ.get('AMO_DB_PATH', '/opt/amo-dashboard/miami_dade_amo.db')
 OPENAI_KEY = os.environ.get('OPENAI_API_KEY', '')
-MIN_VOL    = 3      # skip entities with fewer total transactions
+MIN_VOL    = 1      # lowered: classify all entities (signals handle confidence)
 BATCH_SIZE = 60     # names per GPT request
 
 VALID_TYPES = {'BANK', 'SERVICER', 'PRIVATE_CREDIT', 'GSE', 'MERS', 'TRUST', 'OTHER'}
 
-# ── Fast rule-based pre-classification ────────────────────────────────────────
+# High-confidence sources that the LLM should NOT override
+HIGH_CONFIDENCE_SOURCES = {'manual_override', 'fdic_match', 'suffix_gse', 'suffix_banking', 'suffix_trust_name'}
+
+MERS_PATTERN = re.compile(r'^MERS$|MORTGAGE ELECTRONIC', re.IGNORECASE)
 GSE_PATTERN = re.compile(
     r'FANNIE MAE|FREDDIE MAC|GINNIE MAE|FHLMC|FNMA|GNMA|'
     r'SECRETARY OF HOUSING|DEPT\.? OF HOUSING|\bHUD\b|'
@@ -31,82 +36,10 @@ GSE_PATTERN = re.compile(
     r'VETERANS AFFAIRS|\bFDIC\b|FEDERAL DEPOSIT INSURANCE',
     re.IGNORECASE
 )
-MERS_PATTERN = re.compile(r'^MERS$|MORTGAGE ELECTRONIC', re.IGNORECASE)
-
-# ── Manual overrides — corrections that the LLM gets wrong ────────────────────
-# Applied BEFORE the LLM pass; these always win.
-MANUAL_OVERRIDES: dict[str, str] = {
-    # ── Securitization trusts / structured finance vehicles ──────────────────
-    # These are PASSIVE pools of loans held in trust, not active investment firms.
-    'MEB LOAN TRUST':               'TRUST',
-    'TOWD POINT':                   'TRUST',
-    'CV3 ALPHA TRUST':              'TRUST',
-    'US MORTGAGE RESOLUTION TRUST': 'TRUST',
-    'US RESOLUTION':                'TRUST',
-    'US MTG RESOLUTION':            'TRUST',
-    '1 SHARPE OPPORTUNITY TRUST':   'TRUST',
-    'CHURCHILL FUNDING I':          'TRUST',
-    'NWL 2016 EVERGREEN':           'TRUST',
-    'NWL COMPANY':                  'TRUST',
-    'FIRSTKEY MORTGAGE':            'TRUST',
-    'FIRSTKEY HOMES':               'TRUST',
-    # ── Active private credit / asset managers ───────────────────────────────
-    'KIAVI FUNDING':                'PRIVATE_CREDIT',
-    'ANCHOR LOANS':                 'PRIVATE_CREDIT',
-    'FIGURE LENDING':               'PRIVATE_CREDIT',
-    'VELOCITY COMMERCIAL CAPITAL':  'PRIVATE_CREDIT',
-    'VELOCITY COMMERCIAL':          'PRIVATE_CREDIT',
-    'REVERSE MORTGAGE FUNDING':     'PRIVATE_CREDIT',
-    'ELS HOLDINGS':                 'PRIVATE_CREDIT',
-    'ALTO CAPITAL':                 'PRIVATE_CREDIT',
-    'CITY FIRST':                   'PRIVATE_CREDIT',
-    'PACIFIC ASSET HOLDING':        'PRIVATE_CREDIT',
-    'LADDER CRE FINANCE REIT':      'PRIVATE_CREDIT',
-    'BANKWARD':                     'PRIVATE_CREDIT',
-    'RRA CAPITAL':                  'PRIVATE_CREDIT',
-    'WATERFALL ASSET MANAGEMENT':   'PRIVATE_CREDIT',
-    'FIXED INCOME USA':             'PRIVATE_CREDIT',
-    # ── Servicers ────────────────────────────────────────────────────────────
-    'FINANCE OF AMERICA REVERSE':   'SERVICER',
-    'PARAMOUNT RESIDENTIAL MORTGAGE': 'SERVICER',
-    'PARAMOUNT RESIDENTIAL':          'SERVICER',
-    'CITIMORTGAGE':                 'SERVICER',
-    'COMPUTERSHARE TRUST':          'SERVICER',
-    'AMERIHOME MORTGAGE':           'SERVICER',
-    'PACIFIC UNION FINANCIAL':      'SERVICER',
-    # New Residential Mortgage = servicing subsidiary of Rithm Capital, NOT the parent PE REIT
-    'NEW RESIDENTIAL MORTGAGE':     'SERVICER',
-    # Correspondent originators / mortgage banks
-    'AMERICAN BANCSHARES MORTGAGE': 'SERVICER',
-    # ── Banks ────────────────────────────────────────────────────────────────
-    'EASTERN FINANCIAL MORTGAGE':   'BANK',
-    'EASTERN FINANCIAL':            'BANK',
-    'BRADESCO BANK':                'BANK',
-    'BRADESCO':                     'BANK',
-    'SPACE COAST CREDIT UNION':     'BANK',
-    'DLJ MORTGAGE CAPITAL':         'BANK',
-    'TRUIST BANK':                  'BANK',
-    'MIDFIRST BANK':                'BANK',
-    # Pacific Life = large institutional insurer (regulated, not PE)
-    'PACIFIC LIFE INSURANCE':       'BANK',
-    # ── Securitization trusts ────────────────────────────────────────────────
-    'SALUDA GRADE MORTGAGE FUNDING': 'TRUST',
-    # ── Private credit (active managers) ────────────────────────────────────
-    # MTGLQ = Goldman Sachs NPL acquisition vehicle (confirmed PE/credit fund)
-    'MTGLQ INVESTORS':              'PRIVATE_CREDIT',
-    # Arixa Capital = private real estate bridge lender
-    'ARIXA CAPITAL':                'PRIVATE_CREDIT',
-    # Athene Annuity = Apollo-backed insurer / structured credit investor
-    'ATHENE ANNUITY':               'PRIVATE_CREDIT',
-}
 
 
 def rule_classify(name: str) -> str | None:
-    # Manual overrides win first
-    upper = name.upper().strip()
-    for key, val in MANUAL_OVERRIDES.items():
-        if key in upper:
-            return val
+    """Quick rule check for MERS and GSE — used as pre-filter before LLM."""
     if MERS_PATTERN.search(name):
         return 'MERS'
     if GSE_PATTERN.search(name):
@@ -181,48 +114,57 @@ def enrich(force_reclassify: bool = False):
     conn = sqlite3.connect(DB)
     conn.execute('PRAGMA journal_mode=WAL')
 
-    # Entities already in cache (skip unless --force flag)
-    already: set[str] = set()
-    if not force_reclassify:
-        already = {
-            row[0] for row in
-            conn.execute("SELECT name FROM entity_classifications").fetchall()
-        }
+    # Ensure confidence_source column exists
+    try:
+        conn.execute("ALTER TABLE entity_classifications ADD COLUMN confidence_source TEXT")
+    except Exception:
+        pass
 
-    # When forcing, apply manual overrides immediately to the cache and entity_nodes
+    # Identify entities that still need LLM classification:
+    # - Not already classified by a high-confidence source
+    # - Currently typed OTHER or not yet cached
     if force_reclassify:
-        print("Force-reclassify mode: applying manual overrides to entire cache...")
-        override_updates = []
-        for row in conn.execute("SELECT name FROM entity_classifications").fetchall():
-            name = row[0]
-            for key, val in MANUAL_OVERRIDES.items():
-                if key in name.upper():
-                    override_updates.append((val, name))
-                    break
-        if override_updates:
-            conn.executemany(
-                "UPDATE entity_classifications SET category = ? WHERE name = ?",
-                override_updates
-            )
-            conn.executemany(
-                "UPDATE entity_nodes SET entity_type = ? WHERE entity = ?",
-                override_updates
-            )
-            conn.commit()
-            print(f"  Applied {len(override_updates)} override corrections")
+        # Re-classify everything that isn't high-confidence
+        candidates = conn.execute("""
+            SELECT en.entity, en.total_vol
+            FROM entity_nodes en
+            LEFT JOIN entity_classifications ec ON en.entity = ec.name
+            WHERE en.total_vol >= ?
+              AND COALESCE(ec.confidence_source, 'default') NOT IN (?, ?, ?, ?, ?)
+            ORDER BY en.total_vol DESC
+        """, (MIN_VOL, *HIGH_CONFIDENCE_SOURCES)).fetchall()
+    else:
+        # Only classify entities still at OTHER/default that haven't had LLM run
+        candidates = conn.execute("""
+            SELECT en.entity, en.total_vol
+            FROM entity_nodes en
+            LEFT JOIN entity_classifications ec ON en.entity = ec.name
+            WHERE en.total_vol >= ?
+              AND COALESCE(ec.confidence_source, 'default') IN ('default', 'regex_rule')
+              AND COALESCE(ec.category, 'OTHER') = 'OTHER'
+            ORDER BY en.total_vol DESC
+        """, (MIN_VOL,)).fetchall()
 
-    # Entities above volume threshold, sorted high→low so important ones go first
-    candidates = conn.execute(
-        "SELECT entity, total_vol FROM entity_nodes WHERE total_vol >= ? ORDER BY total_vol DESC",
-        (MIN_VOL,)
-    ).fetchall()
+    # Also pick up entities not yet in the cache at all
+    uncached = conn.execute("""
+        SELECT en.entity, en.total_vol
+        FROM entity_nodes en
+        LEFT JOIN entity_classifications ec ON en.entity = ec.name
+        WHERE ec.name IS NULL AND en.total_vol >= ?
+        ORDER BY en.total_vol DESC
+    """, (MIN_VOL,)).fetchall()
 
-    to_classify = [(e, v) for e, v in candidates if e not in already]
-    print(f"Entities to classify: {len(to_classify)}  (skipping {len(already)} already cached)")
+    to_classify = list({e: v for e, v in candidates + uncached}.items())
+    high_conf_count = conn.execute(
+        "SELECT COUNT(*) FROM entity_classifications WHERE confidence_source IN (?, ?, ?, ?, ?)",
+        tuple(HIGH_CONFIDENCE_SOURCES)
+    ).fetchone()[0]
+
+    print(f"Entities for LLM pass: {len(to_classify)}  (skipping {high_conf_count} high-confidence)")
 
     results: dict[str, str] = {}
 
-    # ── Pass 1: fast rules ───────────────────────────────────────────────────
+    # ── Pass 1: fast rules (MERS/GSE only — other rules already ran in normalize) ─
     llm_queue: list[str] = []
     for entity, _ in to_classify:
         t = rule_classify(entity)
@@ -250,19 +192,25 @@ def enrich(force_reclassify: bool = False):
     for entity, _ in to_classify:
         results.setdefault(entity, 'OTHER')
 
-    # ── Write cache ──────────────────────────────────────────────────────────
+    # ── Write cache with confidence_source ───────────────────────────────────
     print(f"\nCaching {len(results)} classifications...")
-    conn.executemany(
-        "INSERT OR REPLACE INTO entity_classifications (name, category) VALUES (?, ?)",
-        list(results.items())
-    )
+    llm_set = set(llm_queue)
+    cache_rows = [(name, etype, 'llm' if name in llm_set else 'regex_rule')
+                  for name, etype in results.items()]
+
+    conn.executemany("""
+        INSERT INTO entity_classifications (name, category, confidence_source)
+        VALUES (?, ?, ?)
+        ON CONFLICT(name) DO UPDATE SET category = excluded.category,
+                                        confidence_source = excluded.confidence_source
+    """, cache_rows)
     conn.commit()
 
-    # ── Update entity_nodes ──────────────────────────────────────────────────
+    # ── Update entity_nodes (including OTHER results from LLM) ────────────
     print("Updating entity_nodes...")
     conn.executemany(
         "UPDATE entity_nodes SET entity_type = ? WHERE entity = ?",
-        [(t, n) for n, t in results.items() if t != 'OTHER']
+        [(t, n) for n, t in results.items()]
     )
     conn.commit()
 

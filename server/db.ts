@@ -24,7 +24,7 @@ export function getDb(): Database.Database {
       CREATE TABLE IF NOT EXISTS entity_classifications (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT UNIQUE, category TEXT, subcategory TEXT,
-        sub_category TEXT, notes TEXT
+        sub_category TEXT, notes TEXT, confidence_source TEXT
       );
       CREATE TABLE IF NOT EXISTS collection_log (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -79,6 +79,13 @@ export function getDb(): Database.Database {
     try {
       _db.exec(`ALTER TABLE aom_events_clean ADD COLUMN txn_type TEXT`);
       console.log('[db] migrated: added txn_type column to aom_events_clean');
+    } catch (_e) {
+      // Column already present — nothing to do
+    }
+
+    try {
+      _db.exec(`ALTER TABLE entity_classifications ADD COLUMN confidence_source TEXT`);
+      console.log('[db] migrated: added confidence_source column to entity_classifications');
     } catch (_e) {
       // Column already present — nothing to do
     }

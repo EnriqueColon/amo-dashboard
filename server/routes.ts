@@ -315,16 +315,34 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     // Update entity_nodes immediately
     db.prepare(`UPDATE entity_nodes SET entity_type = ? WHERE entity = ?`).run(type, name);
 
-    // Upsert into entity_classifications so the override persists
+    // Upsert into entity_classifications with manual_override confidence
     db.prepare(`
-      INSERT INTO entity_classifications (name, category, sub_category)
-      VALUES (?, ?, '')
-      ON CONFLICT(name) DO UPDATE SET category = excluded.category
+      INSERT INTO entity_classifications (name, category, sub_category, confidence_source)
+      VALUES (?, ?, '', 'manual_override')
+      ON CONFLICT(name) DO UPDATE SET category = excluded.category,
+                                      confidence_source = 'manual_override'
     `).run(name, type);
 
-    // Also cascade into aom_events_clean so txn_type stays consistent
+    // Cascade into aom_events_clean
     db.prepare(`UPDATE aom_events_clean SET assignor_type = ? WHERE assignor_canon = ?`).run(type, name);
     db.prepare(`UPDATE aom_events_clean SET assignee_type = ? WHERE assignee_canon = ?`).run(type, name);
+
+    // Re-derive txn_type for all affected transactions
+    db.prepare(`
+      UPDATE aom_events_clean SET txn_type =
+      CASE
+        WHEN assignor_canon = assignee_canon THEN 'SELF_ASSIGN'
+        WHEN assignor_type  = 'MERS'         THEN 'MERS_RELEASE'
+        WHEN assignor_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST')
+         AND assignee_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST') THEN 'MARKET_TRANSFER'
+        WHEN assignor_type NOT IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST','MERS')
+         AND assignee_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST') THEN 'ORIGINATION'
+        WHEN assignor_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST')
+         AND assignee_type NOT IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST','MERS') THEN 'INSTITUTIONAL_OUT'
+        ELSE 'PRIVATE'
+      END
+      WHERE assignor_canon = ? OR assignee_canon = ?
+    `).run(name, name);
 
     // Clear all relevant cache keys so next request sees fresh data
     clearCacheByPrefix('/api/entity');
@@ -332,6 +350,9 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     clearCacheByPrefix('/api/deal-intelligence');
     clearCacheByPrefix('/api/network');
     clearCacheByPrefix('/api/stats');
+    clearCacheByPrefix('/api/assignments');
+    clearCacheByPrefix('/api/clean-events');
+    clearCacheByPrefix('/api/flow-matrix');
 
     res.json({ ok: true, name, type });
   });
