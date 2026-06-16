@@ -112,10 +112,12 @@ def ensure_schema(conn: sqlite3.Connection):
     conn.commit()
 
 
-def pending_documents(conn: sqlite3.Connection, limit: int, retry_errors: bool) -> list:
+def pending_documents(conn: sqlite3.Connection, limit: int, retry_errors: bool,
+                      since: str | None = None) -> list:
     """CFNs from assignments that have no (successful) extraction yet, newest first."""
     status_clause = "px.cfn IS NULL" if not retry_errors else \
                     "(px.cfn IS NULL OR px.status != 'OK')"
+    date_clause = f"AND a.rec_date >= '{since}'" if since else ""
     return conn.execute(f"""
         SELECT a.cfn, a.rec_book, a.rec_page, a.rec_date
         FROM assignments a
@@ -123,6 +125,7 @@ def pending_documents(conn: sqlite3.Connection, limit: int, retry_errors: bool) 
         WHERE {status_clause}
           AND a.rec_book IS NOT NULL AND a.rec_book != ''
           AND a.rec_page IS NOT NULL AND a.rec_page != ''
+          {date_clause}
         GROUP BY a.cfn
         ORDER BY a.rec_date DESC
         LIMIT ?
@@ -237,13 +240,13 @@ def save(conn, cfn, rec_book, rec_page, status, data=None, ocr_chars=0):
 
 # ── Main loop ─────────────────────────────────────────────────────────────────
 
-def run(limit: int, retry_errors: bool):
+def run(limit: int, retry_errors: bool, since: str | None = None):
     if not OPENAI_KEY:
         raise SystemExit('OPENAI_API_KEY is not set')
 
     conn = get_conn()
     ensure_schema(conn)
-    docs = pending_documents(conn, limit, retry_errors)
+    docs = pending_documents(conn, limit, retry_errors, since=since)
     print(f'Pending documents: {len(docs)} (limit {limit})')
 
     counts = {'OK': 0, 'DOWNLOAD_ERROR': 0, 'OCR_ERROR': 0, 'LLM_ERROR': 0}
@@ -302,5 +305,7 @@ if __name__ == '__main__':
                    help='max documents to process this run (default 500)')
     p.add_argument('--retry-errors', action='store_true',
                    help='re-attempt previously failed documents')
+    p.add_argument('--since', type=str, default=None,
+                   help='only process documents recorded on or after this date (YYYY-MM-DD)')
     args = p.parse_args()
-    run(args.limit, args.retry_errors)
+    run(args.limit, args.retry_errors, since=args.since)
