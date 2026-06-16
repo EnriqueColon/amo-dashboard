@@ -572,7 +572,10 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const total = (db.prepare(`SELECT COUNT(*) as n FROM aom_events_clean ${wc}`).get(...params) as any).n;
     const rows = db.prepare(`
       SELECT cfn, rec_date, assignor, assignee, assignor_canon, assignee_canon,
-             assignor_type, assignee_type, txn_type, rec_book, rec_page, total_parties
+             assignor_type, assignee_type, txn_type, rec_book, rec_page, total_parties,
+             doc_type, doc_category, doc_title, pdf_assignor, pdf_assignee,
+             assignor_parent, assignee_parent, property_address,
+             loan_amount, consideration_amount
       FROM aom_events_clean ${wc}
       ORDER BY rec_date DESC LIMIT ? OFFSET ?
     `).all(...params, limitNum, offset);

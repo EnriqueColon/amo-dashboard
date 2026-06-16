@@ -2,13 +2,15 @@
 Entity Enrichment Pipeline (LLM Fallback)
 ------------------------------------------
 Runs AFTER normalize.py's multi-signal classification pipeline.
-Only sends entities to GPT-4o-mini that couldn't be classified by:
+Only sends entities to OpenAI that couldn't be classified by:
   manual overrides → FDIC match → suffix signals → behavioral patterns → regex rules
 
 Step 1 — Skip high-confidence classifications from normalize.py
-Step 2 — GPT-4o-mini for remaining entities typed OTHER with no confident source
+Step 2 — gpt-4.1-nano for remaining entities typed OTHER with no confident source
 Step 3 — Cache results in entity_classifications
 Step 4 — Propagate to entity_nodes + aom_events_clean
+
+Model is configurable via OPENAI_MODEL (default: gpt-4.1-nano).
 """
 import sqlite3
 import os
@@ -18,10 +20,12 @@ import re
 import sys
 import requests
 
-DB         = os.environ.get('AMO_DB_PATH', '/opt/amo-dashboard/miami_dade_amo.db')
-OPENAI_KEY = os.environ.get('OPENAI_API_KEY', '')
+DB           = os.environ.get('AMO_DB_PATH', '/opt/amo-dashboard/miami_dade_amo.db')
+OPENAI_KEY   = os.environ.get('OPENAI_API_KEY', '')
+OPENAI_MODEL = os.environ.get('OPENAI_MODEL', 'gpt-4.1-nano')
+OPENAI_URL   = 'https://api.openai.com/v1/chat/completions'
 MIN_VOL    = 1      # lowered: classify all entities (signals handle confidence)
-BATCH_SIZE = 60     # names per GPT request
+BATCH_SIZE = 60     # names per request
 
 VALID_TYPES = {'BANK', 'SERVICER', 'PRIVATE_CREDIT', 'GSE', 'MERS', 'TRUST', 'OTHER'}
 
@@ -47,7 +51,7 @@ def rule_classify(name: str) -> str | None:
     return None
 
 
-# ── GPT-4o-mini batch classification ──────────────────────────────────────────
+# ── Claude batch classification ───────────────────────────────────────────────
 SYSTEM_PROMPT = """You are an expert in US mortgage and real estate finance markets.
 Classify each entity name as exactly one of:
 
@@ -65,25 +69,28 @@ Classification rules:
 - "ASSETS MANAGEMENT" standalone → OTHER
 - If a name contains "BANK" but is clearly a small local LLC → OTHER
 - Any entity whose name ends in "LOAN TRUST", "MORTGAGE TRUST", "ASSET TRUST", or "RESOLUTION TRUST" → TRUST
-- Respond ONLY with a valid JSON array: [{"name":"...","type":"BANK"}, ...]
-- No explanation, no markdown fences, no extra text — only the JSON array."""
+- Respond ONLY with a valid JSON object: {"results": [{"name":"...","type":"BANK"}, ...]}
+- No explanation, no markdown fences, no extra text — only the JSON object."""
 
 
 def llm_classify_batch(names: list[str]) -> dict[str, str]:
-    """Send up to BATCH_SIZE names to GPT-4o-mini; return {name: type}."""
+    """Send up to BATCH_SIZE names to OpenAI; return {name: type}."""
     if not OPENAI_KEY:
         print("  [WARN] OPENAI_API_KEY not set — skipping LLM")
         return {}
+    raw = ''
     try:
         resp = requests.post(
-            'https://api.openai.com/v1/chat/completions',
+            OPENAI_URL,
             headers={
                 'Authorization': f'Bearer {OPENAI_KEY}',
                 'Content-Type': 'application/json',
             },
             json={
-                'model': 'gpt-4o-mini',
+                'model': OPENAI_MODEL,
+                'max_tokens': 4096,
                 'temperature': 0,
+                'response_format': {'type': 'json_object'},
                 'messages': [
                     {'role': 'system', 'content': SYSTEM_PROMPT},
                     {'role': 'user',   'content': '\n'.join(names)},
@@ -92,10 +99,9 @@ def llm_classify_batch(names: list[str]) -> dict[str, str]:
             timeout=90,
         )
         resp.raise_for_status()
-        raw = resp.json()['choices'][0]['message']['content'].strip()
-        raw = re.sub(r'^```(?:json)?\s*', '', raw)
-        raw = re.sub(r'\s*```$', '', raw)
-        items = json.loads(raw)
+        raw = resp.json()['choices'][0]['message']['content']
+        parsed = json.loads(raw)
+        items = parsed.get('results', [])
         return {
             item['name']: item['type']
             for item in items
@@ -176,7 +182,7 @@ def enrich(force_reclassify: bool = False):
 
     # ── Pass 2: LLM batches ──────────────────────────────────────────────────
     batches = [llm_queue[i:i+BATCH_SIZE] for i in range(0, len(llm_queue), BATCH_SIZE)]
-    print(f"  Sending {len(batches)} batches to GPT-4o-mini...")
+    print(f"  Sending {len(batches)} batches to {OPENAI_MODEL}...")
 
     for b_idx, batch in enumerate(batches):
         batch_result = llm_classify_batch(batch)

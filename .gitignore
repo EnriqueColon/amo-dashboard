@@ -3,6 +3,9 @@ dist/
 build/
 .env
 .env.local
+collector/config.py
+collector/collector.log
+__pycache__/
 *.db
 *.sqlite
 *.sqlite3

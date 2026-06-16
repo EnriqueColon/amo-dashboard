@@ -89,6 +89,41 @@ export function getDb(): Database.Database {
     } catch (_e) {
       // Column already present — nothing to do
     }
+
+    // Migration: PDF-extraction columns on aom_events_clean (populated by
+    // collector/normalize.py from the pdf_extractions table).
+    const pdfColumns: Array<[string, string]> = [
+      ['doc_type', 'TEXT'],
+      ['doc_category', 'TEXT'],
+      ['doc_title', 'TEXT'],
+      ['pdf_assignor', 'TEXT'],
+      ['pdf_assignee', 'TEXT'],
+      ['assignor_parent', 'TEXT'],
+      ['assignee_parent', 'TEXT'],
+      ['property_address', 'TEXT'],
+      ['loan_amount', 'REAL'],
+      ['consideration_amount', 'REAL'],
+    ];
+    for (const [col, type] of pdfColumns) {
+      try {
+        _db.exec(`ALTER TABLE aom_events_clean ADD COLUMN ${col} ${type}`);
+        console.log(`[db] migrated: added ${col} column to aom_events_clean`);
+      } catch (_e) {
+        // Column already present — nothing to do
+      }
+    }
+
+    _db.exec(`
+      CREATE TABLE IF NOT EXISTS pdf_extractions (
+        cfn TEXT PRIMARY KEY,
+        rec_book TEXT, rec_page TEXT,
+        status TEXT, doc_category TEXT, doc_title TEXT,
+        assignor_name TEXT, assignor_parent TEXT,
+        assignee_name TEXT, assignee_parent TEXT,
+        property_address TEXT, loan_amount REAL, consideration_amount REAL,
+        ocr_chars INTEGER, model TEXT, extracted_at TEXT, raw_json TEXT
+      );
+    `);
   }
   return _db;
 }

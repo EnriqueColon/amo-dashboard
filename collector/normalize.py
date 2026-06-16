@@ -626,20 +626,68 @@ def build_normalized_tables():
     conn.executescript("""
         DROP TABLE IF EXISTS aom_events_clean;
         CREATE TABLE aom_events_clean (
-            cfn            TEXT PRIMARY KEY,
-            rec_date       TEXT,
-            assignor       TEXT,
-            assignee       TEXT,
-            assignor_canon TEXT,
-            assignee_canon TEXT,
-            assignor_type  TEXT,
-            assignee_type  TEXT,
-            txn_type       TEXT,
-            rec_book       TEXT,
-            rec_page       TEXT,
-            total_parties  INTEGER
+            cfn                  TEXT PRIMARY KEY,
+            rec_date             TEXT,
+            assignor             TEXT,
+            assignee             TEXT,
+            assignor_canon       TEXT,
+            assignee_canon       TEXT,
+            assignor_type        TEXT,
+            assignee_type        TEXT,
+            txn_type             TEXT,
+            rec_book             TEXT,
+            rec_page             TEXT,
+            total_parties        INTEGER,
+            doc_type             TEXT,
+            doc_category         TEXT,
+            doc_title            TEXT,
+            pdf_assignor         TEXT,
+            pdf_assignee         TEXT,
+            assignor_parent      TEXT,
+            assignee_parent      TEXT,
+            property_address     TEXT,
+            loan_amount          REAL,
+            consideration_amount REAL
         );
     """)
+
+    # PDF extraction cache (built by extract_pdfs.py; may be empty)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS pdf_extractions (
+            cfn                  TEXT PRIMARY KEY,
+            rec_book             TEXT,
+            rec_page             TEXT,
+            status               TEXT,
+            doc_category         TEXT,
+            doc_title            TEXT,
+            assignor_name        TEXT,
+            assignor_parent      TEXT,
+            assignee_name        TEXT,
+            assignee_parent      TEXT,
+            property_address     TEXT,
+            loan_amount          REAL,
+            consideration_amount REAL,
+            ocr_chars            INTEGER,
+            model                TEXT,
+            extracted_at         TEXT,
+            raw_json             TEXT
+        )
+    """)
+    extractions = {
+        r[0]: {
+            'doc_category': r[1], 'assignor_name': r[2], 'assignor_parent': r[3],
+            'assignee_name': r[4], 'assignee_parent': r[5],
+            'property_address': r[6], 'loan_amount': r[7], 'consideration_amount': r[8],
+            'doc_title': r[9],
+        }
+        for r in conn.execute("""
+            SELECT cfn, doc_category, assignor_name, assignor_parent,
+                   assignee_name, assignee_parent, property_address,
+                   loan_amount, consideration_amount, doc_title
+            FROM pdf_extractions WHERE status = 'OK'
+        """).fetchall()
+    }
+    print(f"  PDF extractions available: {len(extractions)}")
 
     rows = conn.execute("""
         SELECT a.cfn,
@@ -655,7 +703,9 @@ def build_normalized_tables():
                    PARTITION BY a.cfn, a.grantee
                    ORDER BY a.rowid
                ) as rn,
-               COUNT(*) OVER (PARTITION BY a.cfn, a.grantee) as grantee_count
+               COUNT(*) OVER (PARTITION BY a.cfn, a.grantee) as grantee_count,
+               a.doc_type,
+               a.address
         FROM assignments a
         LEFT JOIN entity_classifications ec_g ON UPPER(a.grantor)=UPPER(ec_g.name)
         LEFT JOIN entity_classifications ec_a ON UPPER(a.grantee)=UPPER(ec_a.name)
@@ -669,9 +719,28 @@ def build_normalized_tables():
 
     print(f"  Processing {len(cfn_groups)} unique CFNs...")
 
+    AMO_DOC_TYPE = 'ASSIGNMENT OF MORTGAGE - AMO'
     inserts = []
+    skipped_non_loan = 0
     for cfn, entries in cfn_groups.items():
         total_parties = entries[0][8]
+        doc_type = entries[0][11] or AMO_DOC_TYPE
+        index_address = (entries[0][12] or '').strip() or None
+
+        # ── Loan-transfer filter ────────────────────────────────────────────
+        # Dedicated AMO filings are loan transfers by definition; they stay
+        # unless the PDF proves otherwise. Generic ASG / AIT filings are a
+        # mixed bag (rents, leases, collateral, judgments...) and only enter
+        # the clean table once the PDF is classified as a loan transfer.
+        ext = extractions.get(cfn)
+        doc_category = ext['doc_category'] if ext else None
+        if doc_type == AMO_DOC_TYPE:
+            include = doc_category in (None, 'LOAN_TRANSFER')
+        else:
+            include = doc_category == 'LOAN_TRANSFER'
+        if not include:
+            skipped_non_loan += 1
+            continue
 
         grantee_counts: dict = defaultdict(list)
         for e in entries:
@@ -709,19 +778,32 @@ def build_normalized_tables():
             assignor_type, grantee_type,
             txn_type,
             rec_book, rec_page,
-            total_parties
+            total_parties,
+            doc_type,
+            doc_category,
+            ext['doc_title']         if ext else None,
+            ext['assignor_name']     if ext else None,
+            ext['assignee_name']     if ext else None,
+            ext['assignor_parent']   if ext else None,
+            ext['assignee_parent']   if ext else None,
+            (ext['property_address'] if ext and ext['property_address'] else index_address),
+            ext['loan_amount']           if ext else None,
+            ext['consideration_amount']  if ext else None,
         ))
 
     conn.executemany("""
         INSERT OR REPLACE INTO aom_events_clean
         (cfn, rec_date, assignor, assignee, assignor_canon, assignee_canon,
-         assignor_type, assignee_type, txn_type, rec_book, rec_page, total_parties)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+         assignor_type, assignee_type, txn_type, rec_book, rec_page, total_parties,
+         doc_type, doc_category, doc_title, pdf_assignor, pdf_assignee,
+         assignor_parent, assignee_parent, property_address,
+         loan_amount, consideration_amount)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     """, inserts)
     conn.commit()
 
     n = conn.execute("SELECT COUNT(*) FROM aom_events_clean").fetchone()[0]
-    print(f"  aom_events_clean: {n} rows")
+    print(f"  aom_events_clean: {n} rows ({skipped_non_loan} non-loan-transfer filings excluded)")
 
     # ── Entity relationships ──────────────────────────────────────────────────
     print("Building entity_relationships...")

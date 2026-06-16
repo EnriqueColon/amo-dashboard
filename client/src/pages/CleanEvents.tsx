@@ -174,13 +174,24 @@ function getTransactionNarrative(row: {
   };
 }
 
+// ── Currency formatting ──────────────────────────────────────────────────────
+function fmtAmount(v: number | null | undefined): string | null {
+  if (v == null || !isFinite(v) || v <= 0) return null;
+  return v.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+}
+
 // ── Expandable transaction detail row ────────────────────────────────────────
 function TransactionDetail({ row }: { row: any }) {
   const n = getTransactionNarrative(row);
   const Icon = n.icon;
+  const loanAmt = fmtAmount(row.loan_amount);
+  const considAmt = fmtAmount(row.consideration_amount);
+  const hasPdfData = row.doc_title || row.pdf_assignor || row.pdf_assignee
+    || row.assignor_parent || row.assignee_parent || row.property_address
+    || loanAmt || considAmt;
   return (
     <tr className="bg-muted/10 border-b border-border/30">
-      <td colSpan={8} className="px-4 py-4">
+      <td colSpan={10} className="px-4 py-4">
         <div className="flex gap-4">
           {/* Icon column */}
           <div className={`shrink-0 mt-0.5 ${n.accentClass}`}>
@@ -203,6 +214,43 @@ function TransactionDetail({ row }: { row: any }) {
                 </div>
               )}
             </div>
+            {/* Data extracted from the recorded document */}
+            {hasPdfData && (
+              <div className="space-y-1.5 pt-1 border-t border-border/30">
+                <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                  <BookOpen size={10} />
+                  From the recorded document (PDF)
+                </p>
+                {row.doc_title && (
+                  <p className="text-xs font-medium text-foreground uppercase tracking-wide">
+                    “{row.doc_title}”
+                  </p>
+                )}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 text-xs">
+                  {row.pdf_assignor && (
+                    <div><span className="text-muted-foreground">Assignor as written:</span> <span className="text-foreground">{row.pdf_assignor}</span></div>
+                  )}
+                  {row.pdf_assignee && (
+                    <div><span className="text-muted-foreground">Assignee as written:</span> <span className="text-foreground">{row.pdf_assignee}</span></div>
+                  )}
+                  {row.assignor_parent && (
+                    <div><span className="text-muted-foreground">Assignor related entity:</span> <span className="text-amber-400">{row.assignor_parent}</span></div>
+                  )}
+                  {row.assignee_parent && (
+                    <div><span className="text-muted-foreground">Assignee related entity:</span> <span className="text-amber-400">{row.assignee_parent}</span></div>
+                  )}
+                  {row.property_address && (
+                    <div><span className="text-muted-foreground">Property:</span> <span className="text-foreground">{row.property_address}</span></div>
+                  )}
+                  {loanAmt && (
+                    <div><span className="text-muted-foreground">Loan amount:</span> <span className="text-emerald-400 font-mono">{loanAmt}</span></div>
+                  )}
+                  {considAmt && (
+                    <div><span className="text-muted-foreground">Consideration paid:</span> <span className="text-emerald-400 font-mono">{considAmt}</span></div>
+                  )}
+                </div>
+              </div>
+            )}
             {/* Recording reference */}
             <div className="flex items-center gap-4 pt-1 border-t border-border/30 text-[10px] text-muted-foreground">
               <span>CFN <span className="font-mono text-foreground">{row.cfn}</span></span>
@@ -350,6 +398,8 @@ export default function CleanEvents() {
               <div><span className="text-foreground font-medium">Canonical name</span> — Normalized version (suffixes stripped, brand aliases unified). The smaller grey text below is the original raw name from the filing.</div>
               <div><span className="text-foreground font-medium">Category badge</span> — Entity type: BANK, SERVICER, PRIVATE CREDIT, GSE, MERS, or OTHER.</div>
               <div><span className="text-foreground font-medium">Type</span> — Transaction classification: <em>Market Transfer</em> (institution→institution), <em>Origination</em> (individual→institution), <em>MERS Release</em>, <em>Self-Assign</em> (administrative noise), <em>Inst. Out</em> (institution→individual), or <em>Private</em> (individual→individual).</div>
+              <div><span className="text-foreground font-medium">Property</span> — Street address of the encumbered property, read from the recorded PDF when stated. Many assignments only reference a legal description, so this can be blank.</div>
+              <div><span className="text-foreground font-medium">Amount</span> — Original loan amount (or actual consideration paid) extracted from the recorded PDF. Most assignments recite only nominal consideration ("$10 and other..."), which is ignored.</div>
               <div><span className="text-foreground font-medium">Parties</span> — Total parties on the original filing. Multi-party filings (e.g. 3–4) indicate complex structures; this table collapses them to their dominant direction.</div>
               <div><span className="text-foreground font-medium">Book / Page</span> — Official recording reference in Miami-Dade's instrument index.</div>
             </div>
@@ -361,6 +411,9 @@ export default function CleanEvents() {
             <span>
               This view is <strong>deduplicated</strong> — one row per CFN. Raw filings often contain mirror entries
               (both sides of a transfer recorded separately). See <strong>Raw Assignments</strong> for unmodified records.
+              It is also <strong>loan-transfers only</strong>: filings whose recorded document turns out to be an
+              assignment of rents/leases, a collateral assignment, or another non-loan instrument are excluded
+              based on the actual PDF content.
             </span>
           </div>
         </div>
@@ -468,6 +521,12 @@ export default function CleanEvents() {
                 <th className="px-3 py-2.5 text-left font-medium">
                   <ColHeader label="Type" tooltip="Transaction classification: Market Transfer (institution→institution), Origination (individual→institution, new supply entering), MERS Release (registry housekeeping), Self-Assign (administrative, same entity both sides), Inst. Out (institution→individual, e.g. REO/payoff), or Private (individual→individual)." />
                 </th>
+                <th className="px-3 py-2.5 text-left font-medium">
+                  <ColHeader label="Property" tooltip="Street address of the encumbered property, extracted from the recorded PDF document when stated (falls back to the county index address). Blank when the document only gives a legal description." />
+                </th>
+                <th className="px-3 py-2.5 text-right font-medium">
+                  <ColHeader label="Amount" tooltip="Dollar amount extracted from the recorded PDF: the original loan/mortgage amount when stated, or the actual consideration paid for the assignment. Nominal recitals ($10 and other consideration) are ignored. Blank when no amount appears in the document." />
+                </th>
                 <th className="px-3 py-2.5 text-center font-medium">
                   <span className="flex items-center justify-center gap-1">
                     <Users size={10} />
@@ -483,7 +542,7 @@ export default function CleanEvents() {
               {isLoading
                 ? Array(15).fill(0).map((_, i) => (
                     <tr key={i} className="border-b border-border/50">
-                      {Array(8).fill(0).map((_, j) => <td key={j} className="px-3 py-2.5"><Skeleton className="h-3 w-full" /></td>)}
+                      {Array(10).fill(0).map((_, j) => <td key={j} className="px-3 py-2.5"><Skeleton className="h-3 w-full" /></td>)}
                     </tr>
                   ))
                 : (data?.rows || []).flatMap((r: any, i: number) => {
@@ -521,6 +580,9 @@ export default function CleanEvents() {
                           {r.assignor !== r.assignor_canon && (
                             <div className="text-muted-foreground truncate text-[10px]" title={r.assignor}>{r.assignor}</div>
                           )}
+                          {r.assignor_parent && (
+                            <div className="text-amber-400/80 truncate text-[10px]" title={`Related entity named in the document: ${r.assignor_parent}`}>↳ {r.assignor_parent}</div>
+                          )}
                           <CategoryBadge category={r.assignor_type} size="xs" />
                         </td>
                         {/* Arrow */}
@@ -533,11 +595,28 @@ export default function CleanEvents() {
                           {r.assignee !== r.assignee_canon && (
                             <div className="text-muted-foreground truncate text-[10px]" title={r.assignee}>{r.assignee}</div>
                           )}
+                          {r.assignee_parent && (
+                            <div className="text-amber-400/80 truncate text-[10px]" title={`Related entity named in the document: ${r.assignee_parent}`}>↳ {r.assignee_parent}</div>
+                          )}
                           <CategoryBadge category={r.assignee_type} size="xs" />
                         </td>
                         {/* Txn type */}
                         <td className="px-3 py-2 whitespace-nowrap">
                           {r.txn_type ? <TxnTypeBadge type={r.txn_type} /> : null}
+                        </td>
+                        {/* Property address (from PDF, falls back to index) */}
+                        <td className="px-3 py-2 max-w-[160px]">
+                          {r.property_address
+                            ? <span className="text-muted-foreground truncate block text-[11px]" title={r.property_address}>{r.property_address}</span>
+                            : <span className="text-muted-foreground/30">—</span>}
+                        </td>
+                        {/* Amount (loan amount preferred, else consideration) */}
+                        <td className="px-3 py-2 text-right whitespace-nowrap font-mono text-[11px]">
+                          {fmtAmount(r.loan_amount)
+                            ? <span className="text-emerald-400" title="Original loan / mortgage amount stated in the document">{fmtAmount(r.loan_amount)}</span>
+                            : fmtAmount(r.consideration_amount)
+                              ? <span className="text-emerald-400/80" title="Consideration paid for the assignment">{fmtAmount(r.consideration_amount)}</span>
+                              : <span className="text-muted-foreground/30">—</span>}
                         </td>
                         {/* Parties */}
                         <td className="px-3 py-2 text-center">
@@ -553,7 +632,7 @@ export default function CleanEvents() {
                   })
               }
               {!isLoading && !data?.rows?.length && (
-                <tr><td colSpan={8} className="px-3 py-12 text-center text-muted-foreground">No records found.</td></tr>
+                <tr><td colSpan={10} className="px-3 py-12 text-center text-muted-foreground">No records found.</td></tr>
               )}
             </tbody>
           </table>
