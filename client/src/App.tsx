@@ -8,10 +8,9 @@ import Sidebar from '@/components/Sidebar';
 import Dashboard from '@/pages/Dashboard';
 import Assignments from '@/pages/Assignments';
 import CleanEvents from '@/pages/CleanEvents';
-import MarketRelationships from '@/pages/MarketRelationships';
 import MarketAnalytics from '@/pages/MarketAnalytics';
 import PrivateCredit from '@/pages/PrivateCredit';
-import DealIntelligence from '@/pages/DealIntelligence';
+import Reporting from '@/pages/Reporting';
 import Entities from '@/pages/Entities';
 import CollectionLog from '@/pages/CollectionLog';
 import NotFound from '@/pages/not-found';
@@ -27,11 +26,10 @@ export default function App() {
               <Switch>
                 <Route path="/" component={Dashboard} />
                 <Route path="/clean-events" component={CleanEvents} />
-                <Route path="/market-relationships" component={MarketRelationships} />
                 <Route path="/market-analytics" component={MarketAnalytics} />
                 <Route path="/assignments" component={Assignments} />
                 <Route path="/private-credit" component={PrivateCredit} />
-                <Route path="/deal-intelligence" component={DealIntelligence} />
+                <Route path="/reporting" component={Reporting} />
                 <Route path="/entities" component={Entities} />
                 <Route path="/collection-log" component={CollectionLog} />
                 <Route component={NotFound} />

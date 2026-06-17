@@ -1103,5 +1103,129 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     res.json(result);
   });
 
+  // ─── GET /api/reporting ───────────────────────────────────────────────────
+  app.get('/api/reporting', (req, res) => {
+    const page      = Math.max(1, parseInt(req.query.page as string) || 1);
+    const limit     = Math.min(50, parseInt(req.query.limit as string) || 50);
+    const offset    = (page - 1) * limit;
+    const search    = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+    const startDate = typeof req.query.start_date === 'string' ? req.query.start_date : '';
+    const endDate   = typeof req.query.end_date === 'string' ? req.query.end_date : '';
+    const reviewed  = typeof req.query.reviewed === 'string' ? req.query.reviewed : '';
+
+    const clauses: string[] = [];
+    const params: any[] = [];
+
+    if (search) {
+      clauses.push(`(UPPER(assignor_canon) LIKE UPPER(?) OR UPPER(assignee_canon) LIKE UPPER(?) OR cfn LIKE ?)`);
+      params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+    }
+    if (startDate) { clauses.push(`rec_date >= ?`); params.push(startDate); }
+    if (endDate)   { clauses.push(`rec_date <= ?`); params.push(endDate); }
+    if (reviewed === 'yes') { clauses.push(`reviewed_at IS NOT NULL`); }
+    if (reviewed === 'no')  { clauses.push(`reviewed_at IS NULL`); }
+
+    const wc = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+
+    const total = (db.prepare(`SELECT COUNT(*) as n FROM aom_events_clean ${wc}`).get(...params) as any).n;
+    const rows  = db.prepare(`
+      SELECT cfn, rec_date, doc_type,
+             assignor, assignee, assignor_canon, assignee_canon,
+             assignor_type, assignee_type, txn_type,
+             pdf_assignor, pdf_assignee, assignor_parent, assignee_parent,
+             property_address, loan_amount, consideration_amount,
+             doc_title, doc_category,
+             rec_book, rec_page, total_parties,
+             classification, reviewed_by, reviewed_at
+      FROM aom_events_clean ${wc}
+      ORDER BY rec_date DESC LIMIT ? OFFSET ?
+    `).all(...params, limit, offset);
+
+    res.json({ rows, total, pages: Math.ceil(total / limit), page });
+  });
+
+  // ─── PATCH /api/reporting/:cfn/review ────────────────────────────────────
+  app.patch('/api/reporting/:cfn/review', (req, res) => {
+    const { cfn } = req.params;
+    const { reviewed_by, classification } = req.body as any;
+    const now = new Date().toISOString();
+    db.prepare(`
+      UPDATE aom_events_clean
+      SET reviewed_by = ?, reviewed_at = ?, classification = COALESCE(?, classification)
+      WHERE cfn = ?
+    `).run(reviewed_by || 'user', now, classification || null, cfn);
+    res.json({ ok: true, reviewed_at: now });
+  });
+
+  // ─── DELETE /api/reporting/:cfn/review ───────────────────────────────────
+  app.delete('/api/reporting/:cfn/review', (req, res) => {
+    const { cfn } = req.params;
+    db.prepare(`UPDATE aom_events_clean SET reviewed_by = NULL, reviewed_at = NULL WHERE cfn = ?`).run(cfn);
+    res.json({ ok: true });
+  });
+
+  // ─── GET /api/reporting/chart ─────────────────────────────────────────────
+  app.get('/api/reporting/chart', (req, res) => {
+    const type      = typeof req.query.type === 'string' ? req.query.type : 'monthly';
+    const startDate = typeof req.query.start_date === 'string' ? req.query.start_date : '';
+    const endDate   = typeof req.query.end_date === 'string' ? req.query.end_date : '';
+
+    const dateClauses: string[] = [];
+    const dateParams: any[] = [];
+    if (startDate) { dateClauses.push(`rec_date >= ?`); dateParams.push(startDate); }
+    if (endDate)   { dateClauses.push(`rec_date <= ?`); dateParams.push(endDate); }
+    const dwc = dateClauses.length ? `WHERE ${dateClauses.join(' AND ')}` : '';
+
+    if (type === 'monthly') {
+      const rows = db.prepare(`
+        SELECT strftime('%Y-%m', rec_date) as period, COUNT(*) as count,
+               SUM(loan_amount) as total_loan_amount
+        FROM aom_events_clean ${dwc}
+        GROUP BY period ORDER BY period
+      `).all(...dateParams);
+      return res.json(rows);
+    }
+
+    if (type === 'txn_type') {
+      const rows = db.prepare(`
+        SELECT COALESCE(txn_type, 'UNKNOWN') as label, COUNT(*) as count
+        FROM aom_events_clean ${dwc}
+        GROUP BY txn_type ORDER BY count DESC
+      `).all(...dateParams);
+      return res.json(rows);
+    }
+
+    if (type === 'top_buyers') {
+      const rows = db.prepare(`
+        SELECT assignee_canon as label, COUNT(*) as count
+        FROM aom_events_clean ${dwc}
+        WHERE assignee_canon IS NOT NULL
+        GROUP BY assignee_canon ORDER BY count DESC LIMIT 15
+      `).all(...dateParams);
+      return res.json(rows);
+    }
+
+    if (type === 'top_sellers') {
+      const rows = db.prepare(`
+        SELECT assignor_canon as label, COUNT(*) as count
+        FROM aom_events_clean ${dwc}
+        WHERE assignor_canon IS NOT NULL
+        GROUP BY assignor_canon ORDER BY count DESC LIMIT 15
+      `).all(...dateParams);
+      return res.json(rows);
+    }
+
+    if (type === 'entity_type') {
+      const rows = db.prepare(`
+        SELECT COALESCE(assignee_type, 'OTHER') as label, COUNT(*) as count
+        FROM aom_events_clean ${dwc}
+        GROUP BY assignee_type ORDER BY count DESC
+      `).all(...dateParams);
+      return res.json(rows);
+    }
+
+    res.status(400).json({ error: 'Unknown chart type' });
+  });
+
   return httpServer;
 }

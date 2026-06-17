@@ -1,17 +1,16 @@
 import { Link, useLocation } from 'wouter';
-import { BarChart2, FileText, CheckCircle, Share2, Shield, Building2, ClipboardList, Menu, X, LineChart, Target, LogOut } from 'lucide-react';
+import { BarChart2, FileText, CheckCircle, Shield, Building2, ClipboardList, Menu, X, LineChart, LayoutList, LogOut } from 'lucide-react';
 import { useState } from 'react';
 
 const NAV = [
-  { href: '/',                    icon: BarChart2,     label: 'Overview',             group: 'main' },
-  { href: '/deal-intelligence',   icon: Target,        label: 'Deal Intelligence',    group: 'analysis', badge: 'NEW' },
-  { href: '/market-relationships',icon: Share2,        label: 'Market Relationships', group: 'analysis' },
-  { href: '/market-analytics',    icon: LineChart,     label: 'FDIC Data Analytics',  group: 'analysis' },
-  { href: '/clean-events',        icon: CheckCircle,   label: 'Clean Transactions',   group: 'analysis' },
-  { href: '/private-credit',      icon: Shield,        label: 'Private Credit',       group: 'analysis' },
-  { href: '/assignments',         icon: FileText,       label: 'Raw Assignments',      group: 'data' },
-  { href: '/entities',            icon: Building2,      label: 'Entities',             group: 'data' },
-  { href: '/collection-log',      icon: ClipboardList,  label: 'Collection Log',       group: 'data' },
+  { href: '/',                 icon: BarChart2,    label: 'Overview',           group: 'main' },
+  { href: '/reporting',        icon: LayoutList,   label: 'Reporting',          group: 'analysis' },
+  { href: '/market-analytics', icon: LineChart,    label: 'FDIC Data Analytics',group: 'analysis' },
+  { href: '/clean-events',     icon: CheckCircle,  label: 'Clean Transactions', group: 'analysis' },
+  { href: '/private-credit',   icon: Shield,       label: 'Private Credit',     group: 'analysis' },
+  { href: '/assignments',      icon: FileText,     label: 'Raw Assignments',    group: 'data' },
+  { href: '/entities',         icon: Building2,    label: 'Entities',           group: 'data' },
+  { href: '/collection-log',   icon: ClipboardList,label: 'Collection Log',     group: 'data' },
 ];
 
 const GROUPS: Record<string, string> = {
@@ -57,7 +56,7 @@ export default function Sidebar() {
 
       {/* Nav */}
       <nav className="flex-1 py-2 px-1.5 overflow-y-auto">
-        {NAV.map(({ href, icon: Icon, label, group, badge }) => {
+        {NAV.map(({ href, icon: Icon, label, group, badge }: any) => {
           const active = location === href || (href !== '/' && location.startsWith(href));
           const showGroupLabel = !collapsed && group !== lastGroup && GROUPS[group];
           if (group !== lastGroup) lastGroup = group;

@@ -113,6 +113,19 @@ export function getDb(): Database.Database {
       }
     }
 
+    // Migration: review workflow columns
+    const reviewColumns: Array<[string, string]> = [
+      ['classification', 'TEXT'],
+      ['reviewed_by', 'TEXT'],
+      ['reviewed_at', 'TEXT'],
+    ];
+    for (const [col, type] of reviewColumns) {
+      try {
+        _db.exec(`ALTER TABLE aom_events_clean ADD COLUMN ${col} ${type}`);
+        console.log(`[db] migrated: added ${col} column to aom_events_clean`);
+      } catch (_e) {}
+    }
+
     _db.exec(`
       CREATE TABLE IF NOT EXISTS pdf_extractions (
         cfn TEXT PRIMARY KEY,

@@ -1,0 +1,35 @@
+---
+description: Session handoff — where the AMO Clean Transactions PDF-extraction work left off
+alwaysApply: true
+---
+
+# AMO Clean Transactions — Where We Left Off
+
+At the START of any new session, briefly tell the user this status, then ask how they want to proceed. (Remove this rule once the work is deployed and confirmed.)
+
+## Status as of 2026-06-12: built & verified locally, NOT yet deployed
+
+We deepened the Clean Transactions tab to (a) include all loan/mortgage transfers
+while excluding non-loan instruments (rents/leases, collateral, etc.) and (b) pull
+real data from the recorded PDFs: assignor, assignee, parent/related entity,
+property address, amount, and document title.
+
+### Done (committed to working tree, not yet `git commit`ed)
+- `collector/collect_live.py` — collects 3 doc types (AMO, ASSIGNMENT - ASG, ASSIGNMENT OF INTEREST - AIT); credentials via env vars; per-doc-type resume.
+- `collector/extract_pdfs.py` (new) — downloads clerk PDF, OCRs (poppler + tesseract), Claude (Anthropic) extracts fields + classifies LOAN_TRANSFER / RENTS_LEASES / COLLATERAL / OTHER; caches in `pdf_extractions`.
+- LLM provider is **Claude/Anthropic** (switched from OpenAI 2026-06-16). Both `extract_pdfs.py` and `enrich_entities.py` use the Anthropic Messages API; key via `ANTHROPIC_API_KEY`, model via `ANTHROPIC_MODEL` (default `claude-haiku-4-5`). NOTE: not yet live-tested against the API — needs a key to verify.
+- `collector/normalize.py` — joins PDF data into `aom_events_clean`, applies loan-transfer-only filter, carries doc_title.
+- `collector/database.py`, `run_weekly.sh` — doc_type in collection_log; weekly pipeline = collect → extract → normalize → enrich.
+- `server/db.ts`, `server/routes.ts` — schema migrations + API returns new fields. `server/index.ts` — reusePort guarded to Linux.
+- `client/src/pages/CleanEvents.tsx` — new Property + Amount columns, parent entities under names, doc title + PDF panel in expanded row.
+
+### Remaining / next steps
+1. Deploy to droplet `/opt/amo-dashboard` (git pull; `apt-get install -y poppler-utils tesseract-ocr`).
+2. Backfill: run `extract_pdfs.py` over full history (cost now on Claude Haiku — measure on a small batch first; higher per-token than the old OpenAI estimate), then backfill ASG/AIT doc types, then `normalize.py`.
+3. ROTATE EXPOSED SECRETS: clerk password (`collector/config.py`) and the OpenAI key were exposed in logs/terminal — regenerate both. Supply a fresh `ANTHROPIC_API_KEY` for the new LLM provider.
+4. Live-test the Claude integration (extract_pdfs.py + enrich_entities.py) once a key is available — code is written but unverified against the API.
+4. Revisit the "Request blocked by Anthropic (cyber_policy_review)" item the user deferred.
+
+### Notes
+- Dev tested on a local copy of `miami_dade_amo.db` (gitignored); production untouched.
+- `collector/config.py` is gitignored (holds clerk creds).
