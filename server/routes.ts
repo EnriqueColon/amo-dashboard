@@ -1135,6 +1135,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
              pdf_assignor, pdf_assignee, assignor_parent, assignee_parent,
              property_address, loan_amount, consideration_amount,
              doc_title, doc_category,
+             folio_parcel, sponsor_address, signatory_officer,
              rec_book, rec_page, total_parties,
              classification, reviewed_by, reviewed_at
       FROM aom_events_clean ${wc}

@@ -647,7 +647,10 @@ def build_normalized_tables():
             assignee_parent      TEXT,
             property_address     TEXT,
             loan_amount          REAL,
-            consideration_amount REAL
+            consideration_amount REAL,
+            folio_parcel         TEXT,
+            sponsor_address      TEXT,
+            signatory_officer    TEXT
         );
     """)
 
@@ -678,12 +681,14 @@ def build_normalized_tables():
             'doc_category': r[1], 'assignor_name': r[2], 'assignor_parent': r[3],
             'assignee_name': r[4], 'assignee_parent': r[5],
             'property_address': r[6], 'loan_amount': r[7], 'consideration_amount': r[8],
-            'doc_title': r[9],
+            'doc_title': r[9], 'folio_parcel': r[10],
+            'sponsor_address': r[11], 'signatory_officer': r[12],
         }
         for r in conn.execute("""
             SELECT cfn, doc_category, assignor_name, assignor_parent,
                    assignee_name, assignee_parent, property_address,
-                   loan_amount, consideration_amount, doc_title
+                   loan_amount, consideration_amount, doc_title,
+                   folio_parcel, sponsor_address, signatory_officer
             FROM pdf_extractions WHERE status = 'OK'
         """).fetchall()
     }
@@ -781,14 +786,17 @@ def build_normalized_tables():
             total_parties,
             doc_type,
             doc_category,
-            ext['doc_title']         if ext else None,
-            ext['assignor_name']     if ext else None,
-            ext['assignee_name']     if ext else None,
-            ext['assignor_parent']   if ext else None,
-            ext['assignee_parent']   if ext else None,
+            ext['doc_title']             if ext else None,
+            ext['assignor_name']         if ext else None,
+            ext['assignee_name']         if ext else None,
+            ext['assignor_parent']       if ext else None,
+            ext['assignee_parent']       if ext else None,
             (ext['property_address'] if ext and ext['property_address'] else index_address),
             ext['loan_amount']           if ext else None,
             ext['consideration_amount']  if ext else None,
+            ext['folio_parcel']          if ext else None,
+            ext['sponsor_address']       if ext else None,
+            ext['signatory_officer']     if ext else None,
         ))
 
     conn.executemany("""
@@ -797,8 +805,9 @@ def build_normalized_tables():
          assignor_type, assignee_type, txn_type, rec_book, rec_page, total_parties,
          doc_type, doc_category, doc_title, pdf_assignor, pdf_assignee,
          assignor_parent, assignee_parent, property_address,
-         loan_amount, consideration_amount)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+         loan_amount, consideration_amount,
+         folio_parcel, sponsor_address, signatory_officer)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     """, inserts)
     conn.commit()
 

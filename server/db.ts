@@ -113,6 +113,17 @@ export function getDb(): Database.Database {
       }
     }
 
+    // Migration: new PDF extraction fields
+    const newPdfColumns: Array<[string, string]> = [
+      ['folio_parcel', 'TEXT'],
+      ['sponsor_address', 'TEXT'],
+      ['signatory_officer', 'TEXT'],
+    ];
+    for (const [col, type] of newPdfColumns) {
+      try { _db.exec(`ALTER TABLE pdf_extractions ADD COLUMN ${col} ${type}`); } catch (_e) {}
+      try { _db.exec(`ALTER TABLE aom_events_clean ADD COLUMN ${col} ${type}`); } catch (_e) {}
+    }
+
     // Migration: review workflow columns
     const reviewColumns: Array<[string, string]> = [
       ['classification', 'TEXT'],

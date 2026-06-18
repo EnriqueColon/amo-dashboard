@@ -68,6 +68,9 @@ Return a JSON object with exactly these fields:
 - property_address: the street address of the encumbered property if stated (street, city, state, zip as available - NOT the parties' corporate addresses), else null
 - loan_amount: the original loan / mortgage / note principal amount in dollars if stated, as a number, else null
 - consideration_amount: the actual consideration paid for the assignment if a genuine amount is stated, as a number. IGNORE nominal recitals like "$10.00 and other good and valuable consideration" - those are null.
+- folio_parcel: the Miami-Dade folio or parcel number for the property, typically formatted as XX-XXXX-XXX-XXXX or similar. Often found near the legal description or property description block, or labeled "Folio No.", "Parcel ID", or "RE#". Return as a string, else null.
+- sponsor_address: the mailing address or business address of the assignee (buyer/lender) if stated in the document body (NOT the property address). Often appears after the assignee's name in the opening recital or in the signature block. Return as a string, else null.
+- signatory_officer: the full name and title of the person who signed the document on behalf of the assignor, as written above or below the signature line (e.g. "Jane Smith, Vice President"). Return as a string, else null.
 
 Rules:
 - A document titled "Assignment of Mortgage" that also assigns rents/leases ancillary to the mortgage is LOAN_TRANSFER.
@@ -91,8 +94,8 @@ def ensure_schema(conn: sqlite3.Connection):
             cfn                  TEXT PRIMARY KEY,
             rec_book             TEXT,
             rec_page             TEXT,
-            status               TEXT,           -- OK | DOWNLOAD_ERROR | OCR_ERROR | LLM_ERROR
-            doc_category         TEXT,           -- LOAN_TRANSFER | RENTS_LEASES | COLLATERAL | OTHER
+            status               TEXT,
+            doc_category         TEXT,
             doc_title            TEXT,
             assignor_name        TEXT,
             assignor_parent      TEXT,
@@ -101,6 +104,9 @@ def ensure_schema(conn: sqlite3.Connection):
             property_address     TEXT,
             loan_amount          REAL,
             consideration_amount REAL,
+            folio_parcel         TEXT,
+            sponsor_address      TEXT,
+            signatory_officer    TEXT,
             ocr_chars            INTEGER,
             model                TEXT,
             extracted_at         TEXT DEFAULT (datetime('now')),
@@ -109,19 +115,39 @@ def ensure_schema(conn: sqlite3.Connection):
         CREATE INDEX IF NOT EXISTS idx_pdfx_category ON pdf_extractions(doc_category);
         CREATE INDEX IF NOT EXISTS idx_pdfx_status   ON pdf_extractions(status);
     """)
+    # Migrate existing tables that predate the new columns
+    for col in ('folio_parcel TEXT', 'sponsor_address TEXT', 'signatory_officer TEXT'):
+        try:
+            conn.execute(f'ALTER TABLE pdf_extractions ADD COLUMN {col}')
+        except Exception:
+            pass
     conn.commit()
 
 
 def pending_documents(conn: sqlite3.Connection, limit: int, retry_errors: bool,
-                      since: str | None = None) -> list:
-    """CFNs from assignments that have no (successful) extraction yet, newest first."""
-    status_clause = "px.cfn IS NULL" if not retry_errors else \
-                    "(px.cfn IS NULL OR px.status != 'OK')"
+                      since: str | None = None, redo: bool = False) -> list:
+    """CFNs from assignments that need (re-)extraction, newest first.
+
+    --redo targets already-extracted OK rows that are missing the new fields
+    (folio_parcel, sponsor_address, signatory_officer).  This lets us cheaply
+    backfill the new columns without re-extracting docs that already have them.
+    """
+    if redo:
+        status_clause = ("px.status = 'OK' AND "
+                         "(px.folio_parcel IS NULL AND px.sponsor_address IS NULL "
+                         "AND px.signatory_officer IS NULL)")
+    elif retry_errors:
+        status_clause = "(px.cfn IS NULL OR px.status != 'OK')"
+    else:
+        status_clause = "px.cfn IS NULL"
+
     date_clause = f"AND a.rec_date >= '{since}'" if since else ""
+    join_type   = "INNER" if redo else "LEFT"
+
     return conn.execute(f"""
         SELECT a.cfn, a.rec_book, a.rec_page, a.rec_date
         FROM assignments a
-        LEFT JOIN pdf_extractions px ON px.cfn = a.cfn
+        {join_type} JOIN pdf_extractions px ON px.cfn = a.cfn
         WHERE {status_clause}
           AND a.rec_book IS NOT NULL AND a.rec_book != ''
           AND a.rec_page IS NOT NULL AND a.rec_page != ''
@@ -200,7 +226,8 @@ def llm_extract(ocr_text: str) -> dict | None:
             data[amount_field] = None
 
     for text_field in ('doc_title', 'assignor_name', 'assignor_parent',
-                       'assignee_name', 'assignee_parent', 'property_address'):
+                       'assignee_name', 'assignee_parent', 'property_address',
+                       'folio_parcel', 'sponsor_address', 'signatory_officer'):
         val = data.get(text_field)
         data[text_field] = val.strip() if isinstance(val, str) and val.strip() else None
 
@@ -214,8 +241,9 @@ def save(conn, cfn, rec_book, rec_page, status, data=None, ocr_chars=0):
             (cfn, rec_book, rec_page, status, doc_category, doc_title,
              assignor_name, assignor_parent, assignee_name, assignee_parent,
              property_address, loan_amount, consideration_amount,
+             folio_parcel, sponsor_address, signatory_officer,
              ocr_chars, model, extracted_at, raw_json)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'),?)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'),?)
         ON CONFLICT(cfn) DO UPDATE SET
             status=excluded.status, doc_category=excluded.doc_category,
             doc_title=excluded.doc_title,
@@ -224,6 +252,9 @@ def save(conn, cfn, rec_book, rec_page, status, data=None, ocr_chars=0):
             property_address=excluded.property_address,
             loan_amount=excluded.loan_amount,
             consideration_amount=excluded.consideration_amount,
+            folio_parcel=excluded.folio_parcel,
+            sponsor_address=excluded.sponsor_address,
+            signatory_officer=excluded.signatory_officer,
             ocr_chars=excluded.ocr_chars, model=excluded.model,
             extracted_at=excluded.extracted_at, raw_json=excluded.raw_json
     """, (
@@ -232,6 +263,7 @@ def save(conn, cfn, rec_book, rec_page, status, data=None, ocr_chars=0):
         d.get('assignor_name'), d.get('assignor_parent'),
         d.get('assignee_name'), d.get('assignee_parent'),
         d.get('property_address'), d.get('loan_amount'), d.get('consideration_amount'),
+        d.get('folio_parcel'), d.get('sponsor_address'), d.get('signatory_officer'),
         ocr_chars, OPENAI_MODEL if data else None,
         json.dumps(d) if data else None,
     ))
@@ -240,13 +272,13 @@ def save(conn, cfn, rec_book, rec_page, status, data=None, ocr_chars=0):
 
 # ── Main loop ─────────────────────────────────────────────────────────────────
 
-def run(limit: int, retry_errors: bool, since: str | None = None):
+def run(limit: int, retry_errors: bool, since: str | None = None, redo: bool = False):
     if not OPENAI_KEY:
         raise SystemExit('OPENAI_API_KEY is not set')
 
     conn = get_conn()
     ensure_schema(conn)
-    docs = pending_documents(conn, limit, retry_errors, since=since)
+    docs = pending_documents(conn, limit, retry_errors, since=since, redo=redo)
     print(f'Pending documents: {len(docs)} (limit {limit})')
 
     counts = {'OK': 0, 'DOWNLOAD_ERROR': 0, 'OCR_ERROR': 0, 'LLM_ERROR': 0}
@@ -307,5 +339,8 @@ if __name__ == '__main__':
                    help='re-attempt previously failed documents')
     p.add_argument('--since', type=str, default=None,
                    help='only process documents recorded on or after this date (YYYY-MM-DD)')
+    p.add_argument('--redo', action='store_true',
+                   help='re-extract already-OK docs that are missing the new fields '
+                        '(folio_parcel, sponsor_address, signatory_officer)')
     args = p.parse_args()
-    run(args.limit, args.retry_errors, since=args.since)
+    run(args.limit, args.retry_errors, since=args.since, redo=args.redo)

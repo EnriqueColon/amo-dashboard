@@ -265,12 +265,15 @@ function RecordRow({ row, onReview, onUnreview }: {
                 {row.assignee_parent && <p><span className="text-muted-foreground">Beneficial owner/sponsor:</span> <span className="text-amber-400">{row.assignee_parent}</span></p>}
               </div>
 
-              {/* Financials + links */}
+              {/* Financials + property */}
               <div className="space-y-1.5">
-                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Financials & Links</p>
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Financials & Property</p>
                 {fmtAmt(row.loan_amount) && <p><span className="text-muted-foreground">Loan amount:</span> <span className="text-emerald-400 font-mono">{fmtAmt(row.loan_amount)}</span></p>}
                 {fmtAmt(row.consideration_amount) && <p><span className="text-muted-foreground">Consideration:</span> <span className="text-emerald-400/80 font-mono">{fmtAmt(row.consideration_amount)}</span></p>}
                 {row.property_address && <p><span className="text-muted-foreground">Property:</span> {row.property_address}</p>}
+                {row.folio_parcel && <p><span className="text-muted-foreground">Folio/Parcel:</span> <span className="font-mono">{row.folio_parcel}</span></p>}
+                {row.sponsor_address && <p><span className="text-muted-foreground">Sponsor address:</span> {row.sponsor_address}</p>}
+                {row.signatory_officer && <p><span className="text-muted-foreground">Signed by:</span> {row.signatory_officer}</p>}
                 <a
                   href={docImageUrl(row.rec_book, row.rec_page)}
                   target="_blank"
