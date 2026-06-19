@@ -20,6 +20,18 @@ function fmtAmt(v: number | null | undefined): string | null {
   return v.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
 }
 
+// Reject strings that look like OCR garbage before rendering
+const GARBAGE_RE = /[¢£€§©®™°±×÷\u0080-\uFFFF]|[^\x00-\x7F]/;
+const ADDRESS_RE = /^\d+\s.*(ST|AVE|BLVD|DR|RD|LN|CT|PL|WAY|HWY|CIR|TER|STREET|AVENUE|BOULEVARD|DRIVE|ROAD|LANE|COURT|PLACE|HIGHWAY|CIRCLE|TERRACE)\b/i;
+
+function cleanField(v: string | null | undefined, isAddress = false): string | null {
+  if (!v || v.trim().length < 3) return null;
+  const ratio = (v.match(GARBAGE_RE) || []).length / v.length;
+  if (ratio > 0.06) return null;
+  if (!isAddress && ADDRESS_RE.test(v.trim())) return null;
+  return v.trim();
+}
+
 function docImageUrl(book: string, page: string) {
   return `https://onlineservices.miamidadeclerk.gov/officialrecords/api/DocumentImage/getdocumentimage?redact=false&sBook=${book}&sBookType=O+&sPage=${page}`;
 }
@@ -188,21 +200,21 @@ function RecordRow({ row, onReview, onUnreview }: {
         {/* Assignor */}
         <td className="px-3 py-2.5 max-w-[160px]">
           <div className="text-xs font-semibold truncate" title={row.assignor_canon}>{row.assignor_canon}</div>
-          {row.assignor_parent && (
-            <div className="text-[10px] text-amber-400 truncate">↳ {row.assignor_parent}</div>
+          {cleanField(row.assignor_parent) && (
+            <div className="text-[10px] text-amber-400 truncate">↳ {cleanField(row.assignor_parent)}</div>
           )}
         </td>
         {/* Assignee */}
         <td className="px-3 py-2.5 max-w-[160px]">
           <div className="text-xs font-semibold truncate" title={row.assignee_canon}>{row.assignee_canon}</div>
-          {row.assignee_parent && (
-            <div className="text-[10px] text-amber-400 truncate">↳ {row.assignee_parent}</div>
+          {cleanField(row.assignee_parent) && (
+            <div className="text-[10px] text-amber-400 truncate">↳ {cleanField(row.assignee_parent)}</div>
           )}
         </td>
         {/* Property */}
         <td className="px-3 py-2.5 max-w-[160px] text-[11px] text-muted-foreground">
-          {row.property_address
-            ? <span className="truncate block" title={row.property_address}>{row.property_address}</span>
+          {cleanField(row.property_address, true)
+            ? <span className="truncate block" title={row.property_address}>{cleanField(row.property_address, true)}</span>
             : <span className="text-muted-foreground/30">—</span>}
         </td>
         {/* Loan amount */}
@@ -259,10 +271,13 @@ function RecordRow({ row, onReview, onUnreview }: {
               {/* Parties */}
               <div className="space-y-1.5">
                 <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Parties (as written in PDF)</p>
-                {row.pdf_assignor && <p><span className="text-muted-foreground">Assignor:</span> {row.pdf_assignor}</p>}
-                {row.assignor_parent && <p><span className="text-muted-foreground">Assignor sponsor:</span> <span className="text-amber-400">{row.assignor_parent}</span></p>}
-                {row.pdf_assignee && <p><span className="text-muted-foreground">Assignee:</span> {row.pdf_assignee}</p>}
-                {row.assignee_parent && <p><span className="text-muted-foreground">Beneficial owner/sponsor:</span> <span className="text-amber-400">{row.assignee_parent}</span></p>}
+                {cleanField(row.pdf_assignor) && <p><span className="text-muted-foreground">Assignor:</span> {cleanField(row.pdf_assignor)}</p>}
+                {cleanField(row.assignor_parent) && <p><span className="text-muted-foreground">Assignor sponsor:</span> <span className="text-amber-400">{cleanField(row.assignor_parent)}</span></p>}
+                {cleanField(row.pdf_assignee) && <p><span className="text-muted-foreground">Assignee:</span> {cleanField(row.pdf_assignee)}</p>}
+                {cleanField(row.assignee_parent) && <p><span className="text-muted-foreground">Beneficial owner/sponsor:</span> <span className="text-amber-400">{cleanField(row.assignee_parent)}</span></p>}
+                {!cleanField(row.pdf_assignor) && !cleanField(row.pdf_assignee) && (
+                  <p className="text-muted-foreground/40 italic text-[10px]">PDF text too noisy to extract reliably</p>
+                )}
               </div>
 
               {/* Financials + property */}
@@ -270,10 +285,10 @@ function RecordRow({ row, onReview, onUnreview }: {
                 <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Financials & Property</p>
                 {fmtAmt(row.loan_amount) && <p><span className="text-muted-foreground">Loan amount:</span> <span className="text-emerald-400 font-mono">{fmtAmt(row.loan_amount)}</span></p>}
                 {fmtAmt(row.consideration_amount) && <p><span className="text-muted-foreground">Consideration:</span> <span className="text-emerald-400/80 font-mono">{fmtAmt(row.consideration_amount)}</span></p>}
-                {row.property_address && <p><span className="text-muted-foreground">Property:</span> {row.property_address}</p>}
-                {row.folio_parcel && <p><span className="text-muted-foreground">Folio/Parcel:</span> <span className="font-mono">{row.folio_parcel}</span></p>}
-                {row.sponsor_address && <p><span className="text-muted-foreground">Sponsor address:</span> {row.sponsor_address}</p>}
-                {row.signatory_officer && <p><span className="text-muted-foreground">Signed by:</span> {row.signatory_officer}</p>}
+                {cleanField(row.property_address, true) && <p><span className="text-muted-foreground">Property:</span> {cleanField(row.property_address, true)}</p>}
+                {cleanField(row.folio_parcel) && <p><span className="text-muted-foreground">Folio/Parcel:</span> <span className="font-mono">{cleanField(row.folio_parcel)}</span></p>}
+                {cleanField(row.sponsor_address, true) && <p><span className="text-muted-foreground">Sponsor address:</span> {cleanField(row.sponsor_address, true)}</p>}
+                {cleanField(row.signatory_officer) && <p><span className="text-muted-foreground">Signed by:</span> {cleanField(row.signatory_officer)}</p>}
                 <a
                   href={docImageUrl(row.rec_book, row.rec_page)}
                   target="_blank"

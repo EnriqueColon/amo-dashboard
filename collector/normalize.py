@@ -16,6 +16,68 @@ from collections import defaultdict
 
 DB = os.environ.get('AMO_DB_PATH', '/opt/amo-dashboard/miami_dade_amo.db')
 
+# ── OCR sanity filter ─────────────────────────────────────────────────────────
+# Rejects extracted text fields that look like OCR garbage before they reach
+# aom_events_clean.  Returns the value if it passes, else None.
+
+_STREET_SUFFIXES = re.compile(
+    r'\b(ST|AVE|BLVD|DR|RD|LN|CT|PL|WAY|HWY|PKY|PKWY|CIR|TER|TERR|'
+    r'STREET|AVENUE|BOULEVARD|DRIVE|ROAD|LANE|COURT|PLACE|HIGHWAY|CIRCLE|'
+    r'TERRACE|NW|NE|SW|SE)\b',
+    re.IGNORECASE,
+)
+
+_GARBAGE_RE = re.compile(
+    r'[¢£€§©®™°±×÷]'          # currency / symbol garbage
+    r'|[^\x00-\x7F]'           # non-ASCII characters (OCR artifacts)
+    r'|\b[a-z]{1,2}[A-Z]{2,}'  # mixed-case OCR noise like "sy NarkeuS"
+)
+
+
+def looks_like_address(text: str) -> bool:
+    """Return True if the string looks like a street address rather than an entity name."""
+    if not text:
+        return False
+    # Has leading digits (street number) AND a street suffix word
+    has_number = bool(re.match(r'^\d+\s', text.strip()))
+    has_suffix = bool(_STREET_SUFFIXES.search(text))
+    return has_number and has_suffix
+
+
+def sanitize_ocr_field(value, max_garbage_ratio: float = 0.08) -> str | None:
+    """Return value if it looks clean, else None.
+
+    Checks:
+    - Not None / empty
+    - Not unreasonably short or long
+    - Garbage character ratio below threshold
+    - Doesn't look like a street address (for name fields)
+    """
+    if not value or not isinstance(value, str):
+        return None
+    v = value.strip()
+    if not v or len(v) < 3:
+        return None
+    # Count garbage characters
+    garbage_chars = len(_GARBAGE_RE.findall(v))
+    if len(v) > 0 and garbage_chars / len(v) > max_garbage_ratio:
+        return None
+    return v
+
+
+def sanitize_name_field(value) -> str | None:
+    """Like sanitize_ocr_field but also rejects address-like strings."""
+    v = sanitize_ocr_field(value)
+    if v and looks_like_address(v):
+        return None
+    return v
+
+
+def sanitize_address_field(value) -> str | None:
+    """For address fields — allow street-like strings but still reject garbage."""
+    return sanitize_ocr_field(value)
+
+
 # ── Suffix / noise removal ────────────────────────────────────────────────────
 # These are stripped from the END of entity names before canonicalization
 STRIP_SUFFIXES = [
@@ -678,11 +740,18 @@ def build_normalized_tables():
     """)
     extractions = {
         r[0]: {
-            'doc_category': r[1], 'assignor_name': r[2], 'assignor_parent': r[3],
-            'assignee_name': r[4], 'assignee_parent': r[5],
-            'property_address': r[6], 'loan_amount': r[7], 'consideration_amount': r[8],
-            'doc_title': r[9], 'folio_parcel': r[10],
-            'sponsor_address': r[11], 'signatory_officer': r[12],
+            'doc_category':        r[1],
+            'assignor_name':       sanitize_name_field(r[2]),
+            'assignor_parent':     sanitize_name_field(r[3]),
+            'assignee_name':       sanitize_name_field(r[4]),
+            'assignee_parent':     sanitize_name_field(r[5]),
+            'property_address':    sanitize_address_field(r[6]),
+            'loan_amount':         r[7],
+            'consideration_amount':r[8],
+            'doc_title':           sanitize_ocr_field(r[9]),
+            'folio_parcel':        sanitize_ocr_field(r[10]),
+            'sponsor_address':     sanitize_address_field(r[11]),
+            'signatory_officer':   sanitize_name_field(r[12]),
         }
         for r in conn.execute("""
             SELECT cfn, doc_category, assignor_name, assignor_parent,
@@ -771,6 +840,12 @@ def build_normalized_tables():
         rec_date = entries[0][1]
         rec_book = entries[0][4]
         rec_page = entries[0][5]
+
+        # If the raw grantor looks like a street address, prefer the PDF-extracted name
+        if looks_like_address(dominant_assignor) and ext and ext.get('assignor_name'):
+            dominant_assignor = ext['assignor_name']
+        if looks_like_address(dominant_grantee) and ext and ext.get('assignee_name'):
+            dominant_grantee = ext['assignee_name']
 
         assignor_canon = canonicalize(dominant_assignor)
         assignee_canon = canonicalize(dominant_grantee)
