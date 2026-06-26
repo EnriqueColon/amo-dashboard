@@ -1125,6 +1125,8 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     if (reviewed === 'yes') { clauses.push(`reviewed_at IS NOT NULL`); }
     if (reviewed === 'no')  { clauses.push(`reviewed_at IS NULL`); }
 
+    // Always exclude self-assignments — not true transfers
+    clauses.push(`txn_type != 'SELF_ASSIGN'`);
     const wc = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
 
     const total = (db.prepare(`SELECT COUNT(*) as n FROM aom_events_clean ${wc}`).get(...params) as any).n;
@@ -1182,6 +1184,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     if (endDate)   { clauses.push(`rec_date <= ?`); params.push(endDate); }
     if (reviewed === 'yes') { clauses.push(`reviewed_at IS NOT NULL`); }
     if (reviewed === 'no')  { clauses.push(`reviewed_at IS NULL`); }
+    clauses.push(`txn_type != 'SELF_ASSIGN'`);
     const wc = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
 
     const rows = db.prepare(`
