@@ -1165,6 +1165,112 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     res.json({ ok: true });
   });
 
+  // ─── GET /api/reporting/export ───────────────────────────────────────────
+  app.get('/api/reporting/export', (req, res) => {
+    const search    = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+    const startDate = typeof req.query.start_date === 'string' ? req.query.start_date : '';
+    const endDate   = typeof req.query.end_date === 'string' ? req.query.end_date : '';
+    const reviewed  = typeof req.query.reviewed === 'string' ? req.query.reviewed : '';
+
+    const clauses: string[] = [];
+    const params: any[] = [];
+    if (search) {
+      clauses.push(`(UPPER(assignor_canon) LIKE UPPER(?) OR UPPER(assignee_canon) LIKE UPPER(?) OR cfn LIKE ?)`);
+      params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+    }
+    if (startDate) { clauses.push(`rec_date >= ?`); params.push(startDate); }
+    if (endDate)   { clauses.push(`rec_date <= ?`); params.push(endDate); }
+    if (reviewed === 'yes') { clauses.push(`reviewed_at IS NOT NULL`); }
+    if (reviewed === 'no')  { clauses.push(`reviewed_at IS NULL`); }
+    const wc = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+
+    const rows = db.prepare(`
+      SELECT cfn, rec_date, doc_type, doc_category, doc_title,
+             assignor_canon AS assignor, assignee_canon AS assignee,
+             assignor_type, assignee_type, txn_type,
+             pdf_assignor, pdf_assignee, assignor_parent, assignee_parent,
+             property_address, folio_parcel, loan_amount, consideration_amount,
+             sponsor_address, signatory_officer,
+             rec_book, rec_page,
+             classification, reviewed_by, reviewed_at
+      FROM aom_events_clean ${wc}
+      ORDER BY rec_date DESC
+    `).all(...params) as any[];
+
+    const escape = (v: any) => {
+      if (v === null || v === undefined) return '';
+      const s = String(v);
+      return s.includes(',') || s.includes('"') || s.includes('\n')
+        ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+
+    const headers = [
+      'CFN','Date','Doc Type','Category','Title',
+      'Assignor','Assignee','Assignor Type','Assignee Type','Txn Type',
+      'PDF Assignor','PDF Assignee','Assignor Parent','Assignee Parent',
+      'Property Address','Folio/Parcel','Loan Amount','Consideration',
+      'Sponsor Address','Signatory Officer',
+      'Book','Page','Classification','Reviewed By','Reviewed At',
+    ];
+
+    const csv = [
+      headers.join(','),
+      ...rows.map(r => [
+        r.cfn, r.rec_date, r.doc_type, r.doc_category, r.doc_title,
+        r.assignor, r.assignee, r.assignor_type, r.assignee_type, r.txn_type,
+        r.pdf_assignor, r.pdf_assignee, r.assignor_parent, r.assignee_parent,
+        r.property_address, r.folio_parcel, r.loan_amount, r.consideration_amount,
+        r.sponsor_address, r.signatory_officer,
+        r.rec_book, r.rec_page, r.classification, r.reviewed_by, r.reviewed_at,
+      ].map(escape).join(',')),
+    ].join('\n');
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="amo-reporting-${new Date().toISOString().slice(0,10)}.csv"`);
+    res.send(csv);
+  });
+
+  // ─── GET /api/reporting/participants ──────────────────────────────────────
+  app.get('/api/reporting/participants', (req, res) => {
+    const startDate = typeof req.query.start_date === 'string' ? req.query.start_date : '';
+    const endDate   = typeof req.query.end_date === 'string' ? req.query.end_date : '';
+    const clauses: string[] = [];
+    const params: any[] = [];
+    if (startDate) { clauses.push(`rec_date >= ?`); params.push(startDate); }
+    if (endDate)   { clauses.push(`rec_date <= ?`); params.push(endDate); }
+    const wc = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+
+    const topSellers = db.prepare(`
+      SELECT assignor_canon AS entity, assignor_type AS entity_type,
+             COUNT(*) AS transfers_out,
+             SUM(loan_amount) AS total_loan_amount
+      FROM aom_events_clean ${wc}
+      WHERE assignor_canon IS NOT NULL AND assignor_canon != 'UNKNOWN'
+      GROUP BY assignor_canon ORDER BY transfers_out DESC LIMIT 20
+    `).all(...params);
+
+    const topBuyers = db.prepare(`
+      SELECT assignee_canon AS entity, assignee_type AS entity_type,
+             COUNT(*) AS transfers_in,
+             SUM(loan_amount) AS total_loan_amount
+      FROM aom_events_clean ${wc}
+      WHERE assignee_canon IS NOT NULL AND assignee_canon != 'UNKNOWN'
+      GROUP BY assignee_canon ORDER BY transfers_in DESC LIMIT 20
+    `).all(...params);
+
+    const mostActive = db.prepare(`
+      SELECT entity, entity_type,
+             inbound_vol AS transfers_in,
+             outbound_vol AS transfers_out,
+             total_vol AS total,
+             first_seen, last_seen
+      FROM entity_nodes
+      ORDER BY total_vol DESC LIMIT 20
+    `).all();
+
+    res.json({ topSellers, topBuyers, mostActive });
+  });
+
   // ─── GET /api/reporting/chart ─────────────────────────────────────────────
   app.get('/api/reporting/chart', (req, res) => {
     const type      = typeof req.query.type === 'string' ? req.query.type : 'monthly';

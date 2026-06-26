@@ -68,9 +68,9 @@ Return a JSON object with exactly these fields:
 - property_address: the street address of the encumbered property if stated (street, city, state, zip as available - NOT the parties' corporate addresses), else null
 - loan_amount: the original loan / mortgage / note principal amount in dollars if stated, as a number, else null
 - consideration_amount: the actual consideration paid for the assignment if a genuine amount is stated, as a number. IGNORE nominal recitals like "$10.00 and other good and valuable consideration" - those are null.
-- folio_parcel: the Miami-Dade folio or parcel number for the property, typically formatted as XX-XXXX-XXX-XXXX or similar. Often found near the legal description or property description block, or labeled "Folio No.", "Parcel ID", or "RE#". Return as a string, else null.
+- folio_parcel: the Miami-Dade folio or parcel number for the property. Look for labels like "Folio No.", "Folio #", "Parcel ID", "RE#", "Property ID", or a bare number formatted as XX-XXXX-XXX-XXXX (13 digits with dashes). Also check the legal description block and any "Exhibit A" section. Return only the number string (e.g. "01-3124-020-0340"), not the label. If not present, return null.
 - sponsor_address: the mailing address or business address of the assignee (buyer/lender) if stated in the document body (NOT the property address). Often appears after the assignee's name in the opening recital or in the signature block. Return as a string, else null.
-- signatory_officer: the full name and title of the person who signed the document on behalf of the assignor, as written above or below the signature line (e.g. "Jane Smith, Vice President"). Return as a string, else null.
+- signatory_officer: The name and title of the person who signed this document ON BEHALF OF THE ASSIGNOR (the transferring party). Look in the signature block for a line like "By: ___" or "Name: ___" or "Title: ___" directly under the assignor's name. DO NOT return the notary's name — the notary appears in a separate "State of ___, County of ___" acknowledgment block and is not the signatory. DO NOT return the assignee's signer. Prefer the printed/typed name under the signature line over any handwritten scrawl. Return "Name, Title" as a single string (e.g. "Jane Smith, Vice President"), or null if not legible.
 
 Rules:
 - A document titled "Assignment of Mortgage" that also assigns rents/leases ancillary to the mortgage is LOAN_TRANSFER.
@@ -227,9 +227,16 @@ def llm_extract(ocr_text: str) -> dict | None:
 
     for text_field in ('doc_title', 'assignor_name', 'assignor_parent',
                        'assignee_name', 'assignee_parent', 'property_address',
-                       'folio_parcel', 'sponsor_address', 'signatory_officer'):
+                       'folio_parcel', 'sponsor_address'):
         val = data.get(text_field)
         data[text_field] = val.strip() if isinstance(val, str) and val.strip() else None
+
+    officer = data.get('signatory_officer')
+    if isinstance(officer, str):
+        officer = officer.strip()
+        data['signatory_officer'] = officer if officer else None
+    else:
+        data['signatory_officer'] = None
 
     return data
 
