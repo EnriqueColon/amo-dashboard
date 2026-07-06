@@ -206,8 +206,9 @@ MANUAL_OVERRIDES = [
     (r'CITY\s+FIRST', 'CITY FIRST'),
     # ELS Holdings
     (r'ELS\s+HOLD', 'ELS HOLDINGS'),
-    # Alto Capital
-    (r'\bALTO\b', 'ALTO CAPITAL'),
+    # Alto Capital (incl. common typos: CAPITL/CAPITOL/CAPOITAL/CAPTIAL);
+    # keep pattern tight so RIVO ALTO PARTNERS, D ALTO (person), etc. don't fold in
+    (r'\bALTO\s+(CAP\w*|OPPORTUN\w*)', 'ALTO CAPITAL'),
     # CitiMortgage
     (r'CITI\s*MORTGAGE|CITOMORTGAGE', 'CITIMORTGAGE'),
     # Paramount Residential Mortgage
@@ -258,6 +259,12 @@ MANUAL_OVERRIDES = [
     (r'\bRRA\s+CP\b|\bRRA\s+CAPITAL', 'RRA CAPITAL'),
     # 1 Sharpe Opportunity
     (r'1\s+SHARPE\s+OPPORTUNITY|ONE\s+SHARPE\s+OPPORTUNITY', '1 SHARPE OPPORTUNITY TRUST'),
+    # Banesco (FL state-chartered bank — OCR/word-order variants: BANESCO USA,
+    # USA BANESCO, BANESCOUSA, BANK BANESCO, etc.)
+    (r'BANESCO', 'BANESCO USA'),
+    # First Federal Bank — suffix stripping would otherwise reduce these to 'FIRST'
+    (r'FIRST\s+FEDERAL\s+BANK\s+OF\s+KANSAS\s+CITY', 'FIRST FEDERAL BANK OF KANSAS CITY'),
+    (r'FIRST\s+FEDERAL\s+BANK', 'FIRST FEDERAL BANK'),
 ]
 
 # Compiled patterns
@@ -685,6 +692,18 @@ def build_normalized_tables():
     # ── Step 1: Build aom_events_clean ─────────────────────────────────────
     print("Building aom_events_clean...")
 
+    # Preserve manual review marks (set via the Reporting UI) across the rebuild
+    review_rows = []
+    try:
+        review_rows = conn.execute("""
+            SELECT cfn, classification, reviewed_by, reviewed_at FROM aom_events_clean
+            WHERE reviewed_at IS NOT NULL OR classification IS NOT NULL
+        """).fetchall()
+        if review_rows:
+            print(f"  Preserving {len(review_rows)} manual review marks")
+    except sqlite3.OperationalError:
+        pass  # first run, or review columns not present yet
+
     conn.executescript("""
         DROP TABLE IF EXISTS aom_events_clean;
         CREATE TABLE aom_events_clean (
@@ -712,7 +731,10 @@ def build_normalized_tables():
             consideration_amount REAL,
             folio_parcel         TEXT,
             sponsor_address      TEXT,
-            signatory_officer    TEXT
+            signatory_officer    TEXT,
+            classification       TEXT,
+            reviewed_by          TEXT,
+            reviewed_at          TEXT
         );
     """)
 
@@ -884,6 +906,14 @@ def build_normalized_tables():
          folio_parcel, sponsor_address, signatory_officer)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     """, inserts)
+
+    # Restore preserved review marks
+    if review_rows:
+        conn.executemany("""
+            UPDATE aom_events_clean
+            SET classification = ?, reviewed_by = ?, reviewed_at = ?
+            WHERE cfn = ?
+        """, [(c, rb, ra, cfn) for cfn, c, rb, ra in review_rows])
     conn.commit()
 
     n = conn.execute("SELECT COUNT(*) FROM aom_events_clean").fetchone()[0]

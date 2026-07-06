@@ -27,6 +27,15 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get('AMO_DB_PATH') or os.path.join(HERE, '..', 'miami_dade_amo.db')
 SEED_CSV = os.path.join(HERE, 'targets_seed.csv')
 
+# The pipeline's canonicalizer (manual overrides, suffix rules, etc.) is the
+# source of truth for entity names — use it when available so targets follow
+# consolidations like BANESCO / USA BANESCO / BANESCOUSA → BANESCO USA.
+sys.path.insert(0, HERE)
+try:
+    from normalize import canonicalize as pipeline_canonicalize
+except Exception:
+    pipeline_canonicalize = None
+
 SUFFIX = re.compile(
     r'\s+(LLC|INC|CORP|CORPORATION|LP|LLP|CO|COMPANY|NA|N A|BANK NA|FSB|SSB|NATIONAL ASSOCIATION)$'
 )
@@ -78,6 +87,29 @@ def main() -> int:
     for c in canon:
         canon_stripped.setdefault(strip_suffix(norm(c)), c)
 
+    def to_canonical(n: str) -> str:
+        # Pipeline canonicalizer first (applies MANUAL_OVERRIDES consolidations),
+        # then exact DB match, then suffix-stripped DB match.
+        if pipeline_canonicalize:
+            c = pipeline_canonicalize(n)
+            if c in canon:
+                return c
+        if n in canon:
+            return n
+        return canon_stripped.get(strip_suffix(n), n)
+
+    # Re-canonicalize any existing watchlist rows so they follow newly added
+    # consolidation rules (e.g. BANESCO → BANESCO USA after a re-normalize).
+    existing = db.execute("SELECT entity, added_at, notes FROM target_entities").fetchall()
+    for entity, added_at, notes in existing:
+        c = to_canonical(norm(entity))
+        if c != entity:
+            db.execute(
+                "INSERT INTO target_entities (entity, added_at, notes) VALUES (?, ?, ?) "
+                "ON CONFLICT(entity) DO NOTHING", (c, added_at, notes))
+            db.execute("DELETE FROM target_entities WHERE entity = ?", (entity,))
+            print(f'  Consolidated watchlist entry: {entity} -> {c}')
+
     # Read seed and consolidate onto canonical DB names
     final: dict[str, set] = {}
     with open(SEED_CSV, newline='') as f:
@@ -85,7 +117,7 @@ def main() -> int:
             n = norm(row['entity'])
             if not n:
                 continue
-            name = n if n in canon else canon_stripped.get(strip_suffix(n), n)
+            name = to_canonical(n)
             final.setdefault(name, set())
             if row.get('type'):
                 final[name].update(t for t in row['type'].split('/') if t)
