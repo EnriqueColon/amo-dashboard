@@ -33,8 +33,10 @@ SEED_CSV = os.path.join(HERE, 'targets_seed.csv')
 sys.path.insert(0, HERE)
 try:
     from normalize import canonicalize as pipeline_canonicalize
+    from normalize import load_aliases as pipeline_load_aliases
 except Exception:
     pipeline_canonicalize = None
+    pipeline_load_aliases = None
 
 SUFFIX = re.compile(
     r'\s+(LLC|INC|CORP|CORPORATION|LP|LLP|CO|COMPANY|NA|N A|BANK NA|FSB|SSB|NATIONAL ASSOCIATION)$'
@@ -67,6 +69,8 @@ def main() -> int:
         return 1
 
     db = sqlite3.connect(DB_PATH)
+    if pipeline_load_aliases:
+        pipeline_load_aliases(db)  # honor user-managed merges from the Entities page
     db.execute("""
         CREATE TABLE IF NOT EXISTS target_entities (
             entity TEXT PRIMARY KEY,

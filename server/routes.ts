@@ -1157,6 +1157,240 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     return arr.map((e: string) => String(e).trim().toUpperCase()).filter(Boolean).slice(0, 50);
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ENTITY ALIASES (entity-resolution crosswalk: merge duplicate entities)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  const TXN_TYPE_CASE = `
+    CASE
+      WHEN assignor_canon = assignee_canon THEN 'SELF_ASSIGN'
+      WHEN assignor_type  = 'MERS'         THEN 'MERS_RELEASE'
+      WHEN assignor_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST')
+       AND assignee_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST') THEN 'MARKET_TRANSFER'
+      WHEN assignor_type NOT IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST','MERS')
+       AND assignee_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST') THEN 'ORIGINATION'
+      WHEN assignor_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST')
+       AND assignee_type NOT IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST','MERS') THEN 'INSTITUTIONAL_OUT'
+      ELSE 'PRIVATE'
+    END`;
+
+  function clearMergeCaches() {
+    clearCacheByPrefix('/api/entity');
+    clearCacheByPrefix('/api/entity-nodes');
+    clearCacheByPrefix('/api/deal-intelligence');
+    clearCacheByPrefix('/api/network');
+    clearCacheByPrefix('/api/stats');
+    clearCacheByPrefix('/api/assignments');
+    clearCacheByPrefix('/api/clean-events');
+    clearCacheByPrefix('/api/flow-matrix');
+    clearCacheByPrefix('/api/reporting');
+    clearCacheByPrefix('/api/monthly-volume');
+  }
+
+  // Rebuild the entity_nodes row and entity_relationships rows for one canonical
+  // entity from aom_events_clean (used after a merge collapses variants into it).
+  function rebuildEntityAggregates(canonical: string, entityType: string | null) {
+    const inb = db.prepare(`
+      SELECT COUNT(*) cnt, COUNT(DISTINCT assignor_canon) deg, MIN(rec_date) fs, MAX(rec_date) ls
+      FROM aom_events_clean WHERE assignee_canon = ?
+    `).get(canonical) as any;
+    const outb = db.prepare(`
+      SELECT COUNT(*) cnt, COUNT(DISTINCT assignee_canon) deg, MIN(rec_date) fs, MAX(rec_date) ls
+      FROM aom_events_clean WHERE assignor_canon = ?
+    `).get(canonical) as any;
+
+    const dates = [inb.fs, inb.ls, outb.fs, outb.ls].filter(Boolean).sort();
+    db.prepare(`DELETE FROM entity_nodes WHERE entity = ?`).run(canonical);
+    db.prepare(`
+      INSERT INTO entity_nodes (entity, inbound_vol, outbound_vol, total_vol, degree, entity_type, first_seen, last_seen)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      canonical, inb.cnt, outb.cnt, inb.cnt + outb.cnt, inb.deg + outb.deg,
+      entityType || 'OTHER', dates[0] ?? null, dates[dates.length - 1] ?? null,
+    );
+
+    db.prepare(`DELETE FROM entity_relationships WHERE source_entity = ? OR target_entity = ?`).run(canonical, canonical);
+    db.prepare(`
+      INSERT OR REPLACE INTO entity_relationships (source_entity, target_entity, transaction_count, first_seen_date, last_seen_date)
+      SELECT assignor_canon, assignee_canon, COUNT(*), MIN(rec_date), MAX(rec_date)
+      FROM aom_events_clean
+      WHERE (assignor_canon = ? OR assignee_canon = ?) AND assignor_canon != assignee_canon
+        AND assignor_canon != 'UNKNOWN' AND assignee_canon != 'UNKNOWN'
+      GROUP BY assignor_canon, assignee_canon
+    `).run(canonical, canonical);
+  }
+
+  // ─── GET /api/aliases ─────────────────────────────────────────────────────
+  // Existing merges, grouped by canonical name.
+  app.get('/api/aliases', (_req, res) => {
+    const rows = db.prepare(`
+      SELECT a.variant, a.canonical, a.created_at, a.note,
+             n.total_vol AS canonical_vol, n.entity_type AS canonical_type
+      FROM entity_aliases a
+      LEFT JOIN entity_nodes n ON n.entity = a.canonical
+      ORDER BY a.canonical, a.variant
+    `).all();
+    res.json(rows);
+  });
+
+  // ─── POST /api/aliases/merge ──────────────────────────────────────────────
+  // Body: { canonical: string, variants: string[] }
+  // Records the alias rules and immediately cascades the merge through
+  // aom_events_clean, entity_nodes, entity_relationships and target_entities.
+  app.post('/api/aliases/merge', (req, res) => {
+    const { canonical, variants } = req.body as { canonical?: string; variants?: string[] };
+    const canon = (canonical || '').trim().toUpperCase();
+    const vars = (variants || []).map(v => String(v).trim().toUpperCase())
+      .filter(v => v && v !== canon);
+    if (!canon || vars.length === 0) {
+      return res.status(400).json({ error: 'canonical and at least one distinct variant are required' });
+    }
+    if (vars.length > 50) return res.status(400).json({ error: 'Too many variants in one merge (max 50)' });
+
+    const now = new Date().toISOString();
+    const varPh = vars.map(() => '?').join(',');
+
+    // Determine entity type for the golden record before variant rows disappear:
+    // keep the canonical's current type, else the best-classified variant type.
+    const typeRow = db.prepare(`
+      SELECT entity_type FROM entity_nodes
+      WHERE entity IN (?, ${varPh})
+      ORDER BY CASE WHEN entity = ? THEN 0 ELSE 1 END,
+               CASE WHEN entity_type IS NOT NULL AND entity_type != 'OTHER' THEN 0 ELSE 1 END,
+               total_vol DESC
+    `).get(canon, ...vars, canon) as any;
+    const entityType = typeRow?.entity_type ?? null;
+
+    const doMerge = db.transaction(() => {
+      // Record alias rules; re-point any earlier merges whose target is now itself merged
+      for (const v of vars) {
+        db.prepare(`
+          INSERT INTO entity_aliases (variant, canonical, created_at, created_by, note)
+          VALUES (?, ?, ?, 'user', NULL)
+          ON CONFLICT(variant) DO UPDATE SET canonical = excluded.canonical, created_at = excluded.created_at
+        `).run(v, canon, now);
+      }
+      db.prepare(`UPDATE entity_aliases SET canonical = ? WHERE canonical IN (${varPh})`).run(canon, ...vars);
+
+      // Cascade into the clean events table
+      db.prepare(`UPDATE aom_events_clean SET assignor_canon = ?, assignor_type = COALESCE(?, assignor_type) WHERE assignor_canon IN (${varPh})`).run(canon, entityType, ...vars);
+      db.prepare(`UPDATE aom_events_clean SET assignee_canon = ?, assignee_type = COALESCE(?, assignee_type) WHERE assignee_canon IN (${varPh})`).run(canon, entityType, ...vars);
+
+      // Re-derive txn_type for everything touching the golden record
+      db.prepare(`UPDATE aom_events_clean SET txn_type = ${TXN_TYPE_CASE} WHERE assignor_canon = ? OR assignee_canon = ?`).run(canon, canon);
+
+      // Watchlist follows the merge
+      const inWatchlist = db.prepare(`SELECT entity, added_at, notes FROM target_entities WHERE entity IN (${varPh})`).all(...vars) as any[];
+      if (inWatchlist.length > 0) {
+        db.prepare(`
+          INSERT INTO target_entities (entity, added_at, notes) VALUES (?, ?, ?)
+          ON CONFLICT(entity) DO NOTHING
+        `).run(canon, inWatchlist[0].added_at || now, inWatchlist[0].notes || null);
+        db.prepare(`DELETE FROM target_entities WHERE entity IN (${varPh})`).run(...vars);
+      }
+
+      // Rebuild aggregates for the golden record; drop the variants' node rows
+      db.prepare(`DELETE FROM entity_nodes WHERE entity IN (${varPh})`).run(...vars);
+      db.prepare(`DELETE FROM entity_relationships WHERE source_entity IN (${varPh}) OR target_entity IN (${varPh})`).run(...vars, ...vars);
+      rebuildEntityAggregates(canon, entityType);
+    });
+    doMerge();
+
+    clearMergeCaches();
+    const node = db.prepare(`SELECT * FROM entity_nodes WHERE entity = ?`).get(canon);
+    res.json({ ok: true, canonical: canon, merged: vars, node });
+  });
+
+  // ─── DELETE /api/aliases/:variant ─────────────────────────────────────────
+  // Removes a merge rule. Historical rows revert on the next data rebuild
+  // (normalize.py re-derives canonical names from the preserved raw names).
+  app.delete('/api/aliases/:variant', (req, res) => {
+    const variant = decodeURIComponent(req.params.variant);
+    const info = db.prepare(`DELETE FROM entity_aliases WHERE variant = ?`).run(variant);
+    clearMergeCaches();
+    res.json({ ok: true, removed: info.changes > 0, note: 'Data reverts on next pipeline rebuild (normalize.py)' });
+  });
+
+  // ─── GET /api/aliases/suggestions ─────────────────────────────────────────
+  // Candidate duplicate clusters via blocking heuristics:
+  //  - exact match when spaces/punctuation removed  (BANESCOUSA vs BANESCO USA)
+  //  - exact match on sorted tokens                 (USA BANESCO vs BANESCO USA)
+  //  - prefix extension (possible truncation)       (MCLP ASSET vs MCLP ASSET COMPANY)
+  app.get('/api/aliases/suggestions', (_req, res) => {
+    const nodes = db.prepare(`
+      SELECT entity, entity_type, total_vol FROM entity_nodes
+      WHERE total_vol >= 2 AND entity != 'UNKNOWN'
+    `).all() as any[];
+    const aliased = new Set((db.prepare(`SELECT variant FROM entity_aliases`).all() as any[]).map(r => r.variant));
+    const dismissed = new Set((db.prepare(`SELECT cluster_key FROM alias_suggestion_dismissals`).all() as any[]).map(r => r.cluster_key));
+
+    const active = nodes.filter(n => !aliased.has(n.entity));
+    const byNoSpace = new Map<string, any[]>();
+    const byTokens = new Map<string, any[]>();
+    for (const n of active) {
+      const ns = n.entity.replace(/[^A-Z0-9]/g, '');
+      const tk = n.entity.split(/\s+/).sort().join(' ');
+      if (!byNoSpace.has(ns)) byNoSpace.set(ns, []);
+      byNoSpace.get(ns)!.push(n);
+      if (!byTokens.has(tk)) byTokens.set(tk, []);
+      byTokens.get(tk)!.push(n);
+    }
+
+    type Suggestion = { key: string; reason: string; entities: any[]; suggested_canonical: string; combined_vol: number };
+    const out = new Map<string, Suggestion>();
+
+    const addCluster = (group: any[], reason: string) => {
+      if (group.length < 2) return;
+      const names = group.map(g => g.entity).sort();
+      const key = names.join('|');
+      if (dismissed.has(key) || out.has(key)) return;
+      const best = [...group].sort((a, b) => b.total_vol - a.total_vol)[0];
+      out.set(key, {
+        key, reason, entities: group,
+        suggested_canonical: best.entity,
+        combined_vol: group.reduce((s, g) => s + g.total_vol, 0),
+      });
+    };
+
+    Array.from(byNoSpace.values()).forEach(group => addCluster(group, 'variant'));
+    Array.from(byTokens.values()).forEach(group => addCluster(group, 'variant'));
+
+    // Truncation pairs — sorted scan keeps this O(n·k)
+    const sorted = [...active].sort((a, b) => a.entity.localeCompare(b.entity));
+    for (let i = 0; i < sorted.length; i++) {
+      const a = sorted[i];
+      if (a.entity.length < 8) continue;
+      for (let j = i + 1; j < Math.min(i + 8, sorted.length); j++) {
+        const b = sorted[j];
+        if (b.entity.startsWith(a.entity + ' ')) addCluster([a, b], 'truncation');
+      }
+    }
+
+    const suggestions = Array.from(out.values()).sort((a, b) => {
+      if (a.reason !== b.reason) return a.reason === 'variant' ? -1 : 1;
+      return b.combined_vol - a.combined_vol;
+    }).slice(0, 300);
+
+    res.json({
+      suggestions,
+      counts: {
+        variant: suggestions.filter(s => s.reason === 'variant').length,
+        truncation: suggestions.filter(s => s.reason === 'truncation').length,
+      },
+    });
+  });
+
+  // ─── POST /api/aliases/suggestions/dismiss ────────────────────────────────
+  app.post('/api/aliases/suggestions/dismiss', (req, res) => {
+    const { key } = req.body as { key?: string };
+    if (!key) return res.status(400).json({ error: 'key is required' });
+    db.prepare(`
+      INSERT INTO alias_suggestion_dismissals (cluster_key, dismissed_at) VALUES (?, ?)
+      ON CONFLICT(cluster_key) DO NOTHING
+    `).run(key, new Date().toISOString());
+    res.json({ ok: true });
+  });
+
   // ─── GET /api/reporting/entity-report ─────────────────────────────────────
   // Dynamic report for specific entities over a time window.
   // ?entities=A&entities=B&start_date=&end_date=

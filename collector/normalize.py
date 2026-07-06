@@ -626,6 +626,38 @@ def get_txn_type(assignor_canon: str, assignee_canon: str,
     return 'PRIVATE'
 
 
+# ── User-managed entity aliases (entity_aliases table) ─────────────────────
+# Merges made from the dashboard's Entities page are recorded as
+# variant → canonical rows. canonicalize() applies them as its final step so
+# user merges survive every rebuild. Populated by load_aliases().
+_ALIAS_MAP: dict = {}
+
+
+def load_aliases(conn) -> int:
+    """Load the user-managed alias crosswalk from the DB into _ALIAS_MAP."""
+    global _ALIAS_MAP
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS entity_aliases (
+            variant TEXT PRIMARY KEY,
+            canonical TEXT NOT NULL,
+            created_at TEXT,
+            created_by TEXT,
+            note TEXT
+        )
+    """)
+    raw = dict(conn.execute("SELECT variant, canonical FROM entity_aliases"))
+    # Resolve chains (A→B, B→C  ⇒  A→C), guarding against cycles
+    resolved = {}
+    for variant, canon in raw.items():
+        seen = {variant}
+        while canon in raw and canon not in seen:
+            seen.add(canon)
+            canon = raw[canon]
+        resolved[variant] = canon
+    _ALIAS_MAP = resolved
+    return len(_ALIAS_MAP)
+
+
 def canonicalize(name: str) -> str:
     """Return a canonical brand name for a raw entity string."""
     if not name or not name.strip():
@@ -639,7 +671,7 @@ def canonicalize(name: str) -> str:
     # Check manual overrides first (before stripping suffixes)
     for pat, canon in _OVERRIDE_RES:
         if pat.search(s):
-            return canon
+            return _ALIAS_MAP.get(canon, canon)
     
     # Strip suffixes iteratively
     prev = None
@@ -657,12 +689,20 @@ def canonicalize(name: str) -> str:
     if not s:
         s = name.strip().upper()
     
-    return s if s else 'UNKNOWN'
+    if not s:
+        return 'UNKNOWN'
+    # Final step: apply user-managed merges from the Entities page
+    return _ALIAS_MAP.get(s, s)
 
 
 def build_normalized_tables():
     conn = sqlite3.connect(DB)
     conn.execute('PRAGMA journal_mode=WAL')
+
+    # ── Step 0a: Load user-managed merges so canonicalize() honors them ─────
+    n_aliases = load_aliases(conn)
+    if n_aliases:
+        print(f"Loaded {n_aliases} user-managed entity aliases")
 
     # ── Step 0: Collect suffix signals from ALL raw filing names ───────────
     print("Extracting suffix signals from raw filings...")

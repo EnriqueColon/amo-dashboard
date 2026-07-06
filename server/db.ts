@@ -146,6 +146,25 @@ export function getDb(): Database.Database {
       );
     `);
 
+    // Entity-resolution crosswalk: maps duplicate canonical names (variants)
+    // onto one golden-record name. Managed from the Entities page; applied
+    // immediately via the merge endpoint and re-applied by normalize.py on
+    // every data rebuild.
+    _db.exec(`
+      CREATE TABLE IF NOT EXISTS entity_aliases (
+        variant TEXT PRIMARY KEY,
+        canonical TEXT NOT NULL,
+        created_at TEXT,
+        created_by TEXT,
+        note TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_entity_aliases_canonical ON entity_aliases(canonical);
+      CREATE TABLE IF NOT EXISTS alias_suggestion_dismissals (
+        cluster_key TEXT PRIMARY KEY,
+        dismissed_at TEXT
+      );
+    `);
+
     _db.exec(`
       CREATE TABLE IF NOT EXISTS pdf_extractions (
         cfn TEXT PRIMARY KEY,

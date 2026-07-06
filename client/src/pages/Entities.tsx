@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import CategoryBadge from '@/components/CategoryBadge';
 import EntityDetailPanel from '@/components/EntityDetailPanel';
+import DuplicateManager from '@/components/DuplicateManager';
 import ColHeader from '@/components/ColHeader';
 import { Search, ChevronRight, Info, Network } from 'lucide-react';
 
@@ -52,6 +53,9 @@ export default function Entities() {
             Each entity maps directly to clean AOM records. Click any row to see their full transaction history: what was assigned to them, what they assigned out, and to whom.
           </span>
         </div>
+
+        {/* Duplicate review & merge tool */}
+        <DuplicateManager />
 
         {/* Filters */}
         <div className="flex items-center gap-3 flex-wrap">
