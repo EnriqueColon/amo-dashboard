@@ -1149,6 +1149,121 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     res.json({ ok: true });
   });
 
+  // ── Helper: parse ?entities= (repeatable) into a clean string array ────────
+  function parseEntities(q: any): string[] {
+    const raw = q.entities;
+    if (!raw) return [];
+    const arr = Array.isArray(raw) ? raw : [raw];
+    return arr.map((e: string) => String(e).trim().toUpperCase()).filter(Boolean).slice(0, 50);
+  }
+
+  // ─── GET /api/reporting/entity-report ─────────────────────────────────────
+  // Dynamic report for specific entities over a time window.
+  // ?entities=A&entities=B&start_date=&end_date=
+  app.get('/api/reporting/entity-report', (req, res) => {
+    const entities = parseEntities(req.query);
+    if (entities.length === 0) return res.status(400).json({ error: 'At least one entity is required' });
+    const startDate = typeof req.query.start_date === 'string' ? req.query.start_date : '';
+    const endDate   = typeof req.query.end_date === 'string' ? req.query.end_date : '';
+
+    const ph = entities.map(() => '?').join(',');
+    let dateWhere = '';
+    const dateParams: any[] = [];
+    if (startDate) { dateWhere += ' AND rec_date >= ?'; dateParams.push(startDate); }
+    if (endDate)   { dateWhere += ' AND rec_date <= ?'; dateParams.push(endDate); }
+
+    // KPIs — distinct filings touching the selection
+    const kpis = db.prepare(`
+      SELECT COUNT(*) AS total,
+             SUM(CASE WHEN assignee_canon IN (${ph}) THEN 1 ELSE 0 END) AS inbound,
+             SUM(CASE WHEN assignor_canon IN (${ph}) THEN 1 ELSE 0 END) AS outbound,
+             SUM(CASE WHEN loan_amount > 0 THEN loan_amount ELSE 0 END) AS dollar_volume,
+             SUM(CASE WHEN loan_amount > 0 THEN 1 ELSE 0 END) AS dollar_known_count
+      FROM aom_events_clean
+      WHERE (assignor_canon IN (${ph}) OR assignee_canon IN (${ph}))
+        AND txn_type != 'SELF_ASSIGN' ${dateWhere}
+    `).get(...entities, ...entities, ...entities, ...entities, ...dateParams) as any;
+
+    // Timeline — per entity per month, in/out counts
+    const timeline = db.prepare(`
+      SELECT strftime('%Y-%m', rec_date) AS month, entity,
+             SUM(inb) AS in_count, SUM(outb) AS out_count
+      FROM (
+        SELECT rec_date, assignee_canon AS entity, 1 AS inb, 0 AS outb
+        FROM aom_events_clean
+        WHERE assignee_canon IN (${ph}) AND txn_type != 'SELF_ASSIGN' ${dateWhere}
+        UNION ALL
+        SELECT rec_date, assignor_canon, 0, 1
+        FROM aom_events_clean
+        WHERE assignor_canon IN (${ph}) AND txn_type != 'SELF_ASSIGN' ${dateWhere}
+      )
+      GROUP BY month, entity ORDER BY month
+    `).all(...entities, ...dateParams, ...entities, ...dateParams) as any[];
+
+    // Counterparties — who the selection sold to / bought from (outside the selection)
+    const counterparties = db.prepare(`
+      SELECT counterparty, counterparty_type,
+             SUM(sold) AS sold_to, SUM(bought) AS bought_from,
+             SUM(sold) + SUM(bought) AS total
+      FROM (
+        SELECT assignee_canon AS counterparty, assignee_type AS counterparty_type, 1 AS sold, 0 AS bought
+        FROM aom_events_clean
+        WHERE assignor_canon IN (${ph}) AND assignee_canon NOT IN (${ph})
+          AND txn_type != 'SELF_ASSIGN' ${dateWhere}
+        UNION ALL
+        SELECT assignor_canon, assignor_type, 0, 1
+        FROM aom_events_clean
+        WHERE assignee_canon IN (${ph}) AND assignor_canon NOT IN (${ph})
+          AND txn_type != 'SELF_ASSIGN' ${dateWhere}
+      )
+      WHERE counterparty IS NOT NULL AND counterparty != 'UNKNOWN'
+      GROUP BY counterparty ORDER BY total DESC LIMIT 15
+    `).all(...entities, ...entities, ...dateParams, ...entities, ...entities, ...dateParams) as any[];
+
+    // Per-entity summary (also feeds the bought-vs-sold chart)
+    const summary = entities.map(entity => {
+      const row = db.prepare(`
+        SELECT
+          SUM(CASE WHEN assignee_canon = ? THEN 1 ELSE 0 END) AS inbound,
+          SUM(CASE WHEN assignor_canon = ? THEN 1 ELSE 0 END) AS outbound,
+          SUM(CASE WHEN loan_amount > 0 THEN loan_amount ELSE 0 END) AS dollar_volume,
+          MIN(rec_date) AS first_activity, MAX(rec_date) AS last_activity
+        FROM aom_events_clean
+        WHERE (assignor_canon = ? OR assignee_canon = ?)
+          AND txn_type != 'SELF_ASSIGN' ${dateWhere}
+      `).get(entity, entity, entity, entity, ...dateParams) as any;
+      const topCp = db.prepare(`
+        SELECT counterparty, COUNT(*) AS n FROM (
+          SELECT assignee_canon AS counterparty FROM aom_events_clean
+          WHERE assignor_canon = ? AND assignee_canon != ? AND txn_type != 'SELF_ASSIGN' ${dateWhere}
+          UNION ALL
+          SELECT assignor_canon FROM aom_events_clean
+          WHERE assignee_canon = ? AND assignor_canon != ? AND txn_type != 'SELF_ASSIGN' ${dateWhere}
+        )
+        WHERE counterparty IS NOT NULL AND counterparty != 'UNKNOWN'
+        GROUP BY counterparty ORDER BY n DESC LIMIT 1
+      `).get(entity, entity, ...dateParams, entity, entity, ...dateParams) as any;
+      const node = db.prepare('SELECT entity_type FROM entity_nodes WHERE entity = ?').get(entity) as any;
+      return {
+        entity,
+        entity_type: node?.entity_type || null,
+        inbound: row?.inbound ?? 0,
+        outbound: row?.outbound ?? 0,
+        net: (row?.inbound ?? 0) - (row?.outbound ?? 0),
+        dollar_volume: row?.dollar_volume ?? 0,
+        first_activity: row?.first_activity ?? null,
+        last_activity: row?.last_activity ?? null,
+        top_counterparty: topCp?.counterparty ?? null,
+        top_counterparty_count: topCp?.n ?? 0,
+      };
+    });
+
+    res.json({
+      entities, start_date: startDate || null, end_date: endDate || null,
+      kpis, timeline, counterparties, summary,
+    });
+  });
+
   // ─── GET /api/reporting ───────────────────────────────────────────────────
   app.get('/api/reporting', (req, res) => {
     const page      = Math.max(1, parseInt(req.query.page as string) || 1);
@@ -1159,6 +1274,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const endDate   = typeof req.query.end_date === 'string' ? req.query.end_date : '';
     const reviewed  = typeof req.query.reviewed === 'string' ? req.query.reviewed : '';
     const targetsOnly = req.query.targets === '1';
+    const entities  = parseEntities(req.query);
 
     const clauses: string[] = [];
     const params: any[] = [];
@@ -1166,6 +1282,11 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     if (search) {
       clauses.push(`(UPPER(assignor_canon) LIKE UPPER(?) OR UPPER(assignee_canon) LIKE UPPER(?) OR cfn LIKE ?)`);
       params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+    }
+    if (entities.length > 0) {
+      const ph = entities.map(() => '?').join(',');
+      clauses.push(`(assignor_canon IN (${ph}) OR assignee_canon IN (${ph}))`);
+      params.push(...entities, ...entities);
     }
     if (startDate) { clauses.push(`rec_date >= ?`); params.push(startDate); }
     if (endDate)   { clauses.push(`rec_date <= ?`); params.push(endDate); }
@@ -1222,12 +1343,18 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const endDate   = typeof req.query.end_date === 'string' ? req.query.end_date : '';
     const reviewed  = typeof req.query.reviewed === 'string' ? req.query.reviewed : '';
     const targetsOnly = req.query.targets === '1';
+    const entities  = parseEntities(req.query);
 
     const clauses: string[] = [];
     const params: any[] = [];
     if (search) {
       clauses.push(`(UPPER(assignor_canon) LIKE UPPER(?) OR UPPER(assignee_canon) LIKE UPPER(?) OR cfn LIKE ?)`);
       params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+    }
+    if (entities.length > 0) {
+      const ph = entities.map(() => '?').join(',');
+      clauses.push(`(assignor_canon IN (${ph}) OR assignee_canon IN (${ph}))`);
+      params.push(...entities, ...entities);
     }
     if (startDate) { clauses.push(`rec_date >= ?`); params.push(startDate); }
     if (endDate)   { clauses.push(`rec_date <= ?`); params.push(endDate); }

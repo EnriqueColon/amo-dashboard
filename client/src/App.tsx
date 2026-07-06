@@ -21,9 +21,9 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <Router hook={useHashLocation}>
-          <div className="flex h-screen overflow-hidden bg-background">
+          <div className="flex h-screen overflow-hidden bg-background print:h-auto print:overflow-visible">
             <Sidebar />
-            <main className="flex-1 overflow-y-auto flex flex-col">
+            <main className="flex-1 overflow-y-auto flex flex-col print:overflow-visible">
               <Switch>
                 <Route path="/" component={Dashboard} />
                 <Route path="/clean-events" component={CleanEvents} />

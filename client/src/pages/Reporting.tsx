@@ -8,12 +8,13 @@ import {
   LayoutList, Search, X, ChevronLeft, ChevronRight,
   CheckCircle, Clock, ExternalLink, Download,
   BarChart2, TrendingUp, TrendingDown, Users, PieChart,
-  ArrowUpRight, ChevronDown, ChevronUp, Crosshair,
+  ArrowUpRight, ChevronDown, ChevronUp, Crosshair, Printer,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   CartesianGrid, Cell, PieChart as RechartsPie, Pie, Legend,
 } from 'recharts';
+import { EntityPicker, EntityReport } from '@/components/EntityReport';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function fmtAmt(v: number | null | undefined): string | null {
@@ -260,6 +261,19 @@ function initialParams() {
   return new URLSearchParams(window.location.search);
 }
 
+const DATE_PRESETS: Array<[string, number | 'ytd' | null]> = [
+  ['30d', 30], ['90d', 90], ['YTD', 'ytd'], ['12m', 365], ['All', null],
+];
+
+function presetRange(preset: number | 'ytd' | null): { start: string; end: string } {
+  if (preset === null) return { start: '', end: '' };
+  const today = new Date().toISOString().slice(0, 10);
+  if (preset === 'ytd') return { start: `${today.slice(0, 4)}-01-01`, end: today };
+  const d = new Date();
+  d.setDate(d.getDate() - preset);
+  return { start: d.toISOString().slice(0, 10), end: today };
+}
+
 export default function Reporting() {
   const qc = useQueryClient();
   const [params] = useState(initialParams);
@@ -270,6 +284,7 @@ export default function Reporting() {
   const [endDate, setEndDate]     = useState('');
   const [reviewed, setReviewed]   = useState('');
   const [targetsOnly, setTargetsOnly] = useState(() => params.get('targets') === '1');
+  const [entities, setEntities]   = useState<string[]>([]);
   const [expanded, setExpanded]   = useState<string | null>(null);
 
   const { data: targets } = useQuery({
@@ -278,9 +293,22 @@ export default function Reporting() {
   });
   const targetCount = (targets || []).length;
 
+  const setEntitySelection = (next: string[]) => { setEntities(next); setPage(1); };
+
+  const useMyTargets = () => {
+    // Watchlist entities with recorded activity, most active first (chart stays readable)
+    const active = (targets || [])
+      .filter((t: any) => t.last_activity)
+      .sort((a: any, b: any) => (b.total_vol ?? 0) - (a.total_vol ?? 0))
+      .slice(0, 50)
+      .map((t: any) => t.entity);
+    setEntitySelection(active);
+  };
+
   const targetsQ = targetsOnly ? '&targets=1' : '';
-  const qs = `?page=${page}&limit=50&search=${encodeURIComponent(applied)}&start_date=${startDate}&end_date=${endDate}&reviewed=${reviewed}${targetsQ}`;
-  const exportQs = `?search=${encodeURIComponent(applied)}&start_date=${startDate}&end_date=${endDate}&reviewed=${reviewed}${targetsQ}`;
+  const entitiesQ = entities.map(e => `&entities=${encodeURIComponent(e)}`).join('');
+  const qs = `?page=${page}&limit=50&search=${encodeURIComponent(applied)}&start_date=${startDate}&end_date=${endDate}&reviewed=${reviewed}${targetsQ}${entitiesQ}`;
+  const exportQs = `?search=${encodeURIComponent(applied)}&start_date=${startDate}&end_date=${endDate}&reviewed=${reviewed}${targetsQ}${entitiesQ}`;
 
   const { data, isLoading } = useQuery({
     queryKey: ['/api/reporting', qs],
@@ -298,18 +326,20 @@ export default function Reporting() {
   });
 
   const applySearch = () => { setApplied(search); setPage(1); };
-  const clearAll    = () => { setSearch(''); setApplied(''); setStartDate(''); setEndDate(''); setReviewed(''); setTargetsOnly(false); setPage(1); };
-  const hasFilters  = applied || startDate || endDate || reviewed || targetsOnly;
+  const clearAll    = () => { setSearch(''); setApplied(''); setStartDate(''); setEndDate(''); setReviewed(''); setTargetsOnly(false); setEntities([]); setPage(1); };
+  const hasFilters  = applied || startDate || endDate || reviewed || targetsOnly || entities.length > 0;
 
   const handleExport = () => {
     window.location.href = `/api/reporting/export${exportQs}`;
   };
 
+  const handlePrint = () => window.print();
+
   return (
     <div className="p-4 space-y-4 max-w-screen-2xl mx-auto">
 
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between print:hidden">
         <div>
           <div className="flex items-center gap-2">
             <LayoutList size={15} className="text-primary" />
@@ -317,19 +347,65 @@ export default function Reporting() {
             {data && <span className="text-xs text-muted-foreground ml-1">{data.total.toLocaleString()} records · Miami-Dade County</span>}
           </div>
         </div>
-        <Button size="sm" variant="outline" onClick={handleExport} className="h-8 gap-1.5 text-xs">
-          <Download size={12} />Export CSV
-        </Button>
+        <div className="flex gap-1.5">
+          {entities.length > 0 && (
+            <Button size="sm" variant="outline" onClick={handlePrint} className="h-8 gap-1.5 text-xs">
+              <Printer size={12} />Print report
+            </Button>
+          )}
+          <Button size="sm" variant="outline" onClick={handleExport} className="h-8 gap-1.5 text-xs">
+            <Download size={12} />Export CSV
+          </Button>
+        </div>
       </div>
 
-      {/* Charts + Stats side by side */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <DynamicChart startDate={startDate} endDate={endDate} targetsOnly={targetsOnly} />
-        <ParticipantStats startDate={startDate} endDate={endDate} targetsOnly={targetsOnly} />
+      {/* Report builder — entity selection + date presets */}
+      <div className="bg-card border border-border rounded-lg p-3 space-y-2 print:hidden">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <h2 className="text-sm font-semibold flex items-center gap-1.5">
+            <Crosshair size={12} className="text-primary" />Dynamic Report
+          </h2>
+          <div className="flex items-center gap-1 flex-wrap">
+            {DATE_PRESETS.map(([label, preset]) => {
+              const r = presetRange(preset);
+              const active = startDate === r.start && endDate === r.end;
+              return (
+                <button key={label}
+                  onClick={() => { setStartDate(r.start); setEndDate(r.end); setPage(1); }}
+                  className={`h-6 px-2 rounded-full border text-[10px] font-medium transition-colors ${active ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+                  {label}
+                </button>
+              );
+            })}
+            {targetCount > 0 && (
+              <button onClick={useMyTargets}
+                className="h-6 px-2 rounded-full border border-border text-[10px] font-medium text-muted-foreground hover:text-foreground transition-colors">
+                Use my Targets
+              </button>
+            )}
+          </div>
+        </div>
+        <EntityPicker selected={entities} onChange={setEntitySelection} />
+        {entities.length === 0 && (
+          <p className="text-[11px] text-muted-foreground">
+            Pick one or more entities to generate a focused report — KPIs, activity timeline, counterparties, and a summary table. The filing table and CSV export below follow the same selection.
+          </p>
+        )}
       </div>
+
+      {/* Entity report (only when entities are selected) */}
+      <EntityReport entities={entities} startDate={startDate} endDate={endDate} />
+
+      {/* Market-wide charts (hidden when a specific report is active) */}
+      {entities.length === 0 && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <DynamicChart startDate={startDate} endDate={endDate} targetsOnly={targetsOnly} />
+          <ParticipantStats startDate={startDate} endDate={endDate} targetsOnly={targetsOnly} />
+        </div>
+      )}
 
       {/* Filters */}
-      <div className="bg-card border border-border rounded-lg p-3 space-y-2">
+      <div className="bg-card border border-border rounded-lg p-3 space-y-2 print:hidden">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
           <div className="lg:col-span-2">
             <Input placeholder="Search CFN, assignor, or assignee…" value={search}

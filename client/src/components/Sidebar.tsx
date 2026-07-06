@@ -29,7 +29,7 @@ export default function Sidebar() {
   return (
     <aside
       data-testid="sidebar"
-      className={`flex flex-col bg-card border-r border-border transition-all duration-200 ${collapsed ? 'w-14' : 'w-60'} shrink-0`}
+      className={`flex flex-col bg-card border-r border-border transition-all duration-200 ${collapsed ? 'w-14' : 'w-60'} shrink-0 print:hidden`}
     >
       {/* Logo + toggle */}
       <div className="flex items-center gap-3 px-3 py-4 border-b border-border">
