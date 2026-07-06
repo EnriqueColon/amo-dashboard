@@ -6,6 +6,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import {
   X, Plus, LineChart as LineChartIcon, Users, ArrowLeftRight,
   TrendingUp, TrendingDown, Activity, DollarSign,
+  LayoutGrid, ArrowLeft, ZoomIn,
 } from 'lucide-react';
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar,
@@ -134,6 +135,135 @@ function Kpi({ icon: Icon, label, value, sub }: { icon: any; label: string; valu
   );
 }
 
+// ── Single-entity drill-down ──────────────────────────────────────────────────
+function EntityDrilldown({ entity, color, entityType, startDate, endDate, onBack }: {
+  entity: string;
+  color: string;
+  entityType?: string | null;
+  startDate: string;
+  endDate: string;
+  onBack: () => void;
+}) {
+  const qs = [
+    `entities=${encodeURIComponent(entity)}`,
+    startDate && `start_date=${startDate}`,
+    endDate && `end_date=${endDate}`,
+  ].filter(Boolean).join('&');
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['/api/reporting/entity-report', qs],
+    queryFn: () => apiRequest('GET', `/api/reporting/entity-report?${qs}`).then(r => r.json()),
+  });
+
+  // In/out per month for the two-series timeline
+  const timelineData = useMemo(() => {
+    if (!data?.timeline) return [];
+    const byMonth = new Map<string, any>();
+    for (const r of data.timeline) {
+      if (!byMonth.has(r.month)) byMonth.set(r.month, { month: r.month, in_count: 0, out_count: 0 });
+      const row = byMonth.get(r.month);
+      row.in_count += r.in_count;
+      row.out_count += r.out_count;
+    }
+    return Array.from(byMonth.values()).sort((a, b) => a.month.localeCompare(b.month));
+  }, [data]);
+
+  const k = data?.kpis;
+  const net = k ? (k.inbound ?? 0) - (k.outbound ?? 0) : 0;
+  const summaryType = entityType ?? data?.summary?.[0]?.entity_type;
+
+  return (
+    <div className="space-y-3">
+      {/* Print-only header for the focused entity */}
+      <div className="hidden print:block border-b border-border pb-2">
+        <h1 className="text-base font-bold">AMO Activity Report — Miami-Dade County</h1>
+        <p className="text-xs">Entity: {entity}</p>
+        <p className="text-xs">
+          Period: {startDate || 'beginning'} to {endDate || 'present'} · Generated {new Date().toLocaleDateString()}
+        </p>
+      </div>
+
+      {/* Header + back affordance */}
+      <div className="flex items-center gap-2 flex-wrap print:hidden">
+        <button onClick={onBack}
+          className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded border border-border text-muted-foreground hover:text-foreground transition-colors">
+          <ArrowLeft size={10} />All entities
+        </button>
+        <span className="inline-flex items-center gap-1.5 text-sm font-semibold">
+          <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: color }} />
+          {entity}
+        </span>
+        {summaryType && (
+          <span className={`text-[9px] font-semibold ${TYPE_COLOR[summaryType] || 'text-muted-foreground'}`}>
+            {summaryType}
+          </span>
+        )}
+      </div>
+
+      {/* KPI strip */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+        {isLoading || !k ? (
+          Array(5).fill(0).map((_, i) => <Skeleton key={i} className="h-14 w-full" />)
+        ) : (
+          <>
+            <Kpi icon={Activity} label="Total Transfers" value={(k.total ?? 0).toLocaleString()} />
+            <Kpi icon={TrendingDown} label="Acquired (In)" value={(k.inbound ?? 0).toLocaleString()} />
+            <Kpi icon={TrendingUp} label="Sold (Out)" value={(k.outbound ?? 0).toLocaleString()} />
+            <Kpi icon={ArrowLeftRight} label="Net Direction"
+              value={net > 0 ? `+${net.toLocaleString()} net buyer` : net < 0 ? `${net.toLocaleString()} net seller` : 'Balanced'} />
+            <Kpi icon={DollarSign} label="$ Volume (where known)" value={fmtMoney(k.dollar_volume)}
+              sub={k.dollar_known_count > 0 ? `${k.dollar_known_count.toLocaleString()} filings with $ data` : 'no $ data extracted'} />
+          </>
+        )}
+      </div>
+
+      {/* Timeline — acquisitions vs sales */}
+      <div className="bg-card border border-border rounded-lg p-4 space-y-3">
+        <h2 className="text-sm font-semibold flex items-center gap-1.5">
+          <LineChartIcon size={12} className="text-primary" />Activity Timeline
+        </h2>
+        {isLoading ? <Skeleton className="h-64 w-full" /> : (
+          <ResponsiveContainer width="100%" height={280}>
+            <LineChart data={timelineData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" />
+              <XAxis dataKey="month" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
+              <YAxis tick={{ fontSize: 10 }} tickLine={false} axisLine={false} width={32} allowDecimals={false} />
+              <Tooltip formatter={(v: any) => v.toLocaleString()} />
+              <Legend iconSize={9} wrapperStyle={{ fontSize: 10 }} />
+              <Line type="monotone" dataKey="in_count" name="Acquired (in)" stroke="#3b82f6"
+                strokeWidth={2} dot={{ r: 2 }} />
+              <Line type="monotone" dataKey="out_count" name="Sold (out)" stroke="#f97316"
+                strokeWidth={2} dot={{ r: 2 }} />
+            </LineChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+
+      {/* Top counterparties */}
+      <div className="bg-card border border-border rounded-lg p-4 space-y-3">
+        <h2 className="text-sm font-semibold flex items-center gap-1.5">
+          <Users size={12} className="text-primary" />Top Counterparties
+        </h2>
+        {isLoading ? <Skeleton className="h-48 w-full" /> : (data?.counterparties?.length || 0) === 0 ? (
+          <p className="text-xs text-muted-foreground">No counterparties in this period.</p>
+        ) : (
+          <ResponsiveContainer width="100%" height={Math.max(200, (data?.counterparties?.length || 0) * 24 + 60)}>
+            <BarChart data={data?.counterparties || []} layout="vertical" margin={{ top: 0, right: 40, left: 4, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="var(--border)" />
+              <XAxis type="number" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} allowDecimals={false} />
+              <YAxis type="category" dataKey="counterparty" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} width={170} />
+              <Tooltip formatter={(v: any) => v.toLocaleString()} />
+              <Legend iconSize={9} wrapperStyle={{ fontSize: 10 }} />
+              <Bar dataKey="sold_to" name="They sold to" stackId="a" fill="#f97316" radius={[0, 0, 0, 0]} maxBarSize={16} />
+              <Bar dataKey="bought_from" name="They bought from" stackId="a" fill="#3b82f6" radius={[0, 3, 3, 0]} maxBarSize={16} />
+            </BarChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Report section ────────────────────────────────────────────────────────────
 const REPORT_CHARTS = [
   { id: 'timeline',       label: 'Activity Timeline', icon: LineChartIcon },
@@ -147,6 +277,13 @@ export function EntityReport({ entities, startDate, endDate }: {
   endDate: string;
 }) {
   const [chart, setChart] = useState('timeline');
+  const [timelineMode, setTimelineMode] = useState<'combined' | 'per-entity'>('combined');
+  const [focused, setFocused] = useState<string | null>(null);
+
+  // Drop the drill-down if the focused entity is removed from the selection
+  useEffect(() => {
+    if (focused && !entities.includes(focused)) setFocused(null);
+  }, [entities, focused]);
 
   const qs = [
     ...entities.map(e => `entities=${encodeURIComponent(e)}`),
@@ -173,12 +310,45 @@ export function EntityReport({ entities, startDate, endDate }: {
     return Array.from(byMonth.values()).sort((a, b) => a.month.localeCompare(b.month));
   }, [data]);
 
+  // Per-entity series for the small-multiples grid: entity -> [{ month, count }]
+  const perEntitySeries = useMemo(() => {
+    if (!data?.timeline) return new Map<string, any[]>();
+    const byEntity = new Map<string, Map<string, number>>();
+    for (const r of data.timeline) {
+      if (!byEntity.has(r.entity)) byEntity.set(r.entity, new Map());
+      const months = byEntity.get(r.entity)!;
+      months.set(r.month, (months.get(r.month) || 0) + r.in_count + r.out_count);
+    }
+    const out = new Map<string, any[]>();
+    byEntity.forEach((months, entity) => {
+      out.set(entity, Array.from(months, ([month, count]) => ({ month, count }))
+        .sort((a, b) => a.month.localeCompare(b.month)));
+    });
+    return out;
+  }, [data]);
+
   const perEntityLines = entities.length <= 6;
+  const entityColor = (e: string) => COLORS[Math.max(0, entities.indexOf(e)) % COLORS.length];
 
   if (entities.length === 0) return null;
 
+  if (focused) {
+    return (
+      <EntityDrilldown
+        entity={focused}
+        color={entityColor(focused)}
+        entityType={data?.summary?.find((s: any) => s.entity === focused)?.entity_type}
+        startDate={startDate}
+        endDate={endDate}
+        onBack={() => setFocused(null)}
+      />
+    );
+  }
+
   const k = data?.kpis;
   const net = k ? (k.inbound ?? 0) - (k.outbound ?? 0) : 0;
+  const showTimelineToggle = entities.length >= 2;
+  const perEntityTimeline = showTimelineToggle && timelineMode === 'per-entity';
 
   return (
     <div className="space-y-3">
@@ -227,26 +397,78 @@ export function EntityReport({ entities, startDate, endDate }: {
         </div>
 
         {isLoading ? <Skeleton className="h-64 w-full" /> : chart === 'timeline' ? (
-          <ResponsiveContainer width="100%" height={260}>
-            <LineChart data={timelineData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" />
-              <XAxis dataKey="month" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
-              <YAxis tick={{ fontSize: 10 }} tickLine={false} axisLine={false} width={32} allowDecimals={false} />
-              <Tooltip formatter={(v: any) => v.toLocaleString()} />
-              {perEntityLines ? (
-                <>
-                  <Legend iconSize={9} wrapperStyle={{ fontSize: 10 }} />
-                  {entities.map((e, i) => (
-                    <Line key={e} type="monotone" dataKey={e} stroke={COLORS[i % COLORS.length]}
-                      strokeWidth={2} dot={{ r: 2 }} connectNulls />
+          <div className="space-y-3">
+            {showTimelineToggle && (
+              <div className="flex justify-end print:hidden">
+                <div className="inline-flex rounded border border-border overflow-hidden">
+                  {([['combined', 'Combined', LineChartIcon], ['per-entity', 'Per entity', LayoutGrid]] as const).map(([mode, label, Icon]) => (
+                    <button key={mode} onClick={() => setTimelineMode(mode)}
+                      className={`flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 transition-colors ${timelineMode === mode ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+                      <Icon size={9} />{label}
+                    </button>
                   ))}
-                </>
-              ) : (
-                <Line type="monotone" dataKey="__total" name="All selected entities" stroke="#f97316"
-                  strokeWidth={2} dot={{ r: 2 }} />
-              )}
-            </LineChart>
-          </ResponsiveContainer>
+                </div>
+              </div>
+            )}
+            {perEntityTimeline ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                {entities.map(e => {
+                  const series = perEntitySeries.get(e) || [];
+                  const color = entityColor(e);
+                  return (
+                    <div key={e} className="border border-border/60 rounded-lg p-2 space-y-1">
+                      <button onClick={() => setFocused(e)} title={`Drill into ${e}`}
+                        className="group flex w-full items-center gap-1.5 text-left">
+                        <span className="h-2 w-2 rounded-full shrink-0" style={{ background: color }} />
+                        <span className="text-[10px] font-semibold truncate flex-1 group-hover:text-primary group-hover:underline underline-offset-2">
+                          {e}
+                        </span>
+                        <ZoomIn size={9} className="shrink-0 text-muted-foreground/40 group-hover:text-primary print:hidden" />
+                      </button>
+                      {series.length === 0 ? (
+                        <p className="h-[110px] flex items-center justify-center text-[10px] text-muted-foreground/50">
+                          No activity in period
+                        </p>
+                      ) : (
+                        <ResponsiveContainer width="100%" height={110}>
+                          <LineChart data={series} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+                            <XAxis dataKey="month" tick={{ fontSize: 8 }} tickLine={false} axisLine={false}
+                              interval="preserveStartEnd" minTickGap={30} />
+                            <YAxis tick={{ fontSize: 8 }} tickLine={false} axisLine={false} width={24} allowDecimals={false} />
+                            <Tooltip formatter={(v: any) => v.toLocaleString()}
+                              contentStyle={{ fontSize: 10 }} labelStyle={{ fontSize: 10 }} />
+                            <Line type="monotone" dataKey="count" name="Transfers" stroke={color}
+                              strokeWidth={1.5} dot={false} />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={260}>
+                <LineChart data={timelineData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" />
+                  <XAxis dataKey="month" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
+                  <YAxis tick={{ fontSize: 10 }} tickLine={false} axisLine={false} width={32} allowDecimals={false} />
+                  <Tooltip formatter={(v: any) => v.toLocaleString()} />
+                  {perEntityLines ? (
+                    <>
+                      <Legend iconSize={9} wrapperStyle={{ fontSize: 10 }} />
+                      {entities.map((e, i) => (
+                        <Line key={e} type="monotone" dataKey={e} stroke={COLORS[i % COLORS.length]}
+                          strokeWidth={2} dot={{ r: 2 }} connectNulls />
+                      ))}
+                    </>
+                  ) : (
+                    <Line type="monotone" dataKey="__total" name="All selected entities" stroke="#f97316"
+                      strokeWidth={2} dot={{ r: 2 }} />
+                  )}
+                </LineChart>
+              </ResponsiveContainer>
+            )}
+          </div>
         ) : chart === 'counterparties' ? (
           <ResponsiveContainer width="100%" height={Math.max(220, (data?.counterparties?.length || 0) * 24 + 60)}>
             <BarChart data={data?.counterparties || []} layout="vertical" margin={{ top: 0, right: 40, left: 4, bottom: 0 }}>
@@ -291,13 +513,15 @@ export function EntityReport({ entities, startDate, endDate }: {
                 </tr>
               </thead>
               <tbody>
-                {data.summary.map((s: any, i: number) => (
+                {data.summary.map((s: any) => (
                   <tr key={s.entity} className="border-b border-border/20">
                     <td className="px-2 py-1.5 font-medium max-w-[180px]">
-                      <span className="inline-flex items-center gap-1.5">
-                        <span className="h-2 w-2 rounded-full shrink-0" style={{ background: COLORS[i % COLORS.length] }} />
-                        <span className="truncate" title={s.entity}>{s.entity}</span>
-                      </span>
+                      <button onClick={() => setFocused(s.entity)} title={`Drill into ${s.entity}`}
+                        className="group inline-flex items-center gap-1.5 max-w-full text-left">
+                        <span className="h-2 w-2 rounded-full shrink-0" style={{ background: entityColor(s.entity) }} />
+                        <span className="truncate group-hover:text-primary group-hover:underline underline-offset-2">{s.entity}</span>
+                        <ZoomIn size={9} className="shrink-0 text-muted-foreground/40 group-hover:text-primary print:hidden" />
+                      </button>
                     </td>
                     <td className={`px-2 py-1.5 text-[9px] font-semibold whitespace-nowrap ${TYPE_COLOR[s.entity_type] || 'text-muted-foreground'}`}>
                       {s.entity_type || '—'}
