@@ -8,7 +8,7 @@ import {
   LayoutList, Search, X, ChevronLeft, ChevronRight,
   CheckCircle, Clock, ExternalLink, Download,
   BarChart2, TrendingUp, TrendingDown, Users, PieChart,
-  ArrowUpRight, ChevronDown, ChevronUp,
+  ArrowUpRight, ChevronDown, ChevronUp, Crosshair,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -70,9 +70,9 @@ const CHART_OPTIONS = [
 const COLORS = ['#f97316','#3b82f6','#10b981','#8b5cf6','#f59e0b','#ef4444','#06b6d4','#ec4899'];
 
 // ── Dynamic chart ─────────────────────────────────────────────────────────────
-function DynamicChart({ startDate, endDate }: { startDate: string; endDate: string }) {
+function DynamicChart({ startDate, endDate, targetsOnly }: { startDate: string; endDate: string; targetsOnly: boolean }) {
   const [chartType, setChartType] = useState('monthly');
-  const dateQ = [startDate && `start_date=${startDate}`, endDate && `end_date=${endDate}`].filter(Boolean).join('&');
+  const dateQ = [startDate && `start_date=${startDate}`, endDate && `end_date=${endDate}`, targetsOnly && 'targets=1'].filter(Boolean).join('&');
   const { data, isLoading } = useQuery({
     queryKey: ['/api/reporting/chart', chartType, dateQ],
     queryFn: () => apiRequest('GET', `/api/reporting/chart?type=${chartType}${dateQ ? '&' + dateQ : ''}`).then(r => r.json()),
@@ -139,9 +139,9 @@ function DynamicChart({ startDate, endDate }: { startDate: string; endDate: stri
 }
 
 // ── Participant stats ─────────────────────────────────────────────────────────
-function ParticipantStats({ startDate, endDate }: { startDate: string; endDate: string }) {
+function ParticipantStats({ startDate, endDate, targetsOnly }: { startDate: string; endDate: string; targetsOnly: boolean }) {
   const [tab, setTab] = useState<'sellers' | 'buyers' | 'active'>('active');
-  const dateQ = [startDate && `start_date=${startDate}`, endDate && `end_date=${endDate}`].filter(Boolean).join('&');
+  const dateQ = [startDate && `start_date=${startDate}`, endDate && `end_date=${endDate}`, targetsOnly && 'targets=1'].filter(Boolean).join('&');
   const { data, isLoading } = useQuery({
     queryKey: ['/api/reporting/participants', dateQ],
     queryFn: () => apiRequest('GET', `/api/reporting/participants${dateQ ? '?' + dateQ : ''}`).then(r => r.json()),
@@ -254,18 +254,33 @@ function RowDetail({ row, onClose }: { row: any; onClose: () => void }) {
 }
 
 // ── Main page ─────────────────────────────────────────────────────────────────
+// Query params arrive in window.location.search (the hash router moves them
+// there on navigate), e.g. Targets tab links to /reporting?targets=1.
+function initialParams() {
+  return new URLSearchParams(window.location.search);
+}
+
 export default function Reporting() {
   const qc = useQueryClient();
+  const [params] = useState(initialParams);
   const [page, setPage]           = useState(1);
-  const [search, setSearch]       = useState('');
-  const [applied, setApplied]     = useState('');
+  const [search, setSearch]       = useState(() => params.get('search') || '');
+  const [applied, setApplied]     = useState(() => params.get('search') || '');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate]     = useState('');
   const [reviewed, setReviewed]   = useState('');
+  const [targetsOnly, setTargetsOnly] = useState(() => params.get('targets') === '1');
   const [expanded, setExpanded]   = useState<string | null>(null);
 
-  const qs = `?page=${page}&limit=50&search=${encodeURIComponent(applied)}&start_date=${startDate}&end_date=${endDate}&reviewed=${reviewed}`;
-  const exportQs = `?search=${encodeURIComponent(applied)}&start_date=${startDate}&end_date=${endDate}&reviewed=${reviewed}`;
+  const { data: targets } = useQuery({
+    queryKey: ['/api/targets'],
+    queryFn: () => apiRequest('GET', '/api/targets').then(r => r.json()),
+  });
+  const targetCount = (targets || []).length;
+
+  const targetsQ = targetsOnly ? '&targets=1' : '';
+  const qs = `?page=${page}&limit=50&search=${encodeURIComponent(applied)}&start_date=${startDate}&end_date=${endDate}&reviewed=${reviewed}${targetsQ}`;
+  const exportQs = `?search=${encodeURIComponent(applied)}&start_date=${startDate}&end_date=${endDate}&reviewed=${reviewed}${targetsQ}`;
 
   const { data, isLoading } = useQuery({
     queryKey: ['/api/reporting', qs],
@@ -283,8 +298,8 @@ export default function Reporting() {
   });
 
   const applySearch = () => { setApplied(search); setPage(1); };
-  const clearAll    = () => { setSearch(''); setApplied(''); setStartDate(''); setEndDate(''); setReviewed(''); setPage(1); };
-  const hasFilters  = applied || startDate || endDate || reviewed;
+  const clearAll    = () => { setSearch(''); setApplied(''); setStartDate(''); setEndDate(''); setReviewed(''); setTargetsOnly(false); setPage(1); };
+  const hasFilters  = applied || startDate || endDate || reviewed || targetsOnly;
 
   const handleExport = () => {
     window.location.href = `/api/reporting/export${exportQs}`;
@@ -309,8 +324,8 @@ export default function Reporting() {
 
       {/* Charts + Stats side by side */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <DynamicChart startDate={startDate} endDate={endDate} />
-        <ParticipantStats startDate={startDate} endDate={endDate} />
+        <DynamicChart startDate={startDate} endDate={endDate} targetsOnly={targetsOnly} />
+        <ParticipantStats startDate={startDate} endDate={endDate} targetsOnly={targetsOnly} />
       </div>
 
       {/* Filters */}
@@ -332,6 +347,12 @@ export default function Reporting() {
               {label}
             </button>
           ))}
+          <span className="text-[11px] text-muted-foreground ml-2">Scope:</span>
+          <button onClick={() => { setTargetsOnly(v => !v); setPage(1); }}
+            title={targetCount === 0 ? 'No targets yet — add participants in the Targets tab' : `Filter to your ${targetCount} targeted participant${targetCount === 1 ? '' : 's'}`}
+            className={`h-6 px-2 rounded-full border text-[10px] font-medium transition-colors inline-flex items-center gap-1 ${targetsOnly ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+            <Crosshair size={9} />Targets only{targetCount > 0 && ` (${targetCount})`}
+          </button>
           <div className="ml-auto flex gap-1.5">
             <Button size="sm" onClick={applySearch} className="h-7 text-xs gap-1"><Search size={11} />Search</Button>
             {hasFilters && <Button size="sm" variant="ghost" onClick={clearAll} className="h-7 text-xs gap-1 text-muted-foreground"><X size={11} />Clear</Button>}

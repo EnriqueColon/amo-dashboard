@@ -1103,6 +1103,52 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     res.json(result);
   });
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // TARGETS (user watchlist of market participants)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // SQL fragment: transaction touches at least one targeted entity
+  const TARGETS_MATCH = `(assignor_canon IN (SELECT entity FROM target_entities)
+                       OR assignee_canon IN (SELECT entity FROM target_entities))`;
+
+  // ─── GET /api/targets ─────────────────────────────────────────────────────
+  // Watchlist with per-entity activity stats from the clean events table.
+  app.get('/api/targets', (_req, res) => {
+    const rows = db.prepare(`
+      SELECT t.entity, t.added_at, t.notes,
+             n.entity_type, n.inbound_vol, n.outbound_vol, n.total_vol,
+             n.first_seen, n.last_seen,
+             (SELECT COUNT(*) FROM aom_events_clean c
+              WHERE (c.assignor_canon = t.entity OR c.assignee_canon = t.entity)
+                AND c.rec_date >= date('now', '-90 days')) AS txns_90d,
+             (SELECT MAX(rec_date) FROM aom_events_clean c
+              WHERE c.assignor_canon = t.entity OR c.assignee_canon = t.entity) AS last_activity
+      FROM target_entities t
+      LEFT JOIN entity_nodes n ON n.entity = t.entity
+      ORDER BY t.added_at DESC
+    `).all();
+    res.json(rows);
+  });
+
+  // ─── POST /api/targets ────────────────────────────────────────────────────
+  app.post('/api/targets', (req, res) => {
+    const { entity, notes } = req.body as { entity?: string; notes?: string };
+    const name = (entity || '').trim().toUpperCase();
+    if (!name) return res.status(400).json({ error: 'entity is required' });
+    db.prepare(`
+      INSERT INTO target_entities (entity, added_at, notes) VALUES (?, ?, ?)
+      ON CONFLICT(entity) DO NOTHING
+    `).run(name, new Date().toISOString(), notes || null);
+    res.json({ ok: true, entity: name });
+  });
+
+  // ─── DELETE /api/targets/:entity ──────────────────────────────────────────
+  app.delete('/api/targets/:entity', (req, res) => {
+    const name = decodeURIComponent(req.params.entity);
+    db.prepare(`DELETE FROM target_entities WHERE entity = ?`).run(name);
+    res.json({ ok: true });
+  });
+
   // ─── GET /api/reporting ───────────────────────────────────────────────────
   app.get('/api/reporting', (req, res) => {
     const page      = Math.max(1, parseInt(req.query.page as string) || 1);
@@ -1112,6 +1158,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const startDate = typeof req.query.start_date === 'string' ? req.query.start_date : '';
     const endDate   = typeof req.query.end_date === 'string' ? req.query.end_date : '';
     const reviewed  = typeof req.query.reviewed === 'string' ? req.query.reviewed : '';
+    const targetsOnly = req.query.targets === '1';
 
     const clauses: string[] = [];
     const params: any[] = [];
@@ -1124,6 +1171,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     if (endDate)   { clauses.push(`rec_date <= ?`); params.push(endDate); }
     if (reviewed === 'yes') { clauses.push(`reviewed_at IS NOT NULL`); }
     if (reviewed === 'no')  { clauses.push(`reviewed_at IS NULL`); }
+    if (targetsOnly) { clauses.push(TARGETS_MATCH); }
 
     // Always exclude self-assignments — not true transfers
     clauses.push(`txn_type != 'SELF_ASSIGN'`);
@@ -1173,6 +1221,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const startDate = typeof req.query.start_date === 'string' ? req.query.start_date : '';
     const endDate   = typeof req.query.end_date === 'string' ? req.query.end_date : '';
     const reviewed  = typeof req.query.reviewed === 'string' ? req.query.reviewed : '';
+    const targetsOnly = req.query.targets === '1';
 
     const clauses: string[] = [];
     const params: any[] = [];
@@ -1184,6 +1233,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     if (endDate)   { clauses.push(`rec_date <= ?`); params.push(endDate); }
     if (reviewed === 'yes') { clauses.push(`reviewed_at IS NOT NULL`); }
     if (reviewed === 'no')  { clauses.push(`reviewed_at IS NULL`); }
+    if (targetsOnly) { clauses.push(TARGETS_MATCH); }
     clauses.push(`txn_type != 'SELF_ASSIGN'`);
     const wc = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
 
@@ -1237,27 +1287,32 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   app.get('/api/reporting/participants', (req, res) => {
     const startDate = typeof req.query.start_date === 'string' ? req.query.start_date : '';
     const endDate   = typeof req.query.end_date === 'string' ? req.query.end_date : '';
+    const targetsOnly = req.query.targets === '1';
     const clauses: string[] = [];
     const params: any[] = [];
     if (startDate) { clauses.push(`rec_date >= ?`); params.push(startDate); }
     if (endDate)   { clauses.push(`rec_date <= ?`); params.push(endDate); }
-    const wc = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+    if (targetsOnly) { clauses.push(TARGETS_MATCH); }
 
+    const sellerClauses = [...clauses, `assignor_canon IS NOT NULL`, `assignor_canon != 'UNKNOWN'`];
+    if (targetsOnly) sellerClauses.push(`assignor_canon IN (SELECT entity FROM target_entities)`);
     const topSellers = db.prepare(`
       SELECT assignor_canon AS entity, assignor_type AS entity_type,
              COUNT(*) AS transfers_out,
              SUM(loan_amount) AS total_loan_amount
-      FROM aom_events_clean ${wc}
-      WHERE assignor_canon IS NOT NULL AND assignor_canon != 'UNKNOWN'
+      FROM aom_events_clean
+      WHERE ${sellerClauses.join(' AND ')}
       GROUP BY assignor_canon ORDER BY transfers_out DESC LIMIT 20
     `).all(...params);
 
+    const buyerClauses = [...clauses, `assignee_canon IS NOT NULL`, `assignee_canon != 'UNKNOWN'`];
+    if (targetsOnly) buyerClauses.push(`assignee_canon IN (SELECT entity FROM target_entities)`);
     const topBuyers = db.prepare(`
       SELECT assignee_canon AS entity, assignee_type AS entity_type,
              COUNT(*) AS transfers_in,
              SUM(loan_amount) AS total_loan_amount
-      FROM aom_events_clean ${wc}
-      WHERE assignee_canon IS NOT NULL AND assignee_canon != 'UNKNOWN'
+      FROM aom_events_clean
+      WHERE ${buyerClauses.join(' AND ')}
       GROUP BY assignee_canon ORDER BY transfers_in DESC LIMIT 20
     `).all(...params);
 
@@ -1268,6 +1323,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
              total_vol AS total,
              first_seen, last_seen
       FROM entity_nodes
+      ${targetsOnly ? 'WHERE entity IN (SELECT entity FROM target_entities)' : ''}
       ORDER BY total_vol DESC LIMIT 20
     `).all();
 
@@ -1279,11 +1335,13 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const type      = typeof req.query.type === 'string' ? req.query.type : 'monthly';
     const startDate = typeof req.query.start_date === 'string' ? req.query.start_date : '';
     const endDate   = typeof req.query.end_date === 'string' ? req.query.end_date : '';
+    const targetsOnly = req.query.targets === '1';
 
     const dateClauses: string[] = [];
     const dateParams: any[] = [];
     if (startDate) { dateClauses.push(`rec_date >= ?`); dateParams.push(startDate); }
     if (endDate)   { dateClauses.push(`rec_date <= ?`); dateParams.push(endDate); }
+    if (targetsOnly) { dateClauses.push(TARGETS_MATCH); }
     const dwc = dateClauses.length ? `WHERE ${dateClauses.join(' AND ')}` : '';
 
     if (type === 'monthly') {
@@ -1308,8 +1366,8 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     if (type === 'top_buyers') {
       const rows = db.prepare(`
         SELECT assignee_canon as label, COUNT(*) as count
-        FROM aom_events_clean ${dwc}
-        WHERE assignee_canon IS NOT NULL
+        FROM aom_events_clean
+        WHERE ${[...dateClauses, 'assignee_canon IS NOT NULL'].join(' AND ')}
         GROUP BY assignee_canon ORDER BY count DESC LIMIT 15
       `).all(...dateParams);
       return res.json(rows);
@@ -1318,8 +1376,8 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     if (type === 'top_sellers') {
       const rows = db.prepare(`
         SELECT assignor_canon as label, COUNT(*) as count
-        FROM aom_events_clean ${dwc}
-        WHERE assignor_canon IS NOT NULL
+        FROM aom_events_clean
+        WHERE ${[...dateClauses, 'assignor_canon IS NOT NULL'].join(' AND ')}
         GROUP BY assignor_canon ORDER BY count DESC LIMIT 15
       `).all(...dateParams);
       return res.json(rows);

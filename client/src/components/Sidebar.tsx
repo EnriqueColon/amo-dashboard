@@ -1,10 +1,11 @@
 import { Link, useLocation } from 'wouter';
-import { BarChart2, FileText, CheckCircle, Shield, Building2, ClipboardList, Menu, X, LineChart, LayoutList, LogOut } from 'lucide-react';
+import { BarChart2, FileText, CheckCircle, Shield, Building2, ClipboardList, Menu, X, LineChart, LayoutList, LogOut, Crosshair } from 'lucide-react';
 import { useState } from 'react';
 
 const NAV = [
   { href: '/',                 icon: BarChart2,    label: 'Overview',           group: 'main' },
   { href: '/reporting',        icon: LayoutList,   label: 'Reporting',          group: 'analysis' },
+  { href: '/targets',          icon: Crosshair,    label: 'Targets',            group: 'analysis' },
   { href: '/market-analytics', icon: LineChart,    label: 'FDIC Data Analytics',group: 'analysis' },
   { href: '/clean-events',     icon: CheckCircle,  label: 'Clean Transactions', group: 'analysis' },
   { href: '/private-credit',   icon: Shield,       label: 'Private Credit',     group: 'analysis' },

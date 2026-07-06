@@ -11,6 +11,7 @@ import CleanEvents from '@/pages/CleanEvents';
 import MarketAnalytics from '@/pages/MarketAnalytics';
 import PrivateCredit from '@/pages/PrivateCredit';
 import Reporting from '@/pages/Reporting';
+import Targets from '@/pages/Targets';
 import Entities from '@/pages/Entities';
 import CollectionLog from '@/pages/CollectionLog';
 import NotFound from '@/pages/not-found';
@@ -30,6 +31,7 @@ export default function App() {
                 <Route path="/assignments" component={Assignments} />
                 <Route path="/private-credit" component={PrivateCredit} />
                 <Route path="/reporting" component={Reporting} />
+                <Route path="/targets" component={Targets} />
                 <Route path="/entities" component={Entities} />
                 <Route path="/collection-log" component={CollectionLog} />
                 <Route component={NotFound} />

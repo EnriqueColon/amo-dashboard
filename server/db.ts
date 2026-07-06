@@ -137,6 +137,15 @@ export function getDb(): Database.Database {
       } catch (_e) {}
     }
 
+    // Watchlist of market participants the user wants to monitor (Targets tab)
+    _db.exec(`
+      CREATE TABLE IF NOT EXISTS target_entities (
+        entity TEXT PRIMARY KEY,
+        added_at TEXT,
+        notes TEXT
+      );
+    `);
+
     _db.exec(`
       CREATE TABLE IF NOT EXISTS pdf_extractions (
         cfn TEXT PRIMARY KEY,
