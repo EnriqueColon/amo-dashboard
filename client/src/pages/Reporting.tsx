@@ -254,6 +254,183 @@ function RowDetail({ row, onClose }: { row: any; onClose: () => void }) {
   );
 }
 
+// ── Filing table (one instance per selected entity when 2+ are chosen) ───────
+// filterQs carries all active filters (search, dates, review, targets, entity)
+// as pre-encoded query fragments. Page + expanded-row state live here so each
+// table paginates independently; parents remount via `key` to reset on filter
+// changes.
+function TransactionsTable({ title, filterQs, exportQs }: {
+  title?: string;
+  filterQs: string;
+  exportQs?: string;
+}) {
+  const qc = useQueryClient();
+  const [page, setPage]         = useState(1);
+  const [expanded, setExpanded] = useState<string | null>(null);
+
+  const qs = `?page=${page}&limit=50${filterQs}`;
+  const { data, isLoading } = useQuery({
+    queryKey: ['/api/reporting', qs],
+    queryFn: () => apiRequest('GET', `/api/reporting${qs}`).then(r => r.json()),
+    placeholderData: (prev: any) => prev,
+  });
+
+  const reviewMutation = useMutation({
+    mutationFn: (cfn: string) => apiRequest('PATCH', `/api/reporting/${cfn}/review`, { reviewed_by: 'user' }).then(r => r.json()),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['/api/reporting'] }),
+  });
+  const unreviewMutation = useMutation({
+    mutationFn: (cfn: string) => apiRequest('DELETE', `/api/reporting/${cfn}/review`).then(r => r.json()),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['/api/reporting'] }),
+  });
+
+  return (
+    <div className="bg-card border border-border rounded-lg overflow-hidden break-inside-avoid">
+      {/* Per-entity title bar (multi-entity mode) */}
+      {title && (
+        <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-muted/20">
+          <h3 className="text-xs font-semibold flex items-center gap-1.5">
+            <Crosshair size={11} className="text-primary" />{title}
+            {data && <span className="font-normal text-muted-foreground ml-1">{data.total.toLocaleString()} transaction{data.total === 1 ? '' : 's'}</span>}
+          </h3>
+          {exportQs && (
+            <button
+              onClick={() => { window.location.href = `/api/reporting/export${exportQs}`; }}
+              className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-foreground transition-colors print:hidden">
+              <Download size={10} />CSV
+            </button>
+          )}
+        </div>
+      )}
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-[11px] border-collapse">
+          <thead>
+            <tr className="bg-muted/40 border-b border-border text-muted-foreground">
+              <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap">CFN</th>
+              <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap">Date</th>
+              <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap">Assignor</th>
+              <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap">Type</th>
+              <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap">Assignee</th>
+              <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap">Type</th>
+              <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap">Property</th>
+              <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap">Folio</th>
+              <th className="px-2 py-2 text-right font-semibold border-r border-border/40 whitespace-nowrap">Loan Amt</th>
+              <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap">Signatory</th>
+              <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap">Class.</th>
+              <th className="px-2 py-2 text-center font-semibold whitespace-nowrap">✓</th>
+            </tr>
+          </thead>
+          <tbody>
+            {isLoading
+              ? Array(10).fill(0).map((_, i) => (
+                  <tr key={i} className="border-b border-border/30">
+                    {Array(12).fill(0).map((_, j) => <td key={j} className="px-2 py-1.5"><Skeleton className="h-3 w-full" /></td>)}
+                  </tr>
+                ))
+              : (data?.rows || []).flatMap((r: any, i: number) => {
+                  const isExp = expanded === r.cfn;
+                  const cls = deriveClassification(r);
+                  const loanAmt = fmtAmt(r.loan_amount) || fmtAmt(r.consideration_amount);
+                  const signatory = cleanField(r.signatory_officer);
+                  const folio = cleanField(r.folio_parcel);
+                  const property = cleanField(r.property_address, true);
+                  return [
+                    <tr key={`${r.cfn}-${i}`}
+                      onClick={() => setExpanded(isExp ? null : r.cfn)}
+                      className={`border-b border-border/30 cursor-pointer hover:bg-muted/30 transition-colors ${isExp ? 'bg-primary/5' : i % 2 === 0 ? 'bg-background' : 'bg-muted/10'}`}>
+                      {/* CFN */}
+                      <td className="px-2 py-1.5 border-r border-border/20 whitespace-nowrap">
+                        <div className="flex items-center gap-1">
+                          {isExp ? <ChevronUp size={9} className="text-primary shrink-0" /> : <ChevronDown size={9} className="text-muted-foreground/40 shrink-0" />}
+                          <a href={docUrl(r.rec_book, r.rec_page)} target="_blank" rel="noopener noreferrer"
+                            onClick={e => e.stopPropagation()}
+                            className="font-mono text-primary/80 hover:underline flex items-center gap-0.5">
+                            {r.cfn}<ExternalLink size={8} className="opacity-40" />
+                          </a>
+                        </div>
+                      </td>
+                      {/* Date */}
+                      <td className="px-2 py-1.5 border-r border-border/20 whitespace-nowrap text-muted-foreground">{r.rec_date}</td>
+                      {/* Assignor */}
+                      <td className="px-2 py-1.5 border-r border-border/20 max-w-[150px]">
+                        <div className="font-medium truncate" title={r.assignor_canon}>{r.assignor_canon}</div>
+                        {cleanField(r.assignor_parent) && <div className="text-[9px] text-amber-500 truncate">↳ {cleanField(r.assignor_parent)}</div>}
+                      </td>
+                      {/* Assignor type */}
+                      <td className={`px-2 py-1.5 border-r border-border/20 whitespace-nowrap text-[9px] font-semibold ${TYPE_COLOR[r.assignor_type] || 'text-muted-foreground'}`}>
+                        {r.assignor_type || '—'}
+                      </td>
+                      {/* Assignee */}
+                      <td className="px-2 py-1.5 border-r border-border/20 max-w-[150px]">
+                        <div className="font-medium truncate" title={r.assignee_canon}>{r.assignee_canon}</div>
+                        {cleanField(r.assignee_parent) && <div className="text-[9px] text-amber-500 truncate">↳ {cleanField(r.assignee_parent)}</div>}
+                      </td>
+                      {/* Assignee type */}
+                      <td className={`px-2 py-1.5 border-r border-border/20 whitespace-nowrap text-[9px] font-semibold ${TYPE_COLOR[r.assignee_type] || 'text-muted-foreground'}`}>
+                        {r.assignee_type || '—'}
+                      </td>
+                      {/* Property */}
+                      <td className="px-2 py-1.5 border-r border-border/20 max-w-[140px]">
+                        {property ? <span className="truncate block text-muted-foreground" title={property}>{property}</span> : <span className="text-muted-foreground/25">—</span>}
+                      </td>
+                      {/* Folio */}
+                      <td className="px-2 py-1.5 border-r border-border/20 whitespace-nowrap font-mono text-muted-foreground">
+                        {folio || <span className="text-muted-foreground/25">—</span>}
+                      </td>
+                      {/* Loan amount */}
+                      <td className="px-2 py-1.5 border-r border-border/20 text-right whitespace-nowrap font-mono">
+                        {loanAmt ? <span className="text-emerald-500">{loanAmt}</span> : <span className="text-muted-foreground/25">—</span>}
+                      </td>
+                      {/* Signatory */}
+                      <td className="px-2 py-1.5 border-r border-border/20 max-w-[130px]">
+                        {signatory ? <span className="truncate block text-muted-foreground" title={signatory}>{signatory}</span> : <span className="text-muted-foreground/25">—</span>}
+                      </td>
+                      {/* Classification */}
+                      <td className="px-2 py-1.5 border-r border-border/20 whitespace-nowrap">
+                        <span className={`inline-flex rounded border px-1.5 py-0.5 text-[9px] font-semibold ${CLASS_STYLE[cls] || 'bg-muted border-border text-muted-foreground'}`}>{cls}</span>
+                      </td>
+                      {/* Review */}
+                      <td className="px-2 py-1.5 text-center whitespace-nowrap" onClick={e => e.stopPropagation()}>
+                        {r.reviewed_at ? (
+                          <button onClick={() => unreviewMutation.mutate(r.cfn)} title="Mark unreviewed"
+                            className="text-emerald-500 hover:text-red-400 transition-colors"><CheckCircle size={12} /></button>
+                        ) : (
+                          <button onClick={() => reviewMutation.mutate(r.cfn)} title="Mark reviewed"
+                            className="text-muted-foreground/30 hover:text-primary transition-colors"><Clock size={12} /></button>
+                        )}
+                      </td>
+                    </tr>,
+                    isExp && <RowDetail key={`detail-${r.cfn}`} row={r} onClose={() => setExpanded(null)} />,
+                  ].filter(Boolean);
+                })
+            }
+            {!isLoading && !data?.rows?.length && (
+              <tr><td colSpan={12} className="px-4 py-10 text-center text-muted-foreground text-xs">No records found.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Pagination */}
+      {data && data.pages > 1 && (
+        <div className="flex items-center justify-between px-3 py-2 border-t border-border bg-muted/10 print:hidden">
+          <span className="text-xs text-muted-foreground">
+            {((page - 1) * 50) + 1}–{Math.min(page * 50, data.total)} of {data.total.toLocaleString()}
+          </span>
+          <div className="flex items-center gap-1">
+            <Button size="sm" variant="ghost" disabled={page <= 1} onClick={() => setPage(1)} className="h-6 px-1.5 text-xs">First</Button>
+            <Button size="sm" variant="ghost" disabled={page <= 1} onClick={() => setPage(p => p - 1)} className="h-6 w-6 p-0"><ChevronLeft size={12} /></Button>
+            <span className="text-xs text-muted-foreground px-1.5">{page}/{data.pages}</span>
+            <Button size="sm" variant="ghost" disabled={page >= data.pages} onClick={() => setPage(p => p + 1)} className="h-6 w-6 p-0"><ChevronRight size={12} /></Button>
+            <Button size="sm" variant="ghost" disabled={page >= data.pages} onClick={() => setPage(data.pages)} className="h-6 px-1.5 text-xs">Last</Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 // Query params arrive in window.location.search (the hash router moves them
 // there on navigate), e.g. Targets tab links to /reporting?targets=1.
@@ -275,9 +452,7 @@ function presetRange(preset: number | 'ytd' | null): { start: string; end: strin
 }
 
 export default function Reporting() {
-  const qc = useQueryClient();
   const [params] = useState(initialParams);
-  const [page, setPage]           = useState(1);
   const [search, setSearch]       = useState(() => params.get('search') || '');
   const [applied, setApplied]     = useState(() => params.get('search') || '');
   const [startDate, setStartDate] = useState('');
@@ -285,7 +460,6 @@ export default function Reporting() {
   const [reviewed, setReviewed]   = useState('');
   const [targetsOnly, setTargetsOnly] = useState(() => params.get('targets') === '1');
   const [entities, setEntities]   = useState<string[]>([]);
-  const [expanded, setExpanded]   = useState<string | null>(null);
 
   const { data: targets } = useQuery({
     queryKey: ['/api/targets'],
@@ -293,7 +467,7 @@ export default function Reporting() {
   });
   const targetCount = (targets || []).length;
 
-  const setEntitySelection = (next: string[]) => { setEntities(next); setPage(1); };
+  const setEntitySelection = (next: string[]) => setEntities(next);
 
   const useMyTargets = () => {
     // Watchlist entities with recorded activity, most active first (chart stays readable)
@@ -307,26 +481,12 @@ export default function Reporting() {
 
   const targetsQ = targetsOnly ? '&targets=1' : '';
   const entitiesQ = entities.map(e => `&entities=${encodeURIComponent(e)}`).join('');
-  const qs = `?page=${page}&limit=50&search=${encodeURIComponent(applied)}&start_date=${startDate}&end_date=${endDate}&reviewed=${reviewed}${targetsQ}${entitiesQ}`;
+  // Shared filter fragment (no page/limit/entities) — TransactionsTable adds its own
+  const filterQs = `&search=${encodeURIComponent(applied)}&start_date=${startDate}&end_date=${endDate}&reviewed=${reviewed}${targetsQ}`;
   const exportQs = `?search=${encodeURIComponent(applied)}&start_date=${startDate}&end_date=${endDate}&reviewed=${reviewed}${targetsQ}${entitiesQ}`;
 
-  const { data, isLoading } = useQuery({
-    queryKey: ['/api/reporting', qs],
-    queryFn: () => apiRequest('GET', `/api/reporting${qs}`).then(r => r.json()),
-    placeholderData: (prev: any) => prev,
-  });
-
-  const reviewMutation = useMutation({
-    mutationFn: (cfn: string) => apiRequest('PATCH', `/api/reporting/${cfn}/review`, { reviewed_by: 'user' }).then(r => r.json()),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['/api/reporting'] }),
-  });
-  const unreviewMutation = useMutation({
-    mutationFn: (cfn: string) => apiRequest('DELETE', `/api/reporting/${cfn}/review`).then(r => r.json()),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['/api/reporting'] }),
-  });
-
-  const applySearch = () => { setApplied(search); setPage(1); };
-  const clearAll    = () => { setSearch(''); setApplied(''); setStartDate(''); setEndDate(''); setReviewed(''); setTargetsOnly(false); setEntities([]); setPage(1); };
+  const applySearch = () => setApplied(search);
+  const clearAll    = () => { setSearch(''); setApplied(''); setStartDate(''); setEndDate(''); setReviewed(''); setTargetsOnly(false); setEntities([]); };
   const hasFilters  = applied || startDate || endDate || reviewed || targetsOnly || entities.length > 0;
 
   const handleExport = () => {
@@ -344,7 +504,7 @@ export default function Reporting() {
           <div className="flex items-center gap-2">
             <LayoutList size={15} className="text-primary" />
             <h1 className="text-lg font-semibold">Reporting</h1>
-            {data && <span className="text-xs text-muted-foreground ml-1">{data.total.toLocaleString()} records · Miami-Dade County</span>}
+            <span className="text-xs text-muted-foreground ml-1">Miami-Dade County</span>
           </div>
         </div>
         <div className="flex gap-1.5">
@@ -371,7 +531,7 @@ export default function Reporting() {
               const active = startDate === r.start && endDate === r.end;
               return (
                 <button key={label}
-                  onClick={() => { setStartDate(r.start); setEndDate(r.end); setPage(1); }}
+                  onClick={() => { setStartDate(r.start); setEndDate(r.end); }}
                   className={`h-6 px-2 rounded-full border text-[10px] font-medium transition-colors ${active ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}>
                   {label}
                 </button>
@@ -418,13 +578,13 @@ export default function Reporting() {
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-[11px] text-muted-foreground">Review:</span>
           {[['', 'All'], ['no', 'Pending'], ['yes', 'Reviewed']].map(([val, label]) => (
-            <button key={val} onClick={() => { setReviewed(val); setPage(1); }}
+            <button key={val} onClick={() => setReviewed(val)}
               className={`h-6 px-2 rounded-full border text-[10px] font-medium transition-colors ${reviewed === val ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}>
               {label}
             </button>
           ))}
           <span className="text-[11px] text-muted-foreground ml-2">Scope:</span>
-          <button onClick={() => { setTargetsOnly(v => !v); setPage(1); }}
+          <button onClick={() => setTargetsOnly(v => !v)}
             title={targetCount === 0 ? 'No targets yet — add participants in the Targets tab' : `Filter to your ${targetCount} targeted participant${targetCount === 1 ? '' : 's'}`}
             className={`h-6 px-2 rounded-full border text-[10px] font-medium transition-colors inline-flex items-center gap-1 ${targetsOnly ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}>
             <Crosshair size={9} />Targets only{targetCount > 0 && ` (${targetCount})`}
@@ -436,133 +596,22 @@ export default function Reporting() {
         </div>
       </div>
 
-      {/* Spreadsheet table */}
-      <div className="bg-card border border-border rounded-lg overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-[11px] border-collapse">
-            <thead>
-              <tr className="bg-muted/40 border-b border-border text-muted-foreground">
-                <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap">CFN</th>
-                <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap">Date</th>
-                <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap">Assignor</th>
-                <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap">Type</th>
-                <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap">Assignee</th>
-                <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap">Type</th>
-                <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap">Property</th>
-                <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap">Folio</th>
-                <th className="px-2 py-2 text-right font-semibold border-r border-border/40 whitespace-nowrap">Loan Amt</th>
-                <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap">Signatory</th>
-                <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap">Class.</th>
-                <th className="px-2 py-2 text-center font-semibold whitespace-nowrap">✓</th>
-              </tr>
-            </thead>
-            <tbody>
-              {isLoading
-                ? Array(20).fill(0).map((_, i) => (
-                    <tr key={i} className="border-b border-border/30">
-                      {Array(12).fill(0).map((_, j) => <td key={j} className="px-2 py-1.5"><Skeleton className="h-3 w-full" /></td>)}
-                    </tr>
-                  ))
-                : (data?.rows || []).flatMap((r: any, i: number) => {
-                    const isExp = expanded === r.cfn;
-                    const cls = deriveClassification(r);
-                    const loanAmt = fmtAmt(r.loan_amount) || fmtAmt(r.consideration_amount);
-                    const signatory = cleanField(r.signatory_officer);
-                    const folio = cleanField(r.folio_parcel);
-                    const property = cleanField(r.property_address, true);
-                    return [
-                      <tr key={`${r.cfn}-${i}`}
-                        onClick={() => setExpanded(isExp ? null : r.cfn)}
-                        className={`border-b border-border/30 cursor-pointer hover:bg-muted/30 transition-colors ${isExp ? 'bg-primary/5' : i % 2 === 0 ? 'bg-background' : 'bg-muted/10'}`}>
-                        {/* CFN */}
-                        <td className="px-2 py-1.5 border-r border-border/20 whitespace-nowrap">
-                          <div className="flex items-center gap-1">
-                            {isExp ? <ChevronUp size={9} className="text-primary shrink-0" /> : <ChevronDown size={9} className="text-muted-foreground/40 shrink-0" />}
-                            <a href={docUrl(r.rec_book, r.rec_page)} target="_blank" rel="noopener noreferrer"
-                              onClick={e => e.stopPropagation()}
-                              className="font-mono text-primary/80 hover:underline flex items-center gap-0.5">
-                              {r.cfn}<ExternalLink size={8} className="opacity-40" />
-                            </a>
-                          </div>
-                        </td>
-                        {/* Date */}
-                        <td className="px-2 py-1.5 border-r border-border/20 whitespace-nowrap text-muted-foreground">{r.rec_date}</td>
-                        {/* Assignor */}
-                        <td className="px-2 py-1.5 border-r border-border/20 max-w-[150px]">
-                          <div className="font-medium truncate" title={r.assignor_canon}>{r.assignor_canon}</div>
-                          {cleanField(r.assignor_parent) && <div className="text-[9px] text-amber-500 truncate">↳ {cleanField(r.assignor_parent)}</div>}
-                        </td>
-                        {/* Assignor type */}
-                        <td className={`px-2 py-1.5 border-r border-border/20 whitespace-nowrap text-[9px] font-semibold ${TYPE_COLOR[r.assignor_type] || 'text-muted-foreground'}`}>
-                          {r.assignor_type || '—'}
-                        </td>
-                        {/* Assignee */}
-                        <td className="px-2 py-1.5 border-r border-border/20 max-w-[150px]">
-                          <div className="font-medium truncate" title={r.assignee_canon}>{r.assignee_canon}</div>
-                          {cleanField(r.assignee_parent) && <div className="text-[9px] text-amber-500 truncate">↳ {cleanField(r.assignee_parent)}</div>}
-                        </td>
-                        {/* Assignee type */}
-                        <td className={`px-2 py-1.5 border-r border-border/20 whitespace-nowrap text-[9px] font-semibold ${TYPE_COLOR[r.assignee_type] || 'text-muted-foreground'}`}>
-                          {r.assignee_type || '—'}
-                        </td>
-                        {/* Property */}
-                        <td className="px-2 py-1.5 border-r border-border/20 max-w-[140px]">
-                          {property ? <span className="truncate block text-muted-foreground" title={property}>{property}</span> : <span className="text-muted-foreground/25">—</span>}
-                        </td>
-                        {/* Folio */}
-                        <td className="px-2 py-1.5 border-r border-border/20 whitespace-nowrap font-mono text-muted-foreground">
-                          {folio || <span className="text-muted-foreground/25">—</span>}
-                        </td>
-                        {/* Loan amount */}
-                        <td className="px-2 py-1.5 border-r border-border/20 text-right whitespace-nowrap font-mono">
-                          {loanAmt ? <span className="text-emerald-500">{loanAmt}</span> : <span className="text-muted-foreground/25">—</span>}
-                        </td>
-                        {/* Signatory */}
-                        <td className="px-2 py-1.5 border-r border-border/20 max-w-[130px]">
-                          {signatory ? <span className="truncate block text-muted-foreground" title={signatory}>{signatory}</span> : <span className="text-muted-foreground/25">—</span>}
-                        </td>
-                        {/* Classification */}
-                        <td className="px-2 py-1.5 border-r border-border/20 whitespace-nowrap">
-                          <span className={`inline-flex rounded border px-1.5 py-0.5 text-[9px] font-semibold ${CLASS_STYLE[cls] || 'bg-muted border-border text-muted-foreground'}`}>{cls}</span>
-                        </td>
-                        {/* Review */}
-                        <td className="px-2 py-1.5 text-center whitespace-nowrap" onClick={e => e.stopPropagation()}>
-                          {r.reviewed_at ? (
-                            <button onClick={() => unreviewMutation.mutate(r.cfn)} title="Mark unreviewed"
-                              className="text-emerald-500 hover:text-red-400 transition-colors"><CheckCircle size={12} /></button>
-                          ) : (
-                            <button onClick={() => reviewMutation.mutate(r.cfn)} title="Mark reviewed"
-                              className="text-muted-foreground/30 hover:text-primary transition-colors"><Clock size={12} /></button>
-                          )}
-                        </td>
-                      </tr>,
-                      isExp && <RowDetail key={`detail-${r.cfn}`} row={r} onClose={() => setExpanded(null)} />,
-                    ].filter(Boolean);
-                  })
-              }
-              {!isLoading && !data?.rows?.length && (
-                <tr><td colSpan={12} className="px-4 py-10 text-center text-muted-foreground text-xs">No records found.</td></tr>
-              )}
-            </tbody>
-          </table>
+      {/* Filing tables — one per entity when 2+ are selected, otherwise a single
+          combined table (with the entity filter applied if exactly 1 is chosen) */}
+      {entities.length >= 2 ? (
+        <div className="space-y-4">
+          {entities.map(e => (
+            <TransactionsTable
+              key={`${e}|${filterQs}`}
+              title={e}
+              filterQs={`${filterQs}&entities=${encodeURIComponent(e)}`}
+              exportQs={`?search=${encodeURIComponent(applied)}&start_date=${startDate}&end_date=${endDate}&reviewed=${reviewed}${targetsQ}&entities=${encodeURIComponent(e)}`}
+            />
+          ))}
         </div>
-
-        {/* Pagination */}
-        {data && data.pages > 1 && (
-          <div className="flex items-center justify-between px-3 py-2 border-t border-border bg-muted/10">
-            <span className="text-xs text-muted-foreground">
-              {((page - 1) * 50) + 1}–{Math.min(page * 50, data.total)} of {data.total.toLocaleString()}
-            </span>
-            <div className="flex items-center gap-1">
-              <Button size="sm" variant="ghost" disabled={page <= 1} onClick={() => setPage(1)} className="h-6 px-1.5 text-xs">First</Button>
-              <Button size="sm" variant="ghost" disabled={page <= 1} onClick={() => setPage(p => p - 1)} className="h-6 w-6 p-0"><ChevronLeft size={12} /></Button>
-              <span className="text-xs text-muted-foreground px-1.5">{page}/{data.pages}</span>
-              <Button size="sm" variant="ghost" disabled={page >= data.pages} onClick={() => setPage(p => p + 1)} className="h-6 w-6 p-0"><ChevronRight size={12} /></Button>
-              <Button size="sm" variant="ghost" disabled={page >= data.pages} onClick={() => setPage(data.pages)} className="h-6 px-1.5 text-xs">Last</Button>
-            </div>
-          </div>
-        )}
-      </div>
+      ) : (
+        <TransactionsTable key={filterQs + entitiesQ} filterQs={filterQs + entitiesQ} />
+      )}
     </div>
   );
 }
