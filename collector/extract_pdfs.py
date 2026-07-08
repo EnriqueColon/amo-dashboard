@@ -50,6 +50,15 @@ OCR_DPI       = 200
 MAX_LLM_CHARS = 14000    # ~3.5k tokens of OCR text per request
 REQUEST_DELAY = 0.6      # polite delay between clerk downloads (seconds)
 
+# LLM budget cap: script stops gracefully once estimated spend reaches this.
+# Tracked from actual token usage returned by the OpenAI API.
+BUDGET_USD    = float(os.environ.get('OPENAI_BUDGET_USD', '5.0'))
+# gpt-4.1-nano pricing (USD per 1M tokens)
+PRICE_INPUT_PER_M  = 0.10
+PRICE_OUTPUT_PER_M = 0.40
+
+_spend = {'input_tokens': 0, 'output_tokens': 0, 'cost_usd': 0.0}
+
 VALID_CATEGORIES = {'LOAN_TRANSFER', 'RENTS_LEASES', 'COLLATERAL', 'OTHER'}
 
 SYSTEM_PROMPT = """You extract structured data from OCR text of recorded county documents (Miami-Dade official records). The documents are assignments and similar instruments.
@@ -212,7 +221,18 @@ def llm_extract(ocr_text: str) -> dict | None:
         timeout=90,
     )
     resp.raise_for_status()
-    data = json.loads(resp.json()['choices'][0]['message']['content'])
+    body = resp.json()
+
+    # Track actual spend from the usage block the API returns
+    usage = body.get('usage', {})
+    in_tok  = usage.get('prompt_tokens', 0)
+    out_tok = usage.get('completion_tokens', 0)
+    _spend['input_tokens']  += in_tok
+    _spend['output_tokens'] += out_tok
+    _spend['cost_usd'] += (in_tok  * PRICE_INPUT_PER_M  / 1_000_000
+                           + out_tok * PRICE_OUTPUT_PER_M / 1_000_000)
+
+    data = json.loads(body['choices'][0]['message']['content'])
 
     if data.get('doc_category') not in VALID_CATEGORIES:
         data['doc_category'] = 'OTHER'
@@ -329,10 +349,21 @@ def run(limit: int, retry_errors: bool, since: str | None = None, redo: bool = F
         if i % 25 == 0 or i == len(docs):
             print(f'  [{i}/{len(docs)}] ok={counts["OK"]} '
                   f'dl_err={counts["DOWNLOAD_ERROR"]} ocr_err={counts["OCR_ERROR"]} '
-                  f'llm_err={counts["LLM_ERROR"]}', flush=True)
+                  f'llm_err={counts["LLM_ERROR"]} '
+                  f'spend=${_spend["cost_usd"]:.2f}/${BUDGET_USD:.2f}', flush=True)
+
+        if _spend['cost_usd'] >= BUDGET_USD:
+            print(f'\n⛔ BUDGET LIMIT REACHED: ${_spend["cost_usd"]:.2f} '
+                  f'(cap ${BUDGET_USD:.2f}) after {i} documents. Stopping gracefully.')
+            print('   Already-extracted documents are saved; re-run to continue '
+                  'with a fresh budget.')
+            break
+
         time.sleep(REQUEST_DELAY)
 
     print(f'\nDone. {counts}')
+    print(f'LLM spend: ${_spend["cost_usd"]:.4f} '
+          f'({_spend["input_tokens"]:,} in / {_spend["output_tokens"]:,} out tokens)')
     if categories:
         print('Categories:', categories)
     conn.close()
@@ -349,5 +380,10 @@ if __name__ == '__main__':
     p.add_argument('--redo', action='store_true',
                    help='re-extract already-OK docs that are missing the new fields '
                         '(folio_parcel, sponsor_address, signatory_officer)')
+    p.add_argument('--budget', type=float, default=None,
+                   help=f'max LLM spend in USD for this run (default {BUDGET_USD}, '
+                        'or OPENAI_BUDGET_USD env var)')
     args = p.parse_args()
+    if args.budget is not None:
+        BUDGET_USD = args.budget
     run(args.limit, args.retry_errors, since=args.since, redo=args.redo)
