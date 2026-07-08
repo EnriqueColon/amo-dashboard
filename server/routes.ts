@@ -1618,8 +1618,13 @@ export async function registerRoutes(httpServer: Server, app: Express) {
         ? `"${s.replace(/"/g, '""')}"` : s;
     };
 
+    const docLink = (r: any) =>
+      r.rec_book && r.rec_page
+        ? `https://onlineservices.miamidadeclerk.gov/officialrecords/api/DocumentImage/getdocumentimage?redact=false&sBook=${encodeURIComponent(r.rec_book)}&sBookType=O+&sPage=${encodeURIComponent(r.rec_page)}`
+        : '';
+
     const headers = [
-      'CFN','Date','Doc Type','Category','Title',
+      'CFN','Document Link','Date','Doc Type','Category','Title',
       'Assignor','Assignee','Assignor Type','Assignee Type','Txn Type',
       'PDF Assignor','PDF Assignee','Assignor Parent','Assignee Parent',
       'Property Address','Folio/Parcel','Loan Amount','Consideration',
@@ -1630,7 +1635,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const csv = [
       headers.join(','),
       ...rows.map(r => [
-        r.cfn, r.rec_date, r.doc_type, r.doc_category, r.doc_title,
+        r.cfn, docLink(r), r.rec_date, r.doc_type, r.doc_category, r.doc_title,
         r.assignor, r.assignee, r.assignor_type, r.assignee_type, r.txn_type,
         r.pdf_assignor, r.pdf_assignee, r.assignor_parent, r.assignee_parent,
         r.property_address, r.folio_parcel, r.loan_amount, r.consideration_amount,
