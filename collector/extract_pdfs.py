@@ -75,7 +75,7 @@ Return a JSON object with exactly these fields:
 - assignee_name: the party receiving the interest, clean entity name only, or null
 - assignee_parent: same rule as assignor_parent but for the assignee, else null
 - property_address: the street address of the encumbered property if stated (street, city, state, zip as available - NOT the parties' corporate addresses), else null
-- loan_amount: the original loan / mortgage / note principal amount in dollars if stated, as a number, else null
+- loan_amount: the original loan / mortgage / note principal amount in dollars if stated, as a number, else null. ALWAYS search carefully for this - look for phrases like "in the original principal amount of", "principal balance of", "in the principal sum of", "given to secure a note in the amount of", "face amount", or a dollar figure next to the mortgage/note recording reference.
 - consideration_amount: the actual consideration paid for the assignment if a genuine amount is stated, as a number. IGNORE nominal recitals like "$10.00 and other good and valuable consideration" - those are null.
 - folio_parcel: the Miami-Dade folio or parcel number for the property. Look for labels like "Folio No.", "Folio #", "Parcel ID", "RE#", "Property ID", or a bare number formatted as XX-XXXX-XXX-XXXX (13 digits with dashes). Also check the legal description block and any "Exhibit A" section. Return only the number string (e.g. "01-3124-020-0340"), not the label. If not present, return null.
 - sponsor_address: the mailing address or business address of the assignee (buyer/lender) if stated in the document body (NOT the property address). Often appears after the assignee's name in the opening recital or in the signature block. Return as a string, else null.
