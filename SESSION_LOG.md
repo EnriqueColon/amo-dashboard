@@ -35,6 +35,8 @@ to split the 60-doc sample by filing type before reading initial filings closely
 
 **Key gotcha discovered:** `extract_pdfs.py` never persists raw OCR text anywhere — only the LLM's structured JSON output. If/when we do build wording-based detection into the real pipeline, either (a) add temporary raw-text capture, or (b) extend the LLM extraction schema directly to flag/quote LOC evidence. User explicitly deferred this decision — no tool changes yet.
 
+**Cross-tool handoff set up this session:** added `CLAUDE.md` (auto-loaded by Claude Code) and this file (`SESSION_LOG.md`, the shared source of truth) at the repo root, and rewrote the stale `.cursor/rules/amo-session-handoff.mdc` (previously described abandoned June work) to point here too, so Cursor — regardless of which model is configured — gets the same handoff. All three committed and pushed to `origin/main`.
+
 **Also this session:** Did a full codebase walkthrough (architecture: Express + better-sqlite3 server, React/Vite client, Python collector pipeline). Flagged that the GitHub remote had a PAT embedded in plaintext in `.git/config` — user should rotate it.
 
 ---
