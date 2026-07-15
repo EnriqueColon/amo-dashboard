@@ -794,6 +794,19 @@ def build_normalized_tables():
             property_address     TEXT,
             loan_amount          REAL,
             consideration_amount REAL,
+            folio_parcel         TEXT,
+            sponsor_address      TEXT,
+            signatory_officer    TEXT,
+            facility_type              TEXT,
+            facility_agreement_name    TEXT,
+            facility_agreement_date    TEXT,
+            facility_lender_name       TEXT,
+            facility_agent_name        TEXT,
+            facility_borrower_name     TEXT,
+            facility_amount            REAL,
+            facility_amount_type       TEXT,
+            facility_evidence_quote    TEXT,
+            facility_confidence        TEXT,
             ocr_chars            INTEGER,
             model                TEXT,
             extracted_at         TEXT,
@@ -814,16 +827,33 @@ def build_normalized_tables():
             'folio_parcel':        sanitize_ocr_field(r[10]),
             'sponsor_address':     sanitize_address_field(r[11]),
             'signatory_officer':   sanitize_name_field(r[12]),
+            'facility_type':            r[13],
+            'facility_agreement_name':  sanitize_ocr_field(r[14]),
+            'facility_agreement_date':  r[15],
+            'facility_lender_name':     sanitize_name_field(r[16]),
+            'facility_agent_name':      sanitize_name_field(r[17]),
+            'facility_borrower_name':   sanitize_name_field(r[18]),
+            'facility_amount':          r[19],
+            'facility_amount_type':     r[20],
+            'facility_evidence_quote':  sanitize_ocr_field(r[21]),
+            'facility_confidence':      r[22],
         }
         for r in conn.execute("""
             SELECT cfn, doc_category, assignor_name, assignor_parent,
                    assignee_name, assignee_parent, property_address,
                    loan_amount, consideration_amount, doc_title,
-                   folio_parcel, sponsor_address, signatory_officer
+                   folio_parcel, sponsor_address, signatory_officer,
+                   facility_type, facility_agreement_name, facility_agreement_date,
+                   facility_lender_name, facility_agent_name, facility_borrower_name,
+                   facility_amount, facility_amount_type, facility_evidence_quote,
+                   facility_confidence
             FROM pdf_extractions WHERE status = 'OK'
         """).fetchall()
     }
     print(f"  PDF extractions available: {len(extractions)}")
+    n_facility = sum(1 for e in extractions.values()
+                     if e['facility_type'] and e['facility_type'] != 'none')
+    print(f"  Of which with facility language: {n_facility}")
 
     rows = conn.execute("""
         SELECT a.cfn,
@@ -958,6 +988,50 @@ def build_normalized_tables():
 
     n = conn.execute("SELECT COUNT(*) FROM aom_events_clean").fetchone()[0]
     print(f"  aom_events_clean: {n} rows ({skipped_non_loan} non-loan-transfer filings excluded)")
+
+    # ── Credit facility events ─────────────────────────────────────────────
+    # Independent of the aom_events_clean loan-transfer filter above — a
+    # document can carry real warehouse/credit-facility language regardless
+    # of its doc_category, so this surfaces those separately rather than
+    # folding them into (or being excluded from) Clean Transactions.
+    print("Building credit_facility_events...")
+    conn.executescript("""
+        DROP TABLE IF EXISTS credit_facility_events;
+        CREATE TABLE credit_facility_events (
+            cfn                      TEXT PRIMARY KEY,
+            rec_date                 TEXT,
+            doc_type                 TEXT,
+            grantor                  TEXT,
+            grantee                  TEXT,
+            facility_type            TEXT,
+            facility_agreement_name  TEXT,
+            facility_agreement_date  TEXT,
+            facility_lender_name     TEXT,
+            facility_agent_name      TEXT,
+            facility_borrower_name   TEXT,
+            facility_amount          REAL,
+            facility_amount_type     TEXT,
+            facility_evidence_quote  TEXT,
+            facility_confidence      TEXT
+        );
+    """)
+    conn.execute("""
+        INSERT OR REPLACE INTO credit_facility_events
+        SELECT a.cfn, a.rec_date, a.doc_type, a.grantor, a.grantee,
+               px.facility_type, px.facility_agreement_name, px.facility_agreement_date,
+               px.facility_lender_name, px.facility_agent_name, px.facility_borrower_name,
+               px.facility_amount, px.facility_amount_type, px.facility_evidence_quote,
+               px.facility_confidence
+        FROM pdf_extractions px
+        JOIN assignments a ON a.cfn = px.cfn
+        WHERE px.status = 'OK'
+          AND px.facility_type IS NOT NULL AND px.facility_type != 'none'
+        GROUP BY a.cfn
+    """)
+    conn.commit()
+
+    n_cfe = conn.execute("SELECT COUNT(*) FROM credit_facility_events").fetchone()[0]
+    print(f"  credit_facility_events: {n_cfe} rows")
 
     # ── Entity relationships ──────────────────────────────────────────────────
     print("Building entity_relationships...")

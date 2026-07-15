@@ -4,6 +4,25 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-07-15 — Warehouse/credit-facility extraction: research → pilot → integrated (DONE)
+
+**Outcome:** built and integrated real facility-detection into `collector/extract_pdfs.py` + `normalize.py`. See below for the full arc; this supersedes the "in progress" entry that follows.
+
+**Key finding:** literal "warehouse line of credit" wording essentially never appears in Miami-Dade recorded documents. Real language varies every time — "Warehousing Loan and Security Agreement", "(Warehouse Agreement)" (a bare parenthetical), "Credit Agreement" + "as Agent for the Lenders", UCC "as Administrative Agent" chains — so keyword search fails. Confirmed via a user-supplied real example (`Collateral Assignment of Mortgage`, CFN `2024R432043`, BGI Financial LLC / City National Bank of Florida) which led to finding **13 related documents** for that one relationship (1 "Collateral Assignment of Mortgage", 9 "Quit-Claim Release and Reassignment of Mortgage", 3 "Partial Re-Assignment of Mortgage and Loan Documents" — title alone isn't a reliable filter either), plus a second relationship (Bradesco Bank / Eastern Financial Mortgage Corp, 2 documents, same pattern).
+
+**Pilot (189 documents, `collector/research/scripts/extract_facility_pilot_v3.py`):** iterated a dedicated LLM extraction prompt to 10/13 on the known-positive cluster, 0/6 known-negatives, 0/135 false positives on a random baseline. Repeated-entity-pair heuristic (same grantor/grantee recurring 5+ times) has poor precision on its own (1 real hit out of 7 tested candidates) — real integration scans every document, doesn't gate on that heuristic. LLM cost is trivial: ~$0.00024/doc measured → ~$12-15 for the full ~51,700-doc corpus.
+
+**Integration done this session (`extract_pdfs.py`, `batch_extract_facility.py`, `normalize.py`):**
+- **Critical lesson learned:** first attempt merged facility detection into the existing `doc_category` LLM call (one call, more fields) — this **completely broke detection** (0/13 known-positives, previously 10/13 standalone). Root cause: dropped the `has_facility_language` boolean field and renamed JSON keys when integrating, an untested deviation from the pilot's exact validated prompt. **Facility detection is now a second, fully separate LLM call** (`llm_extract_facility()` / `FACILITY_SYSTEM_PROMPT` in `extract_pdfs.py`) using the *exact* verbatim pilot prompt/field names — renaming into our `facility_*`-prefixed DB columns happens only in `postprocess_facility()`, in code, never by asking the model for different names. **Do not merge these two calls or edit `FACILITY_SYSTEM_PROMPT`'s field names without re-running `collector/research/scripts/verify_integration.py` against the known-labeled CFNs first** (21 CFNs, must score 21/21).
+- `pdf_extractions` gained 10 new `facility_*` columns (type, agreement name/date, lender/agent/borrower name, amount/amount_type, evidence_quote, confidence). New `save_facility()` does a partial UPDATE (only `facility_*` columns) so the Batch API backfill path never clobbers doc_category/assignor_name/etc. from a prior real-time extraction.
+- New `credit_facility_events` table in `normalize.py` (separate from `aom_events_clean`, whose loan-transfer-only filter is completely untouched — confirmed via git diff and a full local `normalize.py` run: filter logic unchanged, row-count delta was 100% explained by this session's own test data changing 14 CFNs' `doc_category`, not by any logic change).
+- New `collector/batch_extract_facility.py` — bulk historical backfill via OpenAI's Batch API (24h turnaround, ~50% cheaper than real-time), `--build`/`--submit`/`--poll`/`--ingest` stages. **Not yet run at real scale** — only verified against 21 known-labeled CFNs locally with a temporary API key. Full ~51,700-doc backfill still needs to be run by the user (droplet has the real `OPENAI_API_KEY`; this machine only had a temporary one for this session).
+- Verified locally: 21/21 known-labeled CFNs match expected facility_type after the fix; `credit_facility_events` populated correctly (11 rows: 10 BGI + 1 Bradesco); `aom_events_clean` build logic unaffected.
+
+**Not done yet / next steps for a future session:** run the real full-corpus backfill (`batch_extract_facility.py --build` → `--submit` → `--poll` → `--ingest`, on the droplet or with a real API key), then decide on dashboard UI for `credit_facility_events` (currently just a queryable table, no client-side view yet).
+
+---
+
 ## 2026-07-15 — Collateral / Line-of-Credit wording discovery (in progress)
 
 **Goal:** Before building any pipeline changes, find real document wording that indicates a "line of credit" / warehouse-facility relationship in collateral-type recorded documents — so the eventual detection logic is based on actual language, not guesses. Explicit constraint from user: **no changes to `collector/` tooling yet** — this is pure research, done with throwaway scripts outside the repo.
