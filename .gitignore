@@ -12,3 +12,5 @@ __pycache__/
 data/
 .DS_Store
 *.tsbuildinfo
+collector/.venv/
+collector/research/

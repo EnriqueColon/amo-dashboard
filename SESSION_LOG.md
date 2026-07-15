@@ -28,10 +28,10 @@ cd collector/.venv/.. && for f in .../fst_texts/*.txt; do head -12 "$f" | grep -
 ```
 to split the 60-doc sample by filing type before reading initial filings closely.
 
-**Scripts used (throwaway, NOT in this repo — live in the Claude Code scratchpad, may not persist):**
-- Download+OCR via the Clerk's public document-image API (same endpoint as `extract_pdfs.py`) + `pdftoppm`/`tesseract`, no LLM call, no DB writes.
-- Keyword grep against OCR'd text for candidate phrases.
-- If continuing this research in a fresh session, these will need to be rewritten (they were quick and dirty, not meant to be permanent) — happy to redo quickly since the approach is now proven.
+**Scripts + downloaded/OCR'd text — persisted at `collector/research/` (gitignored, local-only, NOT committed):**
+- `collector/research/scripts/` — `scan_asg_batch.py`, `scan_fst_batch.py`, `read_collateral_docs.py`, `diag_doctype.py`, `diag_ait_search.py`, `ait_fail.png`. Throwaway/discovery-only, not part of the real pipeline. Download+OCR via the Clerk's public document-image API (same endpoint as `extract_pdfs.py`) + `pdftoppm`/`tesseract`, no LLM call, no DB writes.
+- `collector/research/asg_texts/` — 60 OCR'd ASG docs already pulled and scanned.
+- `collector/research/fst_texts/` — 60 OCR'd FST (UCC-1) docs already pulled; **mid-analysis, not yet split by initial-filing vs amendment** — that's the next step (see below). Re-run `collector/.venv/bin/python3 collector/research/scripts/scan_fst_batch.py <limit> <offset>` with a higher offset to pull more of the 2,581 collected FST docs if this batch doesn't yield a clean "warehouse line of credit" example.
 
 **Key gotcha discovered:** `extract_pdfs.py` never persists raw OCR text anywhere — only the LLM's structured JSON output. If/when we do build wording-based detection into the real pipeline, either (a) add temporary raw-text capture, or (b) extend the LLM extraction schema directly to flag/quote LOC evidence. User explicitly deferred this decision — no tool changes yet.
 
