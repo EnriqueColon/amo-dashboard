@@ -119,10 +119,15 @@ def ensure_batch_schema(conn: sqlite3.Connection):
 _ACTIVE_JOB_STATUSES = ('building', 'submitted')
 
 
-def pending_documents(conn: sqlite3.Connection, limit: int) -> list:
+def pending_documents(conn: sqlite3.Connection, limit: int, since: str | None = None) -> list:
     """CFNs missing facility_type entirely, and not already claimed by an
     in-flight batch job. Newest rec_date first, so repeated chunks naturally
-    work backward from the present."""
+    work backward from the present. `since` (YYYY-MM-DD) optionally scopes
+    this to only documents recorded on/after that date, for a faster
+    partial backfill (e.g. "just the last 6 months") ahead of a deadline —
+    re-run without `since` later to pick up the rest of history."""
+    date_clause = "AND a.rec_date >= ?" if since else ""
+    params = (*_ACTIVE_JOB_STATUSES, *([since] if since else []), limit)
     return conn.execute(f"""
         SELECT a.cfn, a.rec_book, a.rec_page
         FROM assignments a
@@ -135,13 +140,16 @@ def pending_documents(conn: sqlite3.Connection, limit: int) -> list:
               JOIN batch_jobs bj ON bj.id = bjd.job_id
               WHERE bj.status IN ({','.join('?' for _ in _ACTIVE_JOB_STATUSES)})
           )
+          {date_clause}
         GROUP BY a.cfn
         ORDER BY a.rec_date DESC
         LIMIT ?
-    """, (*_ACTIVE_JOB_STATUSES, limit)).fetchall()
+    """, params).fetchall()
 
 
-def pending_count(conn: sqlite3.Connection) -> int:
+def pending_count(conn: sqlite3.Connection, since: str | None = None) -> int:
+    date_clause = "AND a.rec_date >= ?" if since else ""
+    params = (*_ACTIVE_JOB_STATUSES, *([since] if since else []))
     return conn.execute(f"""
         SELECT COUNT(*) FROM (
             SELECT a.cfn
@@ -155,9 +163,10 @@ def pending_count(conn: sqlite3.Connection) -> int:
                   JOIN batch_jobs bj ON bj.id = bjd.job_id
                   WHERE bj.status IN ({','.join('?' for _ in _ACTIVE_JOB_STATUSES)})
               )
+              {date_clause}
             GROUP BY a.cfn
         )
-    """, _ACTIVE_JOB_STATUSES).fetchone()[0]
+    """, params).fetchone()[0]
 
 
 def download_and_ocr(cfn, rec_book, rec_page):
@@ -189,7 +198,7 @@ def download_and_ocr(cfn, rec_book, rec_page):
 
 
 def build_input_file(conn: sqlite3.Connection, limit: int, input_path: str, job_id=None,
-                     workers: int = DEFAULT_DOWNLOAD_WORKERS) -> int:
+                     workers: int = DEFAULT_DOWNLOAD_WORKERS, since: str | None = None) -> int:
     """Download+OCR the next `limit` pending documents (newest first) and
     write one Batch API request per document to input_path. Returns count
     of requests written.
@@ -199,7 +208,7 @@ def build_input_file(conn: sqlite3.Connection, limit: int, input_path: str, job_
     before this one finishes can't select the same documents again — the
     facility_type column alone can't distinguish "in flight" from "not
     started yet" since it's only set once a batch is ingested."""
-    docs = pending_documents(conn, limit)
+    docs = pending_documents(conn, limit, since=since)
     print(f'Pending documents this chunk: {len(docs)} (limit {limit})')
     if not docs:
         return 0
@@ -331,10 +340,10 @@ def ingest_output_file(conn: sqlite3.Connection, output_path: str) -> tuple:
 
 # ── Manual CLI commands (debugging) ──────────────────────────────────────
 
-def cmd_build(limit: int, input_path: str, workers: int):
+def cmd_build(limit: int, input_path: str, workers: int, since: str | None = None):
     conn = get_conn()
     ensure_schema(conn)
-    build_input_file(conn, limit, input_path, workers=workers)
+    build_input_file(conn, limit, input_path, workers=workers, since=since)
     conn.close()
 
 
@@ -365,7 +374,7 @@ def cmd_ingest(output_path: str):
 
 # ── Automatic mode (--tick, intended for cron) ───────────────────────────
 
-def cmd_tick(chunk_size: int, max_concurrent: int, workers: int):
+def cmd_tick(chunk_size: int, max_concurrent: int, workers: int, since: str | None = None):
     os.makedirs(BATCH_DIR, exist_ok=True)
 
     # Simple lock so an overlapping cron invocation doesn't double-submit.
@@ -425,8 +434,9 @@ def cmd_tick(chunk_size: int, max_concurrent: int, workers: int):
         still_in_flight = conn.execute(
             "SELECT COUNT(*) FROM batch_jobs WHERE status = 'submitted'"
         ).fetchone()[0]
-        remaining = pending_count(conn)
-        print(f'In flight: {still_in_flight}/{max_concurrent}. Pending documents: {remaining}')
+        remaining = pending_count(conn, since=since)
+        scope = f' (since {since})' if since else ''
+        print(f'In flight: {still_in_flight}/{max_concurrent}. Pending documents{scope}: {remaining}')
 
         while still_in_flight < max_concurrent and remaining > 0:
             cur = conn.execute(
@@ -437,7 +447,7 @@ def cmd_tick(chunk_size: int, max_concurrent: int, workers: int):
             input_path = os.path.join(BATCH_DIR, f'input_{job_id}.jsonl')
             output_path = os.path.join(BATCH_DIR, f'output_{job_id}.jsonl')
 
-            doc_count = build_input_file(conn, chunk_size, input_path, job_id=job_id, workers=workers)
+            doc_count = build_input_file(conn, chunk_size, input_path, job_id=job_id, workers=workers, since=since)
             if doc_count == 0:
                 conn.execute("UPDATE batch_jobs SET status='empty' WHERE id=?", (job_id,))
                 conn.commit()
@@ -453,7 +463,7 @@ def cmd_tick(chunk_size: int, max_concurrent: int, workers: int):
             print(f'  job {job_id}: submitted batch_id={batch_id} ({doc_count} docs)')
 
             still_in_flight += 1
-            remaining = pending_count(conn)
+            remaining = pending_count(conn, since=since)
 
         conn.close()
     finally:
@@ -480,12 +490,16 @@ if __name__ == '__main__':
     p.add_argument('--input', type=str, default='batch/input.jsonl')
     p.add_argument('--output', type=str, default='batch/output.jsonl')
     p.add_argument('--batch-id', type=str, default=None)
+    p.add_argument('--since', type=str, default=None,
+                   help='only process documents recorded on/after this date (YYYY-MM-DD). '
+                        'Useful for a fast partial backfill (e.g. last 6 months) ahead of a '
+                        'deadline; re-run without --since later to pick up the rest of history.')
     args = p.parse_args()
 
     if args.tick:
-        cmd_tick(args.chunk_size, args.max_concurrent, args.workers)
+        cmd_tick(args.chunk_size, args.max_concurrent, args.workers, since=args.since)
     elif args.build:
-        cmd_build(args.limit, args.input, args.workers)
+        cmd_build(args.limit, args.input, args.workers, since=args.since)
     elif args.submit:
         cmd_submit(args.input)
     elif args.poll:
