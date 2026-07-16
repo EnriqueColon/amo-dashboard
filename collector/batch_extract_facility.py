@@ -34,9 +34,13 @@ Manual / debugging usage (four separate stages, run by hand):
     python3 batch_extract_facility.py --poll    --batch-id batch_abc123 --output batch/output_1.jsonl
     python3 batch_extract_facility.py --ingest  --output batch/output_1.jsonl
 
---build downloads + OCRs documents with a small thread pool (default 8
-workers) — deliberately modest concurrency, to stay considerate of the
-Clerk's public document server.
+--build downloads + OCRs documents with a small thread pool. OCR (tesseract)
+is CPU-bound, not I/O-bound, so the worker count should track CPU cores, not
+network concurrency — too many workers on a small box causes them to starve
+each other and individual tesseract calls to time out (seen in practice on a
+1-vCPU droplet: 8 workers -> ~8% of documents failing on 120s timeouts).
+Default is derived from os.cpu_count(); override with --workers or the
+DOWNLOAD_WORKERS env var if needed.
 """
 import argparse
 import json
@@ -60,9 +64,19 @@ OPENAI_KEY = os.environ.get('OPENAI_API_KEY', '')
 OPENAI_FILES_URL = 'https://api.openai.com/v1/files'
 OPENAI_BATCHES_URL = 'https://api.openai.com/v1/batches'
 
-DOWNLOAD_WORKERS = 8
-DEFAULT_CHUNK_SIZE = 3000
-DEFAULT_MAX_CONCURRENT = 3
+# OCR is CPU-bound: default worker count tracks CPU cores (capped at 4) rather
+# than a fixed number, so it scales down automatically on small droplets
+# instead of thrashing a single core. Override via --workers or this env var.
+DEFAULT_DOWNLOAD_WORKERS = int(os.environ.get('DOWNLOAD_WORKERS', min(4, (os.cpu_count() or 1) + 1)))
+# Smaller chunk than before (was 3000) so a single --tick's build phase
+# finishes in a reasonable time even on modest hardware, instead of one
+# invocation silently running for hours.
+DEFAULT_CHUNK_SIZE = 500
+DEFAULT_MAX_CONCURRENT = 2
+# pdftoppm/tesseract subprocess timeout — generous margin over the few
+# seconds this normally takes, so transient CPU contention doesn't spuriously
+# fail a document outright.
+OCR_SUBPROCESS_TIMEOUT = 180
 BATCH_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'batch')
 LOCK_PATH = os.path.join(BATCH_DIR, 'tick.lock')
 
@@ -162,19 +176,20 @@ def download_and_ocr(cfn, rec_book, rec_page):
         subprocess.run(
             ['pdftoppm', '-r', str(OCR_DPI), '-png', '-f', '1', '-l', str(MAX_OCR_PAGES), pdf_path,
              os.path.join(workdir, 'pg')],
-            check=True, capture_output=True, timeout=120,
+            check=True, capture_output=True, timeout=OCR_SUBPROCESS_TIMEOUT,
         )
         pages = sorted(f for f in os.listdir(workdir) if f.startswith('pg') and f.endswith('.png'))
         text_parts = []
         for page in pages:
             out = subprocess.run(['tesseract', os.path.join(workdir, page), '-'],
-                                 capture_output=True, timeout=120)
+                                 capture_output=True, timeout=OCR_SUBPROCESS_TIMEOUT)
             text_parts.append(out.stdout.decode('utf-8', errors='replace'))
         text = '\n'.join(text_parts).strip()
         return cfn, (text if len(text) >= 80 else None)
 
 
-def build_input_file(conn: sqlite3.Connection, limit: int, input_path: str, job_id=None) -> int:
+def build_input_file(conn: sqlite3.Connection, limit: int, input_path: str, job_id=None,
+                     workers: int = DEFAULT_DOWNLOAD_WORKERS) -> int:
     """Download+OCR the next `limit` pending documents (newest first) and
     write one Batch API request per document to input_path. Returns count
     of requests written.
@@ -198,7 +213,7 @@ def build_input_file(conn: sqlite3.Connection, limit: int, input_path: str, job_
 
     os.makedirs(os.path.dirname(os.path.abspath(input_path)) or '.', exist_ok=True)
     ok, failed = 0, 0
-    with open(input_path, 'w') as out_f, ThreadPoolExecutor(max_workers=DOWNLOAD_WORKERS) as pool:
+    with open(input_path, 'w') as out_f, ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {pool.submit(download_and_ocr, cfn, rb, rp): cfn for cfn, rb, rp in docs}
         for i, fut in enumerate(as_completed(futures), 1):
             cfn = futures[fut]
@@ -316,10 +331,10 @@ def ingest_output_file(conn: sqlite3.Connection, output_path: str) -> tuple:
 
 # ── Manual CLI commands (debugging) ──────────────────────────────────────
 
-def cmd_build(limit: int, input_path: str):
+def cmd_build(limit: int, input_path: str, workers: int):
     conn = get_conn()
     ensure_schema(conn)
-    build_input_file(conn, limit, input_path)
+    build_input_file(conn, limit, input_path, workers=workers)
     conn.close()
 
 
@@ -350,7 +365,7 @@ def cmd_ingest(output_path: str):
 
 # ── Automatic mode (--tick, intended for cron) ───────────────────────────
 
-def cmd_tick(chunk_size: int, max_concurrent: int):
+def cmd_tick(chunk_size: int, max_concurrent: int, workers: int):
     os.makedirs(BATCH_DIR, exist_ok=True)
 
     # Simple lock so an overlapping cron invocation doesn't double-submit.
@@ -422,7 +437,7 @@ def cmd_tick(chunk_size: int, max_concurrent: int):
             input_path = os.path.join(BATCH_DIR, f'input_{job_id}.jsonl')
             output_path = os.path.join(BATCH_DIR, f'output_{job_id}.jsonl')
 
-            doc_count = build_input_file(conn, chunk_size, input_path, job_id=job_id)
+            doc_count = build_input_file(conn, chunk_size, input_path, job_id=job_id, workers=workers)
             if doc_count == 0:
                 conn.execute("UPDATE batch_jobs SET status='empty' WHERE id=?", (job_id,))
                 conn.commit()
@@ -459,15 +474,18 @@ if __name__ == '__main__':
                    help=f'documents per batch job in --tick mode (default {DEFAULT_CHUNK_SIZE})')
     p.add_argument('--max-concurrent', type=int, default=DEFAULT_MAX_CONCURRENT,
                    help=f'max batch jobs in flight at once in --tick mode (default {DEFAULT_MAX_CONCURRENT})')
+    p.add_argument('--workers', type=int, default=DEFAULT_DOWNLOAD_WORKERS,
+                   help=f'concurrent download/OCR threads (default {DEFAULT_DOWNLOAD_WORKERS}, '
+                        'derived from CPU count — OCR is CPU-bound, keep this low on small boxes)')
     p.add_argument('--input', type=str, default='batch/input.jsonl')
     p.add_argument('--output', type=str, default='batch/output.jsonl')
     p.add_argument('--batch-id', type=str, default=None)
     args = p.parse_args()
 
     if args.tick:
-        cmd_tick(args.chunk_size, args.max_concurrent)
+        cmd_tick(args.chunk_size, args.max_concurrent, args.workers)
     elif args.build:
-        cmd_build(args.limit, args.input)
+        cmd_build(args.limit, args.input, args.workers)
     elif args.submit:
         cmd_submit(args.input)
     elif args.poll:
