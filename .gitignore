@@ -14,3 +14,4 @@ data/
 *.tsbuildinfo
 collector/.venv/
 collector/research/
+collector/batch/
