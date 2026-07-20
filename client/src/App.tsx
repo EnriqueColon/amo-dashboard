@@ -10,6 +10,7 @@ import Assignments from '@/pages/Assignments';
 import CleanEvents from '@/pages/CleanEvents';
 import MarketAnalytics from '@/pages/MarketAnalytics';
 import PrivateCredit from '@/pages/PrivateCredit';
+import CreditFacilities from '@/pages/CreditFacilities';
 import Reporting from '@/pages/Reporting';
 import Targets from '@/pages/Targets';
 import Entities from '@/pages/Entities';
@@ -30,6 +31,7 @@ export default function App() {
                 <Route path="/market-analytics" component={MarketAnalytics} />
                 <Route path="/assignments" component={Assignments} />
                 <Route path="/private-credit" component={PrivateCredit} />
+                <Route path="/credit-facilities" component={CreditFacilities} />
                 <Route path="/reporting" component={Reporting} />
                 <Route path="/targets" component={Targets} />
                 <Route path="/entities" component={Entities} />

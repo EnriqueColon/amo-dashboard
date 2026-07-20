@@ -56,6 +56,14 @@ export function getDb(): Database.Database {
         first_seen_date TEXT, last_seen_date TEXT,
         PRIMARY KEY (source_entity, target_entity)
       );
+      CREATE TABLE IF NOT EXISTS credit_facility_events (
+        cfn TEXT PRIMARY KEY, rec_date TEXT, doc_type TEXT,
+        grantor TEXT, grantee TEXT, rec_book TEXT, rec_page TEXT,
+        facility_type TEXT, facility_agreement_name TEXT, facility_agreement_date TEXT,
+        facility_lender_name TEXT, facility_agent_name TEXT, facility_borrower_name TEXT,
+        facility_amount REAL, facility_amount_type TEXT,
+        facility_evidence_quote TEXT, facility_confidence TEXT
+      );
       CREATE INDEX IF NOT EXISTS idx_assignments_grantor ON assignments(grantor);
       CREATE INDEX IF NOT EXISTS idx_assignments_grantee ON assignments(grantee);
       CREATE INDEX IF NOT EXISTS idx_assignments_rec_date ON assignments(rec_date);
@@ -67,6 +75,9 @@ export function getDb(): Database.Database {
       CREATE INDEX IF NOT EXISTS idx_clean_assignee_type ON aom_events_clean(assignee_type);
       CREATE INDEX IF NOT EXISTS idx_clean_date ON aom_events_clean(rec_date);
       CREATE INDEX IF NOT EXISTS idx_clean_txn_type ON aom_events_clean(txn_type);
+      CREATE INDEX IF NOT EXISTS idx_cfe_lender ON credit_facility_events(facility_lender_name);
+      CREATE INDEX IF NOT EXISTS idx_cfe_date ON credit_facility_events(rec_date);
+      CREATE INDEX IF NOT EXISTS idx_cfe_type ON credit_facility_events(facility_type);
       CREATE INDEX IF NOT EXISTS idx_entity_class_name ON entity_classifications(name);
       CREATE INDEX IF NOT EXISTS idx_entity_nodes_type ON entity_nodes(entity_type);
       CREATE INDEX IF NOT EXISTS idx_entity_nodes_inbound ON entity_nodes(inbound_vol DESC);

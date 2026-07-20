@@ -1003,6 +1003,8 @@ def build_normalized_tables():
             doc_type                 TEXT,
             grantor                  TEXT,
             grantee                  TEXT,
+            rec_book                 TEXT,
+            rec_page                 TEXT,
             facility_type            TEXT,
             facility_agreement_name  TEXT,
             facility_agreement_date  TEXT,
@@ -1018,6 +1020,7 @@ def build_normalized_tables():
     conn.execute("""
         INSERT OR REPLACE INTO credit_facility_events
         SELECT a.cfn, a.rec_date, a.doc_type, a.grantor, a.grantee,
+               a.rec_book, a.rec_page,
                px.facility_type, px.facility_agreement_name, px.facility_agreement_date,
                px.facility_lender_name, px.facility_agent_name, px.facility_borrower_name,
                px.facility_amount, px.facility_amount_type, px.facility_evidence_quote,

@@ -585,6 +585,107 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     res.json(payload);
   });
 
+  // ─── GET /api/credit-facility-events ──────────────────────────────────────
+  // Documents where the PDF-extraction pipeline found real warehouse/revolving
+  // credit-facility language (see collector/extract_pdfs.py's FACILITY_SYSTEM_PROMPT
+  // and collector/normalize.py, which builds this table).
+  app.get('/api/credit-facility-events', (req, res) => {
+    const { lender, borrower, facility_type, start_date, end_date, page = '1', limit = '50' } = req.query as Record<string, string>;
+    const pageNum = Math.max(1, parseInt(page));
+    const limitNum = Math.min(parseInt(limit) || 50, 500);
+    const offset = (pageNum - 1) * limitNum;
+
+    const cacheKey = makeCacheKey('/api/credit-facility-events', { lender, borrower, facility_type, start_date, end_date, page, limit });
+    const cached = getCached(cacheKey);
+    if (cached) return res.json(cached);
+
+    const where: string[] = [];
+    const params: any[] = [];
+    if (lender)        { where.push("UPPER(facility_lender_name) LIKE UPPER(?)"); params.push(`%${lender}%`); }
+    if (borrower)      { where.push("UPPER(facility_borrower_name) LIKE UPPER(?)"); params.push(`%${borrower}%`); }
+    if (facility_type) { where.push("facility_type = ?"); params.push(facility_type); }
+    if (start_date)    { where.push("rec_date >= ?"); params.push(start_date); }
+    if (end_date)      { where.push("rec_date <= ?"); params.push(end_date); }
+
+    const wc = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const total = (db.prepare(`SELECT COUNT(*) as n FROM credit_facility_events ${wc}`).get(...params) as any).n;
+    const rows = db.prepare(`
+      SELECT cfn, rec_date, doc_type, grantor, grantee,
+             facility_type, facility_agreement_name, facility_agreement_date,
+             facility_lender_name, facility_agent_name, facility_borrower_name,
+             facility_amount, facility_amount_type, facility_evidence_quote, facility_confidence,
+             rec_book, rec_page
+      FROM credit_facility_events ${wc}
+      ORDER BY rec_date DESC LIMIT ? OFFSET ?
+    `).all(...params, limitNum, offset);
+
+    const payload = { total, page: pageNum, limit: limitNum, pages: Math.ceil(total / limitNum), rows };
+    setCached(cacheKey, payload);
+    res.json(payload);
+  });
+
+  // ─── GET /api/credit-facility-events/chart ────────────────────────────────
+  app.get('/api/credit-facility-events/chart', (req, res) => {
+    const type      = typeof req.query.type === 'string' ? req.query.type : 'monthly';
+    const startDate = typeof req.query.start_date === 'string' ? req.query.start_date : '';
+    const endDate   = typeof req.query.end_date === 'string' ? req.query.end_date : '';
+
+    const dateClauses: string[] = [];
+    const dateParams: any[] = [];
+    if (startDate) { dateClauses.push(`rec_date >= ?`); dateParams.push(startDate); }
+    if (endDate)   { dateClauses.push(`rec_date <= ?`); dateParams.push(endDate); }
+    const dwc = dateClauses.length ? `WHERE ${dateClauses.join(' AND ')}` : '';
+
+    if (type === 'monthly') {
+      const rows = db.prepare(`
+        SELECT strftime('%Y-%m', rec_date) as period, COUNT(*) as count
+        FROM credit_facility_events ${dwc}
+        GROUP BY period ORDER BY period
+      `).all(...dateParams);
+      return res.json(rows);
+    }
+
+    if (type === 'top_lenders') {
+      // Group case-insensitively — the same lender is sometimes extracted with
+      // different capitalization across filings (e.g. "City National Bank of
+      // Florida" vs "CITY NATIONAL BANK OF FLORIDA").
+      const rows = db.prepare(`
+        SELECT UPPER(facility_lender_name) as label, COUNT(*) as count
+        FROM credit_facility_events
+        WHERE ${[...dateClauses, 'facility_lender_name IS NOT NULL'].join(' AND ')}
+        GROUP BY UPPER(facility_lender_name) ORDER BY count DESC LIMIT 15
+      `).all(...dateParams);
+      return res.json(rows);
+    }
+
+    if (type === 'by_facility_type') {
+      const rows = db.prepare(`
+        SELECT COALESCE(facility_type, 'unknown') as label, COUNT(*) as count
+        FROM credit_facility_events ${dwc}
+        GROUP BY facility_type ORDER BY count DESC
+      `).all(...dateParams);
+      return res.json(rows);
+    }
+
+    if (type === 'total_volume') {
+      // Dedupe on (lender, borrower, amount) before summing — the same facility
+      // is often cited across multiple separate filings (a facility gets
+      // pledged/released one document at a time), so a naive SUM(facility_amount)
+      // across every row would multiply-count it.
+      const row = db.prepare(`
+        SELECT SUM(facility_amount) as total, COUNT(*) as distinct_facilities
+        FROM (
+          SELECT DISTINCT facility_lender_name, facility_borrower_name, facility_amount
+          FROM credit_facility_events
+          WHERE facility_amount IS NOT NULL ${dwc.replace('WHERE', 'AND')}
+        )
+      `).get(...dateParams);
+      return res.json(row);
+    }
+
+    res.status(400).json({ error: 'Unknown chart type' });
+  });
+
   // ─── GET /api/entity-nodes ────────────────────────────────────────────────
   app.get('/api/entity-nodes', (req, res) => {
     const { q, type, limit: limitParam } = req.query as Record<string, string>;
