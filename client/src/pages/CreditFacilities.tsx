@@ -55,6 +55,7 @@ function fmtDateMonth(d: string | null) {
 
 // Filing history panel shown when a facility relationship row is expanded.
 function FilingHistory({ row }: { row: any }) {
+  const [quoteCfn, setQuoteCfn] = useState<string | null>(null);
   const qs = `?lender=${encodeURIComponent(row.lender_key || '')}&borrower=${encodeURIComponent(row.borrower_key || '')}`;
   const { data, isLoading } = useQuery({
     queryKey: ['/api/credit-facility-events/filings', row.lender_key, row.borrower_key],
@@ -91,7 +92,11 @@ function FilingHistory({ row }: { row: any }) {
           <tbody>
             {filings.map((f: any) => (
               <Fragment key={f.cfn}>
-                <tr className={f.facility_evidence_quote ? '' : 'border-b border-border/30'}>
+                <tr
+                  onClick={() => f.facility_evidence_quote && setQuoteCfn(c => c === f.cfn ? null : f.cfn)}
+                  className={`border-b border-border/30 ${f.facility_evidence_quote ? 'cursor-pointer hover:bg-muted/20' : ''}`}
+                  title={f.facility_evidence_quote ? 'Click to show the evidence quote' : undefined}
+                >
                   <td className="py-1.5 pr-3 whitespace-nowrap text-muted-foreground">{f.rec_date}</td>
                   <td className="py-1.5 pr-3 font-mono text-primary/80 whitespace-nowrap">{f.cfn}</td>
                   <td className="py-1.5 pr-3 max-w-[160px] truncate" title={f.doc_type}>{f.doc_type || '—'}</td>
@@ -100,21 +105,27 @@ function FilingHistory({ row }: { row: any }) {
                   <td className="py-1.5 pr-3 text-right font-mono whitespace-nowrap" title="Principal of the underlying mortgage pledged/released in this filing">
                     {fmtMoney(f.loan_amount)}
                   </td>
-                  <td className="py-1.5 text-center">
+                  <td className="py-1.5 text-center whitespace-nowrap">
+                    {f.facility_evidence_quote && (
+                      <span className="text-muted-foreground/40 mr-1.5 inline-block align-middle">
+                        {quoteCfn === f.cfn ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+                      </span>
+                    )}
                     <a
                       href={portalUrl(f.rec_book, f.rec_page)}
                       target="_blank" rel="noopener noreferrer"
-                      className="text-muted-foreground/40 hover:text-primary transition-colors"
+                      onClick={e => e.stopPropagation()}
+                      className="text-muted-foreground/40 hover:text-primary transition-colors inline-block align-middle"
                       title="View on county portal"
                     >
                       <ExternalLink size={11} />
                     </a>
                   </td>
                 </tr>
-                {f.facility_evidence_quote && (
-                  <tr className="border-b border-border/30">
+                {quoteCfn === f.cfn && f.facility_evidence_quote && (
+                  <tr className="border-b border-border/30 bg-muted/10">
                     <td></td>
-                    <td colSpan={6} className="pb-2 pr-3">
+                    <td colSpan={6} className="py-2 pr-3">
                       <p className="italic text-muted-foreground/80 max-w-3xl">"{f.facility_evidence_quote}"</p>
                     </td>
                   </tr>
