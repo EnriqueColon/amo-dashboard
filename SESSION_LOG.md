@@ -19,10 +19,16 @@ User's reaction to v1 (flat chronological filings): repeated lender↔borrower r
 - **Key data insight surfaced during review:** `facility_amount` is the facility's *credit limit* quoted in boilerplate on every filing — NOT a per-transaction amount, must never be summed per row (v1's per-filing Amount column repeating $102.5M read as 6 separate transactions — replaced with underlying mortgage principal, the closest public proxy for per-transaction activity; actual draw amounts are never in county records).
 - Old flat `GET /api/credit-facility-events` list endpoint still exists (unused by the UI now).
 
+### Accuracy fixes after user reviewed production (commit `bbe5771` — pushed; **needs deploy**: user last deployed through `18718a3`, so `0e7287c` docs + `bbe5771` are pending a `git pull && npm run build && pm2 restart amo-dashboard`)
+- **Banesco↔Winston Ban case study (user asked "are these duplicated?"):** 3 filings all showed Mortgage $20,000,000 = the facility's credit limit. Not duplicate records (distinct CFNs/dates/doc types; one direction reversed — bank→borrower vs borrower→bank). Root cause: when a blanket collateral assignment states no per-loan principal, the extractor stores the facility's credit limit as `loan_amount` (Property "—" on those rows is the tell). **Fix in `/api/credit-facility-events/filings`: `loan_amount` is nulled when it equals `facility_amount` AND `facility_amount_type = 'credit_limit'`.** The `note_principal` case (e.g. Bradesco: facility size taken FROM the note, so amounts legitimately coincide) is deliberately exempt — do NOT "simplify" the guard to plain equality.
+- **`total_volume` chart stat deduped case-sensitively** — casing variants of the same facility double-counted its amount. Now dedupes on `DISTINCT UPPER(lender), UPPER(borrower), amount`.
+- `facility_amount_type` values seen in DB: `credit_limit`, `note_principal`.
+
 ### Open items / data-quality observations for next session
-1. **OCR variants split relationships** in the grouped view: "GIDY National Bank of Florida" vs "City National Bank of Florida", "BGI Financial, LEC" vs "LLC" appear as separate rows (grouping is exact-string on extracted names). A fuzzy-merge / canonicalization pass over `facility_lender_name`/`facility_borrower_name` is the natural fix.
+1. **OCR variants split relationships** in the grouped view: "GIDY National Bank of Florida" vs "City National Bank of Florida", "BGI Financial, LEC" vs "LLC" appear as separate rows (grouping is exact-string on extracted names). A fuzzy-merge / canonicalization pass over `facility_lender_name`/`facility_borrower_name` is the natural fix — biggest remaining accuracy item (also still inflates the volume stat: split variants each contribute their amount).
 2. Junk extracted amounts exist (a "$10" facility). Prior flags still open: `2026R268269` (possible false positive), `2026R277453` (lender extracted as literal "Lender").
-3. User said "we will discuss next steps later" — widening/removing `--since` in `run_facility_tick.sh` and a recurring `normalize.py` schedule remain undecided.
+3. Bigger extraction fix deferred: teach `FACILITY_SYSTEM_PROMPT` to distinguish facility credit limit from underlying loan principal instead of the server-side guard — touches the validated prompt, so it requires re-running `collector/research/scripts/verify_integration.py` at 21/21 first.
+4. Widening/removing `--since 2026-01-16` in `run_facility_tick.sh` and a recurring `normalize.py` schedule remain undecided. User: "we still got some work to do" — more dashboard work expected next session.
 
 ---
 
