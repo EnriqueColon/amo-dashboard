@@ -686,13 +686,22 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     // loan_amount / property_address describe the specific underlying mortgage
     // being pledged or released in this filing — the closest public proxy for
     // per-transaction activity, since actual draw amounts are never recorded.
+    // Guard: when a document only states the facility's credit limit, the
+    // extractor tends to store that same number as loan_amount too (blanket
+    // collateral assignments have no per-loan principal to extract). Null it
+    // out so the credit limit doesn't masquerade as a per-filing mortgage.
+    // When facility_amount_type is note_principal the amounts legitimately
+    // coincide (the facility size WAS taken from the note), so keep it.
     const rows = db.prepare(`
       SELECT e.cfn, e.rec_date, e.doc_type, e.grantor, e.grantee,
              e.facility_amount, e.facility_amount_type,
              e.facility_agreement_name, e.facility_agreement_date,
              e.facility_evidence_quote, e.facility_confidence,
              e.rec_book, e.rec_page,
-             px.loan_amount, px.property_address
+             CASE WHEN px.loan_amount = e.facility_amount
+                   AND e.facility_amount_type = 'credit_limit'
+                  THEN NULL ELSE px.loan_amount END AS loan_amount,
+             px.property_address
       FROM credit_facility_events e
       LEFT JOIN pdf_extractions px ON px.cfn = e.cfn
       WHERE UPPER(COALESCE(e.facility_lender_name, ''))   = ?
@@ -751,11 +760,15 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       // Dedupe on (lender, borrower, amount) before summing — the same facility
       // is often cited across multiple separate filings (a facility gets
       // pledged/released one document at a time), so a naive SUM(facility_amount)
-      // across every row would multiply-count it.
+      // across every row would multiply-count it. UPPER() because extraction
+      // casing varies across filings of the same facility — case-sensitive
+      // DISTINCT would double-count those.
       const row = db.prepare(`
         SELECT SUM(facility_amount) as total, COUNT(*) as distinct_facilities
         FROM (
-          SELECT DISTINCT facility_lender_name, facility_borrower_name, facility_amount
+          SELECT DISTINCT UPPER(facility_lender_name) AS lender,
+                          UPPER(facility_borrower_name) AS borrower,
+                          facility_amount
           FROM credit_facility_events
           WHERE facility_amount IS NOT NULL ${dwc.replace('WHERE', 'AND')}
         )
