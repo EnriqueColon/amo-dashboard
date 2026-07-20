@@ -28,6 +28,17 @@ function fmtMoney(v: number | null) {
   return `$${v.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 }
 
+function fmtMoneyCompact(v: number | null) {
+  if (v == null) return '—';
+  if (v >= 1e9) return `$${(v / 1e9).toFixed(v % 1e9 ? 2 : 0)}B`;
+  if (v >= 1e6) return `$${(v / 1e6).toFixed(v % 1e6 ? 1 : 0)}M`;
+  if (v >= 1e3) return `$${(v / 1e3).toFixed(0)}K`;
+  return `$${v}`;
+}
+
+const portalUrl = (book: string, page: string) =>
+  `https://onlineservices.miamidadeclerk.gov/officialrecords/api/DocumentImage/getdocumentimage?redact=false&sBook=${book}&sBookType=O+&sPage=${page}`;
+
 const MONTH_LABELS: Record<string, string> = {
   '01': 'Jan', '02': 'Feb', '03': 'Mar', '04': 'Apr', '05': 'May', '06': 'Jun',
   '07': 'Jul', '08': 'Aug', '09': 'Sep', '10': 'Oct', '11': 'Nov', '12': 'Dec',
@@ -35,6 +46,82 @@ const MONTH_LABELS: Record<string, string> = {
 function fmtMonth(m: string) {
   const [y, mo] = (m || '').split('-');
   return mo ? `${MONTH_LABELS[mo] || mo} ${y.slice(2)}` : m;
+}
+
+// "2026-06-29" → "Jun 26"; used for the activity range column
+function fmtDateMonth(d: string | null) {
+  return d ? fmtMonth(d.slice(0, 7)) : '—';
+}
+
+// Filing history panel shown when a facility relationship row is expanded.
+function FilingHistory({ row }: { row: any }) {
+  const qs = `?lender=${encodeURIComponent(row.lender_key || '')}&borrower=${encodeURIComponent(row.borrower_key || '')}`;
+  const { data, isLoading } = useQuery({
+    queryKey: ['/api/credit-facility-events/filings', row.lender_key, row.borrower_key],
+    queryFn: () => apiRequest('GET', `/api/credit-facility-events/filings${qs}`).then(r => r.json()),
+  });
+  const filings = (data as any[]) || [];
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap gap-x-6 gap-y-1 text-[11px] text-muted-foreground">
+        {row.agreement_name && <span><span className="font-medium text-foreground/70">Agreement:</span> {row.agreement_name}</span>}
+        {row.agreement_date && <span><span className="font-medium text-foreground/70">Dated:</span> {row.agreement_date}</span>}
+        {row.agent_name && <span><span className="font-medium text-foreground/70">Agent:</span> {row.agent_name}</span>}
+        {row.facility_amount != null && (
+          <span>
+            <span className="font-medium text-foreground/70">Facility size:</span>{' '}
+            {fmtMoney(row.facility_amount)}{row.facility_amount_type ? ` (${row.facility_amount_type.replace(/_/g, ' ')})` : ''}
+          </span>
+        )}
+      </div>
+      {isLoading ? <Skeleton className="h-16" /> : (
+        <table className="w-full text-[11px]">
+          <thead>
+            <tr className="text-muted-foreground border-b border-border/50">
+              <th className="py-1.5 pr-3 text-left font-medium">Recorded</th>
+              <th className="py-1.5 pr-3 text-left font-medium">CFN</th>
+              <th className="py-1.5 pr-3 text-left font-medium">Document</th>
+              <th className="py-1.5 pr-3 text-left font-medium">Recorded Parties</th>
+              <th className="py-1.5 pr-3 text-right font-medium">Amount</th>
+              <th className="py-1.5 w-6"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {filings.map((f: any) => (
+              <Fragment key={f.cfn}>
+                <tr className={f.facility_evidence_quote ? '' : 'border-b border-border/30'}>
+                  <td className="py-1.5 pr-3 whitespace-nowrap text-muted-foreground">{f.rec_date}</td>
+                  <td className="py-1.5 pr-3 font-mono text-primary/80 whitespace-nowrap">{f.cfn}</td>
+                  <td className="py-1.5 pr-3 max-w-[180px] truncate" title={f.doc_type}>{f.doc_type || '—'}</td>
+                  <td className="py-1.5 pr-3 max-w-[280px] truncate" title={`${f.grantor} → ${f.grantee}`}>{f.grantor} → {f.grantee}</td>
+                  <td className="py-1.5 pr-3 text-right font-mono whitespace-nowrap">{fmtMoney(f.facility_amount)}</td>
+                  <td className="py-1.5 text-center">
+                    <a
+                      href={portalUrl(f.rec_book, f.rec_page)}
+                      target="_blank" rel="noopener noreferrer"
+                      className="text-muted-foreground/40 hover:text-primary transition-colors"
+                      title="View on county portal"
+                    >
+                      <ExternalLink size={11} />
+                    </a>
+                  </td>
+                </tr>
+                {f.facility_evidence_quote && (
+                  <tr className="border-b border-border/30">
+                    <td></td>
+                    <td colSpan={5} className="pb-2 pr-3">
+                      <p className="italic text-muted-foreground/80 max-w-3xl">"{f.facility_evidence_quote}"</p>
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
 }
 
 function StatCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
@@ -60,10 +147,10 @@ export default function CreditFacilities() {
   const [draft, setDraft] = useState<Filters>(EMPTY);
   const [applied, setApplied] = useState<Filters>(EMPTY);
   const [page, setPage] = useState(1);
-  const [expandedCfn, setExpandedCfn] = useState<string | null>(null);
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
 
-  const apply = () => { setApplied(draft); setPage(1); };
-  const clear = () => { setDraft(EMPTY); setApplied(EMPTY); setPage(1); };
+  const apply = () => { setApplied(draft); setPage(1); setExpandedKey(null); };
+  const clear = () => { setDraft(EMPTY); setApplied(EMPTY); setPage(1); setExpandedKey(null); };
   const hasFilters = Object.values(applied).some(Boolean);
 
   const qs = `?lender=${encodeURIComponent(applied.lender)}&borrower=${encodeURIComponent(applied.borrower)}` +
@@ -71,8 +158,8 @@ export default function CreditFacilities() {
     `&page=${page}&limit=50`;
 
   const { data: _data, isLoading } = useQuery({
-    queryKey: ['/api/credit-facility-events', qs],
-    queryFn: () => apiRequest('GET', `/api/credit-facility-events${qs}`).then(r => r.json()),
+    queryKey: ['/api/credit-facility-events/facilities', qs],
+    queryFn: () => apiRequest('GET', `/api/credit-facility-events/facilities${qs}`).then(r => r.json()),
     keepPreviousData: true,
   } as any);
   const data = _data as any;
@@ -114,7 +201,11 @@ export default function CreditFacilities() {
 
       {/* Summary stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <StatCard label="Filings Found" value={data ? data.total.toLocaleString() : '—'} />
+        <StatCard
+          label="Facility Relationships"
+          value={data ? data.total.toLocaleString() : '—'}
+          sub={data?.total_filings != null ? `across ${data.total_filings.toLocaleString()} filings` : undefined}
+        />
         <StatCard label="Distinct Lenders" value={distinctLenders ? String(distinctLenders) : '—'} />
         <StatCard
           label="Total Facility Volume"
@@ -220,75 +311,64 @@ export default function CreditFacilities() {
           <table className="w-full text-xs">
             <thead className="border-b border-border bg-muted/20">
               <tr className="text-muted-foreground">
-                <th className="px-3 py-2.5 text-left font-medium">CFN</th>
-                <th className="px-3 py-2.5 text-left font-medium">Date</th>
                 <th className="px-3 py-2.5 text-left font-medium">Lender</th>
                 <th className="px-3 py-2.5 text-left font-medium">Borrower</th>
                 <th className="px-3 py-2.5 text-left font-medium">Type</th>
-                <th className="px-3 py-2.5 text-left font-medium">Agreement Date</th>
-                <th className="px-3 py-2.5 text-right font-medium">Amount</th>
-                <th className="px-3 py-2.5 text-left font-medium">Confidence</th>
+                <th className="px-3 py-2.5 text-right font-medium">Facility Size</th>
+                <th className="px-3 py-2.5 text-right font-medium">Filings</th>
+                <th className="px-3 py-2.5 text-left font-medium">Activity</th>
                 <th className="px-2 py-2.5 w-8"></th>
-                <th className="px-3 py-2.5 text-center font-medium w-8"></th>
               </tr>
             </thead>
             <tbody>
               {isLoading
                 ? Array(10).fill(0).map((_, i) => (
                     <tr key={i} className="border-b border-border/50">
-                      {Array(10).fill(0).map((_, j) => <td key={j} className="px-3 py-2"><Skeleton className="h-3 w-full" /></td>)}
+                      {Array(7).fill(0).map((_, j) => <td key={j} className="px-3 py-2"><Skeleton className="h-3 w-full" /></td>)}
                     </tr>
                   ))
-                : (data?.rows || []).map((r: any) => (
-                    <Fragment key={r.cfn}>
-                      <tr className="border-b border-border/50 hover:bg-muted/20 transition-colors">
-                        <td className="px-3 py-2 font-mono text-primary/80 text-[11px] whitespace-nowrap">{r.cfn}</td>
-                        <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">{r.rec_date}</td>
-                        <td className="px-3 py-2 max-w-[160px] truncate font-medium text-foreground" title={r.facility_lender_name}>{r.facility_lender_name || '—'}</td>
-                        <td className="px-3 py-2 max-w-[160px] truncate font-medium text-foreground" title={r.facility_borrower_name}>{r.facility_borrower_name || '—'}</td>
-                        <td className="px-3 py-2"><FacilityTypeBadge type={r.facility_type} /></td>
-                        <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">{r.facility_agreement_date || '—'}</td>
-                        <td className="px-3 py-2 text-right font-mono">{fmtMoney(r.facility_amount)}</td>
-                        <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">{r.facility_confidence || '—'}</td>
-                        <td className="px-2 py-2 text-center">
-                          <button onClick={() => setExpandedCfn(c => c === r.cfn ? null : r.cfn)} className="text-muted-foreground/50 hover:text-foreground">
-                            {expandedCfn === r.cfn ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-                          </button>
-                        </td>
-                        <td className="px-3 py-2 text-center">
-                          <a
-                            href={`https://onlineservices.miamidadeclerk.gov/officialrecords/api/DocumentImage/getdocumentimage?redact=false&sBook=${r.rec_book}&sBookType=O+&sPage=${r.rec_page}`}
-                            target="_blank" rel="noopener noreferrer"
-                            className="text-muted-foreground/30 hover:text-primary transition-colors"
-                            title="View on county portal"
-                          >
-                            <ExternalLink size={11} />
-                          </a>
-                        </td>
-                      </tr>
-                      {expandedCfn === r.cfn && (
-                        <tr className="border-b border-border/50 bg-muted/10">
-                          <td colSpan={10} className="px-3 py-3">
-                            <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium mb-1">Evidence quote</div>
-                            <p className="text-xs text-foreground/90 italic max-w-3xl">"{r.facility_evidence_quote || 'No quote captured.'}"</p>
-                            {r.facility_agreement_name && (
-                              <p className="text-[11px] text-muted-foreground mt-2">Agreement: {r.facility_agreement_name}</p>
-                            )}
+                : (data?.rows || []).map((r: any) => {
+                    const k = `${r.lender_key}|${r.borrower_key}`;
+                    return (
+                      <Fragment key={k}>
+                        <tr
+                          onClick={() => setExpandedKey(c => c === k ? null : k)}
+                          className="border-b border-border/50 hover:bg-muted/20 transition-colors cursor-pointer"
+                        >
+                          <td className="px-3 py-2 max-w-[200px] truncate font-medium text-foreground" title={r.lender}>{r.lender || '—'}</td>
+                          <td className="px-3 py-2 max-w-[200px] truncate font-medium text-foreground" title={r.borrower}>{r.borrower || '—'}</td>
+                          <td className="px-3 py-2"><FacilityTypeBadge type={r.facility_type} /></td>
+                          <td className="px-3 py-2 text-right font-mono whitespace-nowrap" title={r.facility_amount != null ? fmtMoney(r.facility_amount) : undefined}>
+                            {fmtMoneyCompact(r.facility_amount)}
+                          </td>
+                          <td className="px-3 py-2 text-right font-mono text-blue-500">{r.filings}</td>
+                          <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">
+                            {r.first_date === r.last_date ? fmtDateMonth(r.last_date) : `${fmtDateMonth(r.first_date)} → ${fmtDateMonth(r.last_date)}`}
+                          </td>
+                          <td className="px-2 py-2 text-center text-muted-foreground/50">
+                            {expandedKey === k ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
                           </td>
                         </tr>
-                      )}
-                    </Fragment>
-                  ))
+                        {expandedKey === k && (
+                          <tr className="border-b border-border/50 bg-muted/10">
+                            <td colSpan={7} className="px-4 py-3">
+                              <FilingHistory row={r} />
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    );
+                  })
               }
               {!isLoading && !data?.rows?.length && (
-                <tr><td colSpan={10} className="px-3 py-10 text-center text-muted-foreground">No matching filings found.</td></tr>
+                <tr><td colSpan={7} className="px-3 py-10 text-center text-muted-foreground">No matching facilities found.</td></tr>
               )}
             </tbody>
           </table>
         </div>
         {data && data.pages > 1 && (
           <div className="flex items-center justify-between px-4 py-3 border-t border-border">
-            <span className="text-xs text-muted-foreground">Page {page} of {data.pages} · {data.total.toLocaleString()} total</span>
+            <span className="text-xs text-muted-foreground">Page {page} of {data.pages} · {data.total.toLocaleString()} facilities</span>
             <div className="flex gap-1">
               <Button size="sm" variant="ghost" disabled={page <= 1} onClick={() => setPage(1)} className="h-7 px-2 text-xs">First</Button>
               <Button size="sm" variant="ghost" disabled={page <= 1} onClick={() => setPage(p => p - 1)} className="h-7 w-7 p-0"><ChevronLeft size={14} /></Button>

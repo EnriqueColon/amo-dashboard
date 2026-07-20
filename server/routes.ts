@@ -624,6 +624,81 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     res.json(payload);
   });
 
+  // ─── GET /api/credit-facility-events/facilities ───────────────────────────
+  // Relationship-grouped view: one row per lender↔borrower pair (grouped
+  // case-insensitively, since extraction casing varies across filings). The
+  // same facility recurs across filings as loans are pledged into / released
+  // from it, so the pair — not the filing — is the real unit of interest.
+  app.get('/api/credit-facility-events/facilities', (req, res) => {
+    const { lender, borrower, facility_type, start_date, end_date, page = '1', limit = '50' } = req.query as Record<string, string>;
+    const pageNum = Math.max(1, parseInt(page));
+    const limitNum = Math.min(parseInt(limit) || 50, 500);
+    const offset = (pageNum - 1) * limitNum;
+
+    const cacheKey = makeCacheKey('/api/credit-facility-events/facilities', { lender, borrower, facility_type, start_date, end_date, page, limit });
+    const cached = getCached(cacheKey);
+    if (cached) return res.json(cached);
+
+    const where: string[] = [];
+    const params: any[] = [];
+    if (lender)        { where.push("UPPER(facility_lender_name) LIKE UPPER(?)"); params.push(`%${lender}%`); }
+    if (borrower)      { where.push("UPPER(facility_borrower_name) LIKE UPPER(?)"); params.push(`%${borrower}%`); }
+    if (facility_type) { where.push("facility_type = ?"); params.push(facility_type); }
+    if (start_date)    { where.push("rec_date >= ?"); params.push(start_date); }
+    if (end_date)      { where.push("rec_date <= ?"); params.push(end_date); }
+    const wc = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+    const grouped = `
+      SELECT UPPER(COALESCE(facility_lender_name, ''))   AS lender_key,
+             UPPER(COALESCE(facility_borrower_name, '')) AS borrower_key,
+             MAX(facility_lender_name)    AS lender,
+             MAX(facility_borrower_name)  AS borrower,
+             MAX(facility_type)           AS facility_type,
+             MAX(facility_amount)         AS facility_amount,
+             MAX(facility_amount_type)    AS facility_amount_type,
+             MAX(facility_agent_name)     AS agent_name,
+             MAX(facility_agreement_name) AS agreement_name,
+             MAX(facility_agreement_date) AS agreement_date,
+             COUNT(*)                     AS filings,
+             MIN(rec_date)                AS first_date,
+             MAX(rec_date)                AS last_date
+      FROM credit_facility_events ${wc}
+      GROUP BY lender_key, borrower_key
+    `;
+    const totals = db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(filings), 0) AS f FROM (${grouped})`).get(...params) as any;
+    const rows = db.prepare(`${grouped} ORDER BY filings DESC, facility_amount DESC, last_date DESC LIMIT ? OFFSET ?`)
+      .all(...params, limitNum, offset);
+
+    const payload = { total: totals.n, total_filings: totals.f, page: pageNum, limit: limitNum, pages: Math.ceil(totals.n / limitNum), rows };
+    setCached(cacheKey, payload);
+    res.json(payload);
+  });
+
+  // ─── GET /api/credit-facility-events/filings ──────────────────────────────
+  // Filing history for one facility relationship. lender/borrower are the
+  // UPPER()'d keys returned by /facilities (empty string = extracted as null).
+  app.get('/api/credit-facility-events/filings', (req, res) => {
+    const { lender = '', borrower = '' } = req.query as Record<string, string>;
+    const cacheKey = makeCacheKey('/api/credit-facility-events/filings', { lender, borrower });
+    const cached = getCached(cacheKey);
+    if (cached) return res.json(cached);
+
+    const rows = db.prepare(`
+      SELECT cfn, rec_date, doc_type, grantor, grantee,
+             facility_amount, facility_amount_type,
+             facility_agreement_name, facility_agreement_date,
+             facility_evidence_quote, facility_confidence,
+             rec_book, rec_page
+      FROM credit_facility_events
+      WHERE UPPER(COALESCE(facility_lender_name, ''))   = ?
+        AND UPPER(COALESCE(facility_borrower_name, '')) = ?
+      ORDER BY rec_date DESC
+    `).all(lender.toUpperCase(), borrower.toUpperCase());
+
+    setCached(cacheKey, rows);
+    res.json(rows);
+  });
+
   // ─── GET /api/credit-facility-events/chart ────────────────────────────────
   app.get('/api/credit-facility-events/chart', (req, res) => {
     const type      = typeof req.query.type === 'string' ? req.query.type : 'monthly';
