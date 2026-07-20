@@ -391,7 +391,7 @@ export default function CreditFacilities() {
                   ['lender', 'Lender', 'left'],
                   ['borrower', 'Borrower', 'left'],
                   ['type', 'Type', 'left'],
-                  ['amount', 'Facility Size', 'right'],
+                  ['amount', 'Credit Limit', 'right'],
                   ['filings', 'Filings', 'right'],
                   ['activity', 'Activity', 'left'],
                 ] as Array<[string, string, string]>).map(([key, label, align]) => (
