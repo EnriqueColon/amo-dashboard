@@ -630,12 +630,12 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   // same facility recurs across filings as loans are pledged into / released
   // from it, so the pair — not the filing — is the real unit of interest.
   app.get('/api/credit-facility-events/facilities', (req, res) => {
-    const { lender, borrower, facility_type, start_date, end_date, page = '1', limit = '50' } = req.query as Record<string, string>;
+    const { lender, borrower, facility_type, start_date, end_date, page = '1', limit = '50', sort = '', dir = '' } = req.query as Record<string, string>;
     const pageNum = Math.max(1, parseInt(page));
     const limitNum = Math.min(parseInt(limit) || 50, 500);
     const offset = (pageNum - 1) * limitNum;
 
-    const cacheKey = makeCacheKey('/api/credit-facility-events/facilities', { lender, borrower, facility_type, start_date, end_date, page, limit });
+    const cacheKey = makeCacheKey('/api/credit-facility-events/facilities', { lender, borrower, facility_type, start_date, end_date, page, limit, sort, dir });
     const cached = getCached(cacheKey);
     if (cached) return res.json(cached);
 
@@ -665,8 +665,21 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       FROM credit_facility_events ${wc}
       GROUP BY 1, 2
     `;
+    // Whitelisted sort columns (aliases from the grouped SELECT) — anything
+    // else falls back to the default most-active-first ordering.
+    const SORT_COLS: Record<string, string> = {
+      lender: 'lender COLLATE NOCASE', borrower: 'borrower COLLATE NOCASE',
+      type: 'facility_type COLLATE NOCASE',
+      amount: 'facility_amount', filings: 'filings', activity: 'last_date',
+    };
+    const sortCol = SORT_COLS[sort];
+    const sortDir = dir === 'asc' ? 'ASC' : 'DESC';
+    const orderBy = sortCol
+      ? `${sortCol} ${sortDir}, filings DESC, last_date DESC`
+      : 'filings DESC, facility_amount DESC, last_date DESC';
+
     const totals = db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(filings), 0) AS f FROM (${grouped})`).get(...params) as any;
-    const rows = db.prepare(`${grouped} ORDER BY filings DESC, facility_amount DESC, last_date DESC LIMIT ? OFFSET ?`)
+    const rows = db.prepare(`${grouped} ORDER BY ${orderBy} LIMIT ? OFFSET ?`)
       .all(...params, limitNum, offset);
 
     const payload = { total: totals.n, total_filings: totals.f, page: pageNum, limit: limitNum, pages: Math.ceil(totals.n / limitNum), rows };

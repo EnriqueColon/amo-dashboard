@@ -163,14 +163,26 @@ export default function CreditFacilities() {
   const [applied, setApplied] = useState<Filters>(EMPTY);
   const [page, setPage] = useState(1);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null);
 
   const apply = () => { setApplied(draft); setPage(1); setExpandedKey(null); };
   const clear = () => { setDraft(EMPTY); setApplied(EMPTY); setPage(1); setExpandedKey(null); };
   const hasFilters = Object.values(applied).some(Boolean);
 
+  // First click sorts descending (biggest/latest first), second flips, third resets
+  const toggleSort = (key: string) => {
+    setPage(1);
+    setExpandedKey(null);
+    setSort(s => {
+      if (s?.key !== key) return { key, dir: 'desc' };
+      if (s.dir === 'desc') return { key, dir: 'asc' };
+      return null;
+    });
+  };
+
   const qs = `?lender=${encodeURIComponent(applied.lender)}&borrower=${encodeURIComponent(applied.borrower)}` +
     `&facility_type=${encodeURIComponent(applied.facility_type)}&start_date=${applied.start_date}&end_date=${applied.end_date}` +
-    `&page=${page}&limit=50`;
+    `&page=${page}&limit=50` + (sort ? `&sort=${sort.key}&dir=${sort.dir}` : '');
 
   const { data: _data, isLoading } = useQuery({
     queryKey: ['/api/credit-facility-events/facilities', qs],
@@ -206,7 +218,7 @@ export default function CreditFacilities() {
       <div className="flex items-center gap-3">
         <Landmark size={20} className="text-blue-400" />
         <div>
-          <h1 className="text-xl font-semibold">Credit Facilities</h1>
+          <h1 className="text-xl font-semibold">Lending Relationships</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
             Recorded documents that describe an institutional warehouse/revolving credit facility or line of credit,
             identified from document text by the extraction pipeline.
@@ -326,12 +338,27 @@ export default function CreditFacilities() {
           <table className="w-full text-xs">
             <thead className="border-b border-border bg-muted/20">
               <tr className="text-muted-foreground">
-                <th className="px-3 py-2.5 text-left font-medium">Lender</th>
-                <th className="px-3 py-2.5 text-left font-medium">Borrower</th>
-                <th className="px-3 py-2.5 text-left font-medium">Type</th>
-                <th className="px-3 py-2.5 text-right font-medium">Facility Size</th>
-                <th className="px-3 py-2.5 text-right font-medium">Filings</th>
-                <th className="px-3 py-2.5 text-left font-medium">Activity</th>
+                {([
+                  ['lender', 'Lender', 'left'],
+                  ['borrower', 'Borrower', 'left'],
+                  ['type', 'Type', 'left'],
+                  ['amount', 'Facility Size', 'right'],
+                  ['filings', 'Filings', 'right'],
+                  ['activity', 'Activity', 'left'],
+                ] as Array<[string, string, string]>).map(([key, label, align]) => (
+                  <th
+                    key={key}
+                    onClick={() => toggleSort(key)}
+                    className={`px-3 py-2.5 font-medium cursor-pointer select-none hover:text-foreground transition-colors ${align === 'right' ? 'text-right' : 'text-left'}`}
+                    title={`Sort by ${label.toLowerCase()}`}
+                  >
+                    <span className="inline-flex items-center gap-0.5">
+                      {align === 'right' && sort?.key === key && (sort.dir === 'desc' ? <ChevronDown size={11} /> : <ChevronUp size={11} />)}
+                      {label}
+                      {align !== 'right' && sort?.key === key && (sort.dir === 'desc' ? <ChevronDown size={11} /> : <ChevronUp size={11} />)}
+                    </span>
+                  </th>
+                ))}
                 <th className="px-2 py-2.5 w-8"></th>
               </tr>
             </thead>

@@ -9,7 +9,7 @@ const NAV = [
   { href: '/market-analytics', icon: LineChart,    label: 'FDIC Data Analytics',group: 'analysis' },
   { href: '/clean-events',     icon: CheckCircle,  label: 'Clean Transactions', group: 'analysis' },
   { href: '/private-credit',   icon: Shield,       label: 'Private Credit',     group: 'analysis' },
-  { href: '/credit-facilities',icon: Landmark,     label: 'Credit Facilities',  group: 'analysis' },
+  { href: '/credit-facilities',icon: Landmark,     label: 'Lending Relationships', group: 'analysis' },
   { href: '/assignments',      icon: FileText,     label: 'Raw Assignments',    group: 'data' },
   { href: '/entities',         icon: Building2,    label: 'Entities',           group: 'data' },
   { href: '/collection-log',   icon: ClipboardList,label: 'Collection Log',     group: 'data' },
