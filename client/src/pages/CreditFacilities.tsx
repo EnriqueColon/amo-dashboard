@@ -58,19 +58,39 @@ function keysMatch(a: string, b: string): boolean {
 }
 
 // Interpret a filing's direction relative to its facility: collateral moving
-// borrower → bank is a pledge (drawing on the line); bank → borrower is a
-// release (loan paid off / sold out of the facility).
-function filingDirection(f: any, lenderKey: string, borrowerKey: string): 'pledge' | 'release' | null {
-  const g = nameKey(f.grantor), e = nameKey(f.grantee);
-  const pledge  = (keysMatch(e, lenderKey) ? 1 : 0) + (keysMatch(g, borrowerKey) ? 1 : 0);
-  const release = (keysMatch(g, lenderKey) ? 1 : 0) + (keysMatch(e, borrowerKey) ? 1 : 0);
-  if (pledge > release) return 'pledge';
-  if (release > pledge) return 'release';
+// TO the bank is a pledge (drawing on the line); FROM the bank is a release
+// (loan paid off / sold out of the facility). Lender-anchored on purpose —
+// the bank must actually be a recorded party. A third party assigning to the
+// borrower (e.g. the prior holder of an acquired loan) is NOT the facility
+// releasing collateral, so borrower-only matches stay unlabeled.
+function filingDirection(f: any, lenderKey: string, _borrowerKey: string): 'pledge' | 'release' | null {
+  if (keysMatch(nameKey(f.grantee), lenderKey)) return 'pledge';
+  if (keysMatch(nameKey(f.grantor), lenderKey)) return 'release';
   return null;
 }
 
+// Marks a recorded party that is neither the facility's lender nor borrower,
+// and explains why the filing is still part of this facility.
+function ThirdPartyChip() {
+  return (
+    <span
+      className="inline-flex items-center rounded border px-1 py-0.5 text-[9px] font-medium leading-none whitespace-nowrap shrink-0 text-amber-700 bg-amber-50 border-amber-200 cursor-help"
+      title={"Not the facility's named lender or borrower. This filing still belongs to the facility because its document text cites the facility agreement — commonly an affiliate co-borrower pledging into the line, or the prior holder of a loan being warehoused. Open the evidence quote or the county document to verify the role."}
+    >
+      3rd party
+    </span>
+  );
+}
+
 function DirectionBadge({ dir }: { dir: 'pledge' | 'release' | null }) {
-  if (!dir) return <span className="text-muted-foreground/50">—</span>;
+  if (!dir) {
+    return (
+      <span
+        className="text-muted-foreground/50 cursor-help"
+        title="Direction unclear — the recorded parties don't cleanly match the facility's lender or borrower"
+      >—</span>
+    );
+  }
   const meta = dir === 'pledge'
     ? { label: 'Pledge',  cls: 'text-blue-700 bg-blue-50 border-blue-200',       tip: 'Collateral pledged into the facility (borrower → bank)' }
     : { label: 'Release', cls: 'text-emerald-700 bg-emerald-50 border-emerald-200', tip: 'Collateral released from the facility (bank → borrower)' };
@@ -149,7 +169,22 @@ function FilingHistory({ row }: { row: any }) {
                   <td className="py-1.5 pr-3">
                     <DirectionBadge dir={filingDirection(f, row.lender_key || '', row.borrower_key || '')} />
                   </td>
-                  <td className="py-1.5 pr-3 max-w-[220px] truncate" title={`${f.grantor} → ${f.grantee}`}>{f.grantor} → {f.grantee}</td>
+                  <td className="py-1.5 pr-3 max-w-[280px]">
+                    {(() => {
+                      const lk = row.lender_key || '', bk = row.borrower_key || '';
+                      const gThird = !keysMatch(nameKey(f.grantor), lk) && !keysMatch(nameKey(f.grantor), bk);
+                      const eThird = !keysMatch(nameKey(f.grantee), lk) && !keysMatch(nameKey(f.grantee), bk);
+                      return (
+                        <span className="flex items-center gap-1 min-w-0" title={`${f.grantor} → ${f.grantee}`}>
+                          <span className="truncate">{f.grantor}</span>
+                          {gThird && <ThirdPartyChip />}
+                          <span className="shrink-0 text-muted-foreground">→</span>
+                          <span className="truncate">{f.grantee}</span>
+                          {eThird && <ThirdPartyChip />}
+                        </span>
+                      );
+                    })()}
+                  </td>
                   <td className="py-1.5 pr-3 max-w-[200px] truncate text-muted-foreground" title={f.property_address}>{f.property_address || '—'}</td>
                   <td className="py-1.5 pr-3 text-right font-mono whitespace-nowrap" title="Principal of the underlying mortgage pledged/released in this filing">
                     {fmtMoney(f.loan_amount)}
