@@ -83,19 +83,21 @@ function FilingHistory({ row }: { row: any }) {
               <th className="py-1.5 pr-3 text-left font-medium">CFN</th>
               <th className="py-1.5 pr-3 text-left font-medium">Document</th>
               <th className="py-1.5 pr-3 text-left font-medium">Recorded Parties</th>
-              <th className="py-1.5 pr-3 text-right font-medium">Amount</th>
+              <th className="py-1.5 pr-3 text-right font-medium">Mortgage</th>
               <th className="py-1.5 w-6"></th>
             </tr>
           </thead>
           <tbody>
             {filings.map((f: any) => (
               <Fragment key={f.cfn}>
-                <tr className={f.facility_evidence_quote ? '' : 'border-b border-border/30'}>
+                <tr className={f.facility_evidence_quote || f.property_address ? '' : 'border-b border-border/30'}>
                   <td className="py-1.5 pr-3 whitespace-nowrap text-muted-foreground">{f.rec_date}</td>
                   <td className="py-1.5 pr-3 font-mono text-primary/80 whitespace-nowrap">{f.cfn}</td>
                   <td className="py-1.5 pr-3 max-w-[180px] truncate" title={f.doc_type}>{f.doc_type || '—'}</td>
                   <td className="py-1.5 pr-3 max-w-[280px] truncate" title={`${f.grantor} → ${f.grantee}`}>{f.grantor} → {f.grantee}</td>
-                  <td className="py-1.5 pr-3 text-right font-mono whitespace-nowrap">{fmtMoney(f.facility_amount)}</td>
+                  <td className="py-1.5 pr-3 text-right font-mono whitespace-nowrap" title="Principal of the underlying mortgage pledged/released in this filing">
+                    {fmtMoney(f.loan_amount)}
+                  </td>
                   <td className="py-1.5 text-center">
                     <a
                       href={portalUrl(f.rec_book, f.rec_page)}
@@ -107,11 +109,16 @@ function FilingHistory({ row }: { row: any }) {
                     </a>
                   </td>
                 </tr>
-                {f.facility_evidence_quote && (
+                {(f.facility_evidence_quote || f.property_address) && (
                   <tr className="border-b border-border/30">
                     <td></td>
                     <td colSpan={5} className="pb-2 pr-3">
-                      <p className="italic text-muted-foreground/80 max-w-3xl">"{f.facility_evidence_quote}"</p>
+                      {f.property_address && (
+                        <p className="text-muted-foreground mb-0.5">Property: {f.property_address}</p>
+                      )}
+                      {f.facility_evidence_quote && (
+                        <p className="italic text-muted-foreground/80 max-w-3xl">"{f.facility_evidence_quote}"</p>
+                      )}
                     </td>
                   </tr>
                 )}

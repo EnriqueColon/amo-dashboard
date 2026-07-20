@@ -683,16 +683,21 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const cached = getCached(cacheKey);
     if (cached) return res.json(cached);
 
+    // loan_amount / property_address describe the specific underlying mortgage
+    // being pledged or released in this filing — the closest public proxy for
+    // per-transaction activity, since actual draw amounts are never recorded.
     const rows = db.prepare(`
-      SELECT cfn, rec_date, doc_type, grantor, grantee,
-             facility_amount, facility_amount_type,
-             facility_agreement_name, facility_agreement_date,
-             facility_evidence_quote, facility_confidence,
-             rec_book, rec_page
-      FROM credit_facility_events
-      WHERE UPPER(COALESCE(facility_lender_name, ''))   = ?
-        AND UPPER(COALESCE(facility_borrower_name, '')) = ?
-      ORDER BY rec_date DESC
+      SELECT e.cfn, e.rec_date, e.doc_type, e.grantor, e.grantee,
+             e.facility_amount, e.facility_amount_type,
+             e.facility_agreement_name, e.facility_agreement_date,
+             e.facility_evidence_quote, e.facility_confidence,
+             e.rec_book, e.rec_page,
+             px.loan_amount, px.property_address
+      FROM credit_facility_events e
+      LEFT JOIN pdf_extractions px ON px.cfn = e.cfn
+      WHERE UPPER(COALESCE(e.facility_lender_name, ''))   = ?
+        AND UPPER(COALESCE(e.facility_borrower_name, '')) = ?
+      ORDER BY e.rec_date DESC
     `).all(lender.toUpperCase(), borrower.toUpperCase());
 
     setCached(cacheKey, rows);
