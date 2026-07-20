@@ -83,6 +83,7 @@ function FilingHistory({ row }: { row: any }) {
               <th className="py-1.5 pr-3 text-left font-medium">CFN</th>
               <th className="py-1.5 pr-3 text-left font-medium">Document</th>
               <th className="py-1.5 pr-3 text-left font-medium">Recorded Parties</th>
+              <th className="py-1.5 pr-3 text-left font-medium">Property</th>
               <th className="py-1.5 pr-3 text-right font-medium">Mortgage</th>
               <th className="py-1.5 w-6"></th>
             </tr>
@@ -90,11 +91,12 @@ function FilingHistory({ row }: { row: any }) {
           <tbody>
             {filings.map((f: any) => (
               <Fragment key={f.cfn}>
-                <tr className={f.facility_evidence_quote || f.property_address ? '' : 'border-b border-border/30'}>
+                <tr className={f.facility_evidence_quote ? '' : 'border-b border-border/30'}>
                   <td className="py-1.5 pr-3 whitespace-nowrap text-muted-foreground">{f.rec_date}</td>
                   <td className="py-1.5 pr-3 font-mono text-primary/80 whitespace-nowrap">{f.cfn}</td>
-                  <td className="py-1.5 pr-3 max-w-[180px] truncate" title={f.doc_type}>{f.doc_type || '—'}</td>
-                  <td className="py-1.5 pr-3 max-w-[280px] truncate" title={`${f.grantor} → ${f.grantee}`}>{f.grantor} → {f.grantee}</td>
+                  <td className="py-1.5 pr-3 max-w-[160px] truncate" title={f.doc_type}>{f.doc_type || '—'}</td>
+                  <td className="py-1.5 pr-3 max-w-[220px] truncate" title={`${f.grantor} → ${f.grantee}`}>{f.grantor} → {f.grantee}</td>
+                  <td className="py-1.5 pr-3 max-w-[200px] truncate text-muted-foreground" title={f.property_address}>{f.property_address || '—'}</td>
                   <td className="py-1.5 pr-3 text-right font-mono whitespace-nowrap" title="Principal of the underlying mortgage pledged/released in this filing">
                     {fmtMoney(f.loan_amount)}
                   </td>
@@ -109,16 +111,11 @@ function FilingHistory({ row }: { row: any }) {
                     </a>
                   </td>
                 </tr>
-                {(f.facility_evidence_quote || f.property_address) && (
+                {f.facility_evidence_quote && (
                   <tr className="border-b border-border/30">
                     <td></td>
-                    <td colSpan={5} className="pb-2 pr-3">
-                      {f.property_address && (
-                        <p className="text-muted-foreground mb-0.5">Property: {f.property_address}</p>
-                      )}
-                      {f.facility_evidence_quote && (
-                        <p className="italic text-muted-foreground/80 max-w-3xl">"{f.facility_evidence_quote}"</p>
-                      )}
+                    <td colSpan={6} className="pb-2 pr-3">
+                      <p className="italic text-muted-foreground/80 max-w-3xl">"{f.facility_evidence_quote}"</p>
                     </td>
                   </tr>
                 )}
