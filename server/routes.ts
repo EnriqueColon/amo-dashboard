@@ -649,8 +649,8 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const wc = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
     const grouped = `
-      SELECT UPPER(COALESCE(facility_lender_name, ''))   AS lender_key,
-             UPPER(COALESCE(facility_borrower_name, '')) AS borrower_key,
+      SELECT COALESCE(lender_key, UPPER(COALESCE(facility_lender_name, '')))     AS lender_key,
+             COALESCE(borrower_key, UPPER(COALESCE(facility_borrower_name, ''))) AS borrower_key,
              MAX(facility_lender_name)    AS lender,
              MAX(facility_borrower_name)  AS borrower,
              MAX(facility_type)           AS facility_type,
@@ -663,7 +663,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
              MIN(rec_date)                AS first_date,
              MAX(rec_date)                AS last_date
       FROM credit_facility_events ${wc}
-      GROUP BY lender_key, borrower_key
+      GROUP BY 1, 2
     `;
     const totals = db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(filings), 0) AS f FROM (${grouped})`).get(...params) as any;
     const rows = db.prepare(`${grouped} ORDER BY filings DESC, facility_amount DESC, last_date DESC LIMIT ? OFFSET ?`)
@@ -704,8 +704,8 @@ export async function registerRoutes(httpServer: Server, app: Express) {
              px.property_address
       FROM credit_facility_events e
       LEFT JOIN pdf_extractions px ON px.cfn = e.cfn
-      WHERE UPPER(COALESCE(e.facility_lender_name, ''))   = ?
-        AND UPPER(COALESCE(e.facility_borrower_name, '')) = ?
+      WHERE COALESCE(e.lender_key, UPPER(COALESCE(e.facility_lender_name, '')))     = ?
+        AND COALESCE(e.borrower_key, UPPER(COALESCE(e.facility_borrower_name, ''))) = ?
       ORDER BY e.rec_date DESC
     `).all(lender.toUpperCase(), borrower.toUpperCase());
 
@@ -739,10 +739,11 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       // different capitalization across filings (e.g. "City National Bank of
       // Florida" vs "CITY NATIONAL BANK OF FLORIDA").
       const rows = db.prepare(`
-        SELECT UPPER(facility_lender_name) as label, COUNT(*) as count
+        SELECT MAX(facility_lender_name) as label, COUNT(*) as count
         FROM credit_facility_events
         WHERE ${[...dateClauses, 'facility_lender_name IS NOT NULL'].join(' AND ')}
-        GROUP BY UPPER(facility_lender_name) ORDER BY count DESC LIMIT 15
+        GROUP BY COALESCE(lender_key, UPPER(facility_lender_name))
+        ORDER BY count DESC LIMIT 15
       `).all(...dateParams);
       return res.json(rows);
     }
@@ -766,8 +767,8 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       const row = db.prepare(`
         SELECT SUM(facility_amount) as total, COUNT(*) as distinct_facilities
         FROM (
-          SELECT DISTINCT UPPER(facility_lender_name) AS lender,
-                          UPPER(facility_borrower_name) AS borrower,
+          SELECT DISTINCT COALESCE(lender_key, UPPER(facility_lender_name))     AS lender,
+                          COALESCE(borrower_key, UPPER(facility_borrower_name)) AS borrower,
                           facility_amount
           FROM credit_facility_events
           WHERE facility_amount IS NOT NULL ${dwc.replace('WHERE', 'AND')}

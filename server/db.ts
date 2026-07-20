@@ -62,7 +62,8 @@ export function getDb(): Database.Database {
         facility_type TEXT, facility_agreement_name TEXT, facility_agreement_date TEXT,
         facility_lender_name TEXT, facility_agent_name TEXT, facility_borrower_name TEXT,
         facility_amount REAL, facility_amount_type TEXT,
-        facility_evidence_quote TEXT, facility_confidence TEXT
+        facility_evidence_quote TEXT, facility_confidence TEXT,
+        lender_key TEXT, borrower_key TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_assignments_grantor ON assignments(grantor);
       CREATE INDEX IF NOT EXISTS idx_assignments_grantee ON assignments(grantee);
@@ -133,6 +134,12 @@ export function getDb(): Database.Database {
     for (const [col, type] of newPdfColumns) {
       try { _db.exec(`ALTER TABLE pdf_extractions ADD COLUMN ${col} ${type}`); } catch (_e) {}
       try { _db.exec(`ALTER TABLE aom_events_clean ADD COLUMN ${col} ${type}`); } catch (_e) {}
+    }
+
+    // Migration: facility grouping-key columns (populated by normalize.py;
+    // NULL until it re-runs — the routes COALESCE onto UPPER(name) meanwhile)
+    for (const col of ['lender_key', 'borrower_key']) {
+      try { _db.exec(`ALTER TABLE credit_facility_events ADD COLUMN ${col} TEXT`); } catch (_e) {}
     }
 
     // Migration: review workflow columns

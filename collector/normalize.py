@@ -609,6 +609,56 @@ _MANUAL_TYPE_OVERRIDES: dict[str, str] = {
 }
 
 
+# ── Credit-facility name cleaning ─────────────────────────────────────────────
+# The facility extractor returns lender/borrower names verbatim from document
+# text, so the same real-world entity shows up under OCR/formatting variants
+# ("VASTER-LOANS IIL LLC", "Assignee (AMERANT BANK, N.A.)") and splits into
+# multiple rows in the dashboard's relationship view. Two layers:
+#   clean_facility_name() — light display cleanup, names stay close to the doc
+#   facility_name_key()   — aggressive grouping key (punctuation-free, upper)
+# Both are deliberately separate from canonicalize(): no brand folding or
+# suffix stripping here, these names are shown in the UI.
+
+_FAC_ROLE_PREFIX_RE = re.compile(
+    r'^\s*(?:ASSIGNEE|ASSIGNOR|LENDER|BORROWER)\s*[:\(]\s*', re.IGNORECASE)
+# Names that are just a document role, not an entity — extraction gaps
+_FAC_ROLE_ONLY = {'LENDER', 'BORROWER', 'ASSIGNEE', 'ASSIGNOR', 'AGENT', 'TRUSTEE', 'BANK'}
+# Exact-match aliases (keyed on the aggressive key form) for OCR misreads that
+# rules can't safely catch. Add entries as new variants show up in production.
+_FAC_ALIASES = {
+    'GIDY NATIONAL BANK OF FLORIDA': 'City National Bank of Florida',
+    'BGI FINANCIAL LEC': 'BGI Financial, LLC',
+}
+
+
+def _fac_alias_key(s: str) -> str:
+    return re.sub(r'\s+', ' ', re.sub(r'[^A-Z0-9 ]', '', s.upper())).strip()
+
+
+def clean_facility_name(name):
+    """Display-level cleanup of an extracted facility lender/borrower name."""
+    if name is None or not str(name).strip():
+        return None
+    s = re.sub(r'\s+', ' ', str(name)).strip()
+    s = _FAC_ROLE_PREFIX_RE.sub('', s)
+    if s.endswith(')') and s.count(')') > s.count('('):   # "Assignee (X)" → "X"
+        s = s[:-1].rstrip()
+    s = re.sub(r'(\w)\s*-\s*(\w)', r'\1 \2', s)           # "VASTER-LOANS" → "VASTER LOANS"
+    s = re.sub(r'\bIIL\b', 'III', s)                      # OCR misread of roman numeral III
+    s = re.sub(r'\s+', ' ', s).strip(' ,')
+    if not s or s.upper() in _FAC_ROLE_ONLY:
+        return None
+    return _FAC_ALIASES.get(_fac_alias_key(s), s)
+
+
+def facility_name_key(name):
+    """Aggressive grouping key: cleaned name, uppercased, punctuation removed.
+    Returns '' (not NULL) when there is no usable name, so SQL grouping and
+    exact-match lookups behave consistently."""
+    cleaned = clean_facility_name(name)
+    return _fac_alias_key(cleaned) if cleaned else ''
+
+
 def get_txn_type(assignor_canon: str, assignee_canon: str,
                  assignor_type: str, assignee_type: str) -> str:
     if assignor_canon == assignee_canon:
@@ -995,6 +1045,8 @@ def build_normalized_tables():
     # of its doc_category, so this surfaces those separately rather than
     # folding them into (or being excluded from) Clean Transactions.
     print("Building credit_facility_events...")
+    conn.create_function('clean_fac_name', 1, clean_facility_name)
+    conn.create_function('fac_name_key', 1, facility_name_key)
     conn.executescript("""
         DROP TABLE IF EXISTS credit_facility_events;
         CREATE TABLE credit_facility_events (
@@ -1014,17 +1066,27 @@ def build_normalized_tables():
             facility_amount          REAL,
             facility_amount_type     TEXT,
             facility_evidence_quote  TEXT,
-            facility_confidence      TEXT
+            facility_confidence      TEXT,
+            lender_key               TEXT,
+            borrower_key             TEXT
         );
     """)
+    # facility_amount <= 1000 is the standard deed recital ("for $10.00 and
+    # other good and valuable consideration") leaking through — never a real
+    # facility size, so null it rather than displaying it.
     conn.execute("""
         INSERT OR REPLACE INTO credit_facility_events
         SELECT a.cfn, a.rec_date, a.doc_type, a.grantor, a.grantee,
                a.rec_book, a.rec_page,
                px.facility_type, px.facility_agreement_name, px.facility_agreement_date,
-               px.facility_lender_name, px.facility_agent_name, px.facility_borrower_name,
-               px.facility_amount, px.facility_amount_type, px.facility_evidence_quote,
-               px.facility_confidence
+               clean_fac_name(px.facility_lender_name),
+               clean_fac_name(px.facility_agent_name),
+               clean_fac_name(px.facility_borrower_name),
+               CASE WHEN px.facility_amount <= 1000 THEN NULL ELSE px.facility_amount END,
+               px.facility_amount_type, px.facility_evidence_quote,
+               px.facility_confidence,
+               fac_name_key(px.facility_lender_name),
+               fac_name_key(px.facility_borrower_name)
         FROM pdf_extractions px
         JOIN assignments a ON a.cfn = px.cfn
         WHERE px.status = 'OK'
@@ -1034,7 +1096,10 @@ def build_normalized_tables():
     conn.commit()
 
     n_cfe = conn.execute("SELECT COUNT(*) FROM credit_facility_events").fetchone()[0]
-    print(f"  credit_facility_events: {n_cfe} rows")
+    n_pairs = conn.execute(
+        "SELECT COUNT(DISTINCT lender_key || '|' || borrower_key) FROM credit_facility_events"
+    ).fetchone()[0]
+    print(f"  credit_facility_events: {n_cfe} rows ({n_pairs} distinct lender/borrower pairs)")
 
     # ── Entity relationships ──────────────────────────────────────────────────
     print("Building entity_relationships...")
