@@ -8,7 +8,7 @@ This same handoff mechanism is mirrored for Cursor (any model) at [.cursor/rules
 
 ## Operational facts
 
-- **Deploy:** production runs on a DigitalOcean droplet (`165.22.35.75`, `/opt/amo-dashboard`). `git pull` alone does NOT update the live site — must also `npm run build` and restart the Node process (`node dist/index.cjs`, port 5000). Don't kill Python backfill processes when restarting.
+- **Deploy:** production runs on a DigitalOcean droplet (`165.22.35.75`, `/opt/amo-dashboard`, **1 vCPU / 1GB RAM** — keep any CPU-heavy cron jobs (OCR concurrency, etc.) modest, this box has no headroom). `git pull` alone does NOT update the live site — must also `npm run build` and restart the Node process (`node dist/index.cjs`, port 5000). Don't kill Python backfill processes when restarting.
 - **User runs all droplet/production actions manually** — code changes happen here (commit + push to `origin/main`), deployment is a separate manual step the user does themselves. Don't attempt to SSH or act on the droplet directly.
 - **LLM provider is OpenAI** (`gpt-4.1-nano` by default) for `collector/extract_pdfs.py` and `collector/enrich_entities.py` — not Claude/Anthropic.
 - **GitHub workflow:** every agreed-on code change should be committed and pushed to `origin/main` once confirmed.
