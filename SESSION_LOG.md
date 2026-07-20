@@ -4,6 +4,28 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-07-20 (later session) — Credit Facilities tab DEPLOYED + reworked into relationship-grouped view
+
+**Status: fully deployed and live in production.** Deploy revealed key operational fact: **Node server is PM2-managed, app name `amo-dashboard`** (see CLAUDE.md — deploy is `git pull` → `npm run build` → `pm2 restart amo-dashboard`). Discovered because a manual `kill` of the Node PID was instantly auto-restarted by PM2's daemon; there is no systemd unit or cron for the server.
+
+### Deploy events
+- `normalize.py` re-run on droplet: first attempt (plain foreground SSH) was **killed by a dropped SSH session ~23 min in, before any table writes** — restarted with `nohup ... & disown`, completed clean in that same hour. Result: `aom_events_clean` 49,886 rows; **`credit_facility_events` 82 rows, all with `rec_book`/`rec_page`** (backfill grew it from ~60 while deploy was pending). Any long-running one-off on the droplet needs nohup+disown.
+- `normalize.py` progress can't be watched via row counts mid-run — it builds all inserts in Python memory and commits once at the end (table shows 0 the whole time). Process liveness (`ps`, CPU time climbing) is the only real signal.
+
+### Tab reworked: flat filing list → relationship-grouped view (user request)
+User's reaction to v1 (flat chronological filings): repeated lender↔borrower rows bury the story; "we want to see the relationship between the two." Rebuilt (commits `d8cc28b`, `396b5ac`, `18718a3`):
+- **Table is now one row per lender↔borrower pair** (grouped `UPPER()` case-insensitively): lender, borrower, type badge, facility size (compact, full on hover), filing count, first→last activity range. Default sort: filings DESC, amount DESC.
+- Row expands to **filing history** (new `GET /api/credit-facility-events/facilities` grouped + `GET /api/credit-facility-events/filings?lender=&borrower=` per-pair, keys are the UPPER'd names): per filing — date, CFN, doc type, recorded parties, **property address + underlying mortgage principal** (LEFT JOIN `pdf_extractions` for `loan_amount`/`property_address`), evidence quote, county-portal link. Agreement name/date/agent/credit-limit shown once in expansion header.
+- **Key data insight surfaced during review:** `facility_amount` is the facility's *credit limit* quoted in boilerplate on every filing — NOT a per-transaction amount, must never be summed per row (v1's per-filing Amount column repeating $102.5M read as 6 separate transactions — replaced with underlying mortgage principal, the closest public proxy for per-transaction activity; actual draw amounts are never in county records).
+- Old flat `GET /api/credit-facility-events` list endpoint still exists (unused by the UI now).
+
+### Open items / data-quality observations for next session
+1. **OCR variants split relationships** in the grouped view: "GIDY National Bank of Florida" vs "City National Bank of Florida", "BGI Financial, LEC" vs "LLC" appear as separate rows (grouping is exact-string on extracted names). A fuzzy-merge / canonicalization pass over `facility_lender_name`/`facility_borrower_name` is the natural fix.
+2. Junk extracted amounts exist (a "$10" facility). Prior flags still open: `2026R268269` (possible false positive), `2026R277453` (lender extracted as literal "Lender").
+3. User said "we will discuss next steps later" — widening/removing `--since` in `run_facility_tick.sh` and a recurring `normalize.py` schedule remain undecided.
+
+---
+
 ## 2026-07-16 → 2026-07-20 — Warehouse/credit-facility feature: research → pipeline → production backfill → dashboard tab
 
 **Status as of last message: production backfill is running (cron, on droplet), real results confirmed (~60 hits so far in a 6-month window). New "Credit Facilities" dashboard tab is built and verified locally but NOT YET DEPLOYED — deploy steps below.**
