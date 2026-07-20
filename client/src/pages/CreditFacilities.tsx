@@ -69,6 +69,13 @@ function filingDirection(f: any, lenderKey: string, _borrowerKey: string): 'pled
   return null;
 }
 
+// A recorded party is a "third party" when its normalized name matches
+// neither the facility's lender key nor its borrower key.
+function isThirdParty(name: string | null, lenderKey: string, borrowerKey: string): boolean {
+  const k = nameKey(name);
+  return !!k && !keysMatch(k, lenderKey) && !keysMatch(k, borrowerKey);
+}
+
 // Marks a recorded party that is neither the facility's lender nor borrower,
 // and explains why the filing is still part of this facility.
 function ThirdPartyChip() {
@@ -127,6 +134,9 @@ function FilingHistory({ row }: { row: any }) {
     queryFn: () => apiRequest('GET', `/api/credit-facility-events/filings${qs}`).then(r => r.json()),
   });
   const filings = (data as any[]) || [];
+  const lenderKey = row.lender_key || '', borrowerKey = row.borrower_key || '';
+  const hasThirdParty = filings.some(f =>
+    isThirdParty(f.grantor, lenderKey, borrowerKey) || isThirdParty(f.grantee, lenderKey, borrowerKey));
 
   return (
     <div className="space-y-2">
@@ -170,20 +180,13 @@ function FilingHistory({ row }: { row: any }) {
                     <DirectionBadge dir={filingDirection(f, row.lender_key || '', row.borrower_key || '')} />
                   </td>
                   <td className="py-1.5 pr-3 max-w-[280px]">
-                    {(() => {
-                      const lk = row.lender_key || '', bk = row.borrower_key || '';
-                      const gThird = !keysMatch(nameKey(f.grantor), lk) && !keysMatch(nameKey(f.grantor), bk);
-                      const eThird = !keysMatch(nameKey(f.grantee), lk) && !keysMatch(nameKey(f.grantee), bk);
-                      return (
-                        <span className="flex items-center gap-1 min-w-0" title={`${f.grantor} → ${f.grantee}`}>
-                          <span className="truncate">{f.grantor}</span>
-                          {gThird && <ThirdPartyChip />}
-                          <span className="shrink-0 text-muted-foreground">→</span>
-                          <span className="truncate">{f.grantee}</span>
-                          {eThird && <ThirdPartyChip />}
-                        </span>
-                      );
-                    })()}
+                    <span className="flex items-center gap-1 min-w-0" title={`${f.grantor} → ${f.grantee}`}>
+                      <span className="truncate">{f.grantor}</span>
+                      {isThirdParty(f.grantor, row.lender_key || '', row.borrower_key || '') && <ThirdPartyChip />}
+                      <span className="shrink-0 text-muted-foreground">→</span>
+                      <span className="truncate">{f.grantee}</span>
+                      {isThirdParty(f.grantee, row.lender_key || '', row.borrower_key || '') && <ThirdPartyChip />}
+                    </span>
                   </td>
                   <td className="py-1.5 pr-3 max-w-[200px] truncate text-muted-foreground" title={f.property_address}>{f.property_address || '—'}</td>
                   <td className="py-1.5 pr-3 text-right font-mono whitespace-nowrap" title="Principal of the underlying mortgage pledged/released in this filing">
@@ -218,6 +221,16 @@ function FilingHistory({ row }: { row: any }) {
             ))}
           </tbody>
         </table>
+      )}
+      {!isLoading && hasThirdParty && (
+        <p className="text-[10px] text-muted-foreground leading-relaxed max-w-3xl border-t border-border/30 pt-2">
+          <span className="inline-flex items-center rounded border px-1 py-0.5 text-[9px] font-medium leading-none text-amber-700 bg-amber-50 border-amber-200 mr-1.5">3rd party</span>
+          marks a recorded assignor/assignee whose name matches neither this facility's lender nor its borrower.
+          Filings are linked to a facility by the loan agreement cited in the document's own text — not by the
+          recorded party names — so a third party here is usually an affiliate co-borrower pledging collateral
+          into the line, or the prior holder of a loan moving through the facility. Open the filing's evidence
+          quote or the county document to confirm the role.
+        </p>
       )}
     </div>
   );
