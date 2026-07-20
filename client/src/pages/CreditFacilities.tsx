@@ -39,6 +39,51 @@ function fmtMoneyCompact(v: number | null) {
 const portalUrl = (book: string, page: string) =>
   `https://onlineservices.miamidadeclerk.gov/officialrecords/api/DocumentImage/getdocumentimage?redact=false&sBook=${book}&sBookType=O+&sPage=${page}`;
 
+// JS twin of normalize.py's facility_name_key(): uppercase, punctuation-free,
+// collapsed — used to match a filing's recorded parties against the
+// facility's lender/borrower keys.
+function nameKey(s: string | null): string {
+  if (!s) return '';
+  return s.toUpperCase().replace(/[^A-Z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
+}
+
+// Two keys "match" when equal, or when one contains the other (recorded index
+// names are often longer/shorter than the extracted name). Containment only
+// counts for reasonably long strings, so short junk like "PAM" can't
+// false-positive its way into everything.
+function keysMatch(a: string, b: string): boolean {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  return (a.length >= 8 && b.length >= 8) && (a.includes(b) || b.includes(a));
+}
+
+// Interpret a filing's direction relative to its facility: collateral moving
+// borrower → bank is a pledge (drawing on the line); bank → borrower is a
+// release (loan paid off / sold out of the facility).
+function filingDirection(f: any, lenderKey: string, borrowerKey: string): 'pledge' | 'release' | null {
+  const g = nameKey(f.grantor), e = nameKey(f.grantee);
+  const pledge  = (keysMatch(e, lenderKey) ? 1 : 0) + (keysMatch(g, borrowerKey) ? 1 : 0);
+  const release = (keysMatch(g, lenderKey) ? 1 : 0) + (keysMatch(e, borrowerKey) ? 1 : 0);
+  if (pledge > release) return 'pledge';
+  if (release > pledge) return 'release';
+  return null;
+}
+
+function DirectionBadge({ dir }: { dir: 'pledge' | 'release' | null }) {
+  if (!dir) return <span className="text-muted-foreground/50">—</span>;
+  const meta = dir === 'pledge'
+    ? { label: 'Pledge',  cls: 'text-blue-700 bg-blue-50 border-blue-200',       tip: 'Collateral pledged into the facility (borrower → bank)' }
+    : { label: 'Release', cls: 'text-emerald-700 bg-emerald-50 border-emerald-200', tip: 'Collateral released from the facility (bank → borrower)' };
+  return (
+    <span
+      className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium leading-none whitespace-nowrap ${meta.cls}`}
+      title={meta.tip}
+    >
+      {meta.label}
+    </span>
+  );
+}
+
 const MONTH_LABELS: Record<string, string> = {
   '01': 'Jan', '02': 'Feb', '03': 'Mar', '04': 'Apr', '05': 'May', '06': 'Jun',
   '07': 'Jul', '08': 'Aug', '09': 'Sep', '10': 'Oct', '11': 'Nov', '12': 'Dec',
@@ -83,7 +128,8 @@ function FilingHistory({ row }: { row: any }) {
               <th className="py-1.5 pr-3 text-left font-medium">Recorded</th>
               <th className="py-1.5 pr-3 text-left font-medium">CFN</th>
               <th className="py-1.5 pr-3 text-left font-medium">Document</th>
-              <th className="py-1.5 pr-3 text-left font-medium">Recorded Parties</th>
+              <th className="py-1.5 pr-3 text-left font-medium">Direction</th>
+              <th className="py-1.5 pr-3 text-left font-medium">Assignor → Assignee</th>
               <th className="py-1.5 pr-3 text-left font-medium">Property</th>
               <th className="py-1.5 pr-3 text-right font-medium">Mortgage</th>
               <th className="py-1.5 w-6"></th>
@@ -100,6 +146,9 @@ function FilingHistory({ row }: { row: any }) {
                   <td className="py-1.5 pr-3 whitespace-nowrap text-muted-foreground">{f.rec_date}</td>
                   <td className="py-1.5 pr-3 font-mono text-primary/80 whitespace-nowrap">{f.cfn}</td>
                   <td className="py-1.5 pr-3 max-w-[160px] truncate" title={f.doc_type}>{f.doc_type || '—'}</td>
+                  <td className="py-1.5 pr-3">
+                    <DirectionBadge dir={filingDirection(f, row.lender_key || '', row.borrower_key || '')} />
+                  </td>
                   <td className="py-1.5 pr-3 max-w-[220px] truncate" title={`${f.grantor} → ${f.grantee}`}>{f.grantor} → {f.grantee}</td>
                   <td className="py-1.5 pr-3 max-w-[200px] truncate text-muted-foreground" title={f.property_address}>{f.property_address || '—'}</td>
                   <td className="py-1.5 pr-3 text-right font-mono whitespace-nowrap" title="Principal of the underlying mortgage pledged/released in this filing">
@@ -125,7 +174,7 @@ function FilingHistory({ row }: { row: any }) {
                 {quoteCfn === f.cfn && f.facility_evidence_quote && (
                   <tr className="border-b border-border/30 bg-muted/10">
                     <td></td>
-                    <td colSpan={6} className="py-2 pr-3">
+                    <td colSpan={7} className="py-2 pr-3">
                       <p className="italic text-muted-foreground/80 max-w-3xl">"{f.facility_evidence_quote}"</p>
                     </td>
                   </tr>
