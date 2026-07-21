@@ -13,14 +13,15 @@
 # so it's safe to let this run untouched — it resumes correctly between ticks
 # and after any restart.
 #
-# --since scopes this to only the last ~6 months of documents, for a much
-# faster partial backfill ahead of a deadline. Once you no longer need that
-# time pressure, remove the --since flag entirely (or push the date further
-# back) to let it continue backfilling the rest of history — no other state
-# needs to change, it just picks up more documents as pending on the next tick.
+# No --since flag: backfills all collected history (assignments start
+# 2023-01-03). A --since date was used temporarily in July 2026 to prioritize
+# the most recent ~6 months ahead of a deadline; that window is fully
+# processed, so the tick now works backward through the rest of history
+# (newest first). Re-adding --since YYYY-MM-DD re-scopes it any time —
+# no other state needs to change.
 
 set -u
 cd /opt/amo-dashboard/collector
 source /opt/amo-dashboard/.env
 
-.venv/bin/python3 batch_extract_facility.py --tick --since 2026-01-16
+.venv/bin/python3 batch_extract_facility.py --tick
