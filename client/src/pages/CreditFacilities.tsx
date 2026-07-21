@@ -174,7 +174,17 @@ function FilingHistory({ row }: { row: any }) {
                   title={f.facility_evidence_quote ? 'Click to show the evidence quote' : undefined}
                 >
                   <td className="py-1.5 pr-3 whitespace-nowrap text-muted-foreground">{f.rec_date}</td>
-                  <td className="py-1.5 pr-3 font-mono text-primary/80 whitespace-nowrap">{f.cfn}</td>
+                  <td className="py-1.5 pr-3 font-mono whitespace-nowrap">
+                    <a
+                      href={portalUrl(f.rec_book, f.rec_page)}
+                      target="_blank" rel="noopener noreferrer"
+                      onClick={e => e.stopPropagation()}
+                      className="text-primary hover:underline"
+                      title="Open the recorded document on the county Clerk portal"
+                    >
+                      {f.cfn}
+                    </a>
+                  </td>
                   <td className="py-1.5 pr-3 max-w-[160px] truncate" title={f.doc_type}>{f.doc_type || '—'}</td>
                   <td className="py-1.5 pr-3">
                     <DirectionBadge dir={filingDirection(f, row.lender_key || '', row.borrower_key || '')} />
