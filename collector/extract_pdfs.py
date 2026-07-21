@@ -285,6 +285,10 @@ def ocr_pdf(pdf_path: str, workdir: str) -> str:
         out = subprocess.run(
             ['tesseract', os.path.join(workdir, page), '-'],
             capture_output=True, timeout=120,
+            # single OpenMP thread per process — parallelism comes from the
+            # worker pool, not tesseract's internal threads (see
+            # batch_extract_facility.download_and_ocr for the full story)
+            env={**os.environ, 'OMP_THREAD_LIMIT': '1'},
         )
         text_parts.append(out.stdout.decode('utf-8', errors='replace'))
     return '\n'.join(text_parts).strip()

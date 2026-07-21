@@ -190,8 +190,14 @@ def download_and_ocr(cfn, rec_book, rec_page):
         pages = sorted(f for f in os.listdir(workdir) if f.startswith('pg') and f.endswith('.png'))
         text_parts = []
         for page in pages:
+            # OMP_THREAD_LIMIT=1: tesseract otherwise spawns ~4 OpenMP threads
+            # per process; with 4 parallel download workers that's 16 compute
+            # threads on 4 cores, and every call stalls past the timeout
+            # (seen 2026-07-21: 100% of a chunk timing out at 180s). One
+            # thread per process × one process per core is the fast layout.
             out = subprocess.run(['tesseract', os.path.join(workdir, page), '-'],
-                                 capture_output=True, timeout=OCR_SUBPROCESS_TIMEOUT)
+                                 capture_output=True, timeout=OCR_SUBPROCESS_TIMEOUT,
+                                 env={**os.environ, 'OMP_THREAD_LIMIT': '1'})
             text_parts.append(out.stdout.decode('utf-8', errors='replace'))
         text = '\n'.join(text_parts).strip()
         return cfn, (text if len(text) >= 80 else None)
