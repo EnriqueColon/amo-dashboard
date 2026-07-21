@@ -27,4 +27,7 @@ source /opt/amo-dashboard/.env
 # --max-concurrent 4 sized for the 4 vCPU / 8GB droplet (resized 2026-07-21);
 # OCR workers auto-scale to os.cpu_count() capped at 4. On a smaller box,
 # drop this back to 2.
-.venv/bin/python3 batch_extract_facility.py --tick --max-concurrent 4
+# -u: unbuffered stdout so tick.log updates live (same lesson as normalize.py —
+# without it, output only appears in buffered bursts and a healthy quiet run
+# looks stalled).
+.venv/bin/python3 -u batch_extract_facility.py --tick --max-concurrent 4
