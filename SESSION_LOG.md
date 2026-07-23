@@ -4,6 +4,23 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-07-22 — UX round built while backfill runs (commit `31fd48c` — NOT yet deployed)
+
+All 7 proposed enhancements from 2026-07-20 implemented in `CreditFacilities.tsx` + small `routes.ts` changes, verified in-browser locally (login: dev default password, form_input not synthetic keypress — CDP Enter doesn't trigger implicit form submit; requestSubmit() confirmed the handler):
+1. Top Lenders click-to-filter (toggle: click again clears; ring highlight on active)
+2. Enter applies filters (filter grid is now a real `<form>`; Apply is type=submit)
+3. Type chips show filing counts from by_facility_type (already-fetched data)
+4. "Active" badge (green, emerald) on rows with a filing in last 90 days (`isRecentlyActive`, client-side)
+5. Expansion summary line: "N filings · N pledges · N releases · $X in underlying mortgages" (mortgage part hidden when all loan_amounts null)
+6. CSV export: toolbar button above table exports full filtered+sorted set (client fetches `limit=5000`); small "CSV" button in expansion exports that facility's filing history
+7. ⓘ methodology tooltips (title-attr) on all four stat cards
+Server: `/facilities` limit cap 500→5000 (export path); **top_lenders chart LIMIT 15 removed** — the cap would have silently frozen the "Distinct Lenders" stat at 15 once historical data landed (client slices its own top-8 for display).
+**Deploy (after backfill, or anytime): `git pull && npm run build && pm2 restart amo-dashboard`.**
+Backfill status at time of writing: ~21.6k pending of ~55k total (started 2023-01-03 inventory-wide), ~1,300/hr, ETA Thu afternoon; nightly normalize cron live at 08:30 UTC.
+Known pre-existing console warning (not from this round): wouter `<a>`-in-`<a>` nesting in `Sidebar.tsx` — flagged as separate cleanup task.
+
+---
+
 ## 2026-07-21 — Full-history backfill kicked off (to 2023-01-03) + droplet resized 4 vCPU/8GB
 
 User decision: backfill facility extraction over ALL collected history to make Lending Relationships robust. Key facts established:
