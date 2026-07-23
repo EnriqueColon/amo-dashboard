@@ -2,7 +2,7 @@ import { useState, Fragment } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer } from 'recharts';
-import { Landmark, ChevronLeft, ChevronRight, ExternalLink, ChevronDown, ChevronUp } from 'lucide-react';
+import { Landmark, ChevronLeft, ChevronRight, ExternalLink, ChevronDown, ChevronUp, Info, Download } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -38,6 +38,43 @@ function fmtMoneyCompact(v: number | null) {
 
 const portalUrl = (book: string, page: string) =>
   `https://onlineservices.miamidadeclerk.gov/officialrecords/api/DocumentImage/getdocumentimage?redact=false&sBook=${book}&sBookType=O+&sPage=${page}`;
+
+// A facility is "active" when its most recent filing is within the last 90
+// days — a live line being drawn on / released, not an archived relationship.
+const ACTIVE_WINDOW_DAYS = 90;
+function isRecentlyActive(lastDate: string | null): boolean {
+  if (!lastDate) return false;
+  const d = new Date(lastDate + 'T00:00:00');
+  return Date.now() - d.getTime() < ACTIVE_WINDOW_DAYS * 24 * 3600 * 1000;
+}
+
+function ActiveBadge() {
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[9px] font-medium leading-none whitespace-nowrap text-emerald-700 bg-emerald-50 border-emerald-200 cursor-help"
+      title={`At least one filing recorded in the last ${ACTIVE_WINDOW_DAYS} days`}
+    >
+      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+      Active
+    </span>
+  );
+}
+
+// ── CSV export ──────────────────────────────────────────────────────────────
+function csvEscape(v: any): string {
+  const s = v == null ? '' : String(v);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function downloadCsv(filename: string, header: string[], rows: any[][]) {
+  const body = [header, ...rows].map(r => r.map(csvEscape).join(',')).join('\n');
+  const url = URL.createObjectURL(new Blob([body], { type: 'text/csv;charset=utf-8' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 // JS twin of normalize.py's facility_name_key(): uppercase, punctuation-free,
 // collapsed — used to match a filing's recorded parties against the
@@ -138,17 +175,50 @@ function FilingHistory({ row }: { row: any }) {
   const hasThirdParty = filings.some(f =>
     isThirdParty(f.grantor, lenderKey, borrowerKey) || isThirdParty(f.grantee, lenderKey, borrowerKey));
 
+  // At-a-glance relationship profile, computed from the filings in hand
+  const dirs = filings.map(f => filingDirection(f, lenderKey, borrowerKey));
+  const pledges = dirs.filter(d => d === 'pledge').length;
+  const releases = dirs.filter(d => d === 'release').length;
+  const mortgageTotal = filings.reduce((s, f) => s + (f.loan_amount || 0), 0);
+
+  const exportFilings = () => {
+    downloadCsv(
+      `filings_${(row.lender || 'unknown').replace(/\W+/g, '_')}_${(row.borrower || 'unknown').replace(/\W+/g, '_')}.csv`,
+      ['recorded', 'cfn', 'document', 'direction', 'assignor', 'assignee', 'property', 'mortgage_principal', 'evidence_quote'],
+      filings.map((f, i) => [f.rec_date, f.cfn, f.doc_type, dirs[i] ?? '', f.grantor, f.grantee, f.property_address, f.loan_amount, f.facility_evidence_quote]),
+    );
+  };
+
   return (
     <div className="space-y-2">
-      <div className="flex flex-wrap gap-x-6 gap-y-1 text-[11px] text-muted-foreground">
-        {row.agreement_name && <span><span className="font-medium text-foreground/70">Agreement:</span> {row.agreement_name}</span>}
-        {row.agreement_date && <span><span className="font-medium text-foreground/70">Dated:</span> {row.agreement_date}</span>}
-        {row.agent_name && <span><span className="font-medium text-foreground/70">Agent:</span> {row.agent_name}</span>}
-        {row.facility_amount != null && (
-          <span>
-            <span className="font-medium text-foreground/70">Facility size:</span>{' '}
-            {fmtMoney(row.facility_amount)}{row.facility_amount_type ? ` (${row.facility_amount_type.replace(/_/g, ' ')})` : ''}
-          </span>
+      <div className="flex items-start justify-between gap-3">
+        <div className="space-y-1 min-w-0">
+          {!isLoading && filings.length > 0 && (
+            <p className="text-[11px] font-medium text-foreground/80">
+              {filings.length} filing{filings.length === 1 ? '' : 's'} · {pledges} pledge{pledges === 1 ? '' : 's'} · {releases} release{releases === 1 ? '' : 's'}
+              {mortgageTotal > 0 && <> · {fmtMoneyCompact(mortgageTotal)} in underlying mortgages</>}
+            </p>
+          )}
+          <div className="flex flex-wrap gap-x-6 gap-y-1 text-[11px] text-muted-foreground">
+            {row.agreement_name && <span><span className="font-medium text-foreground/70">Agreement:</span> {row.agreement_name}</span>}
+            {row.agreement_date && <span><span className="font-medium text-foreground/70">Dated:</span> {row.agreement_date}</span>}
+            {row.agent_name && <span><span className="font-medium text-foreground/70">Agent:</span> {row.agent_name}</span>}
+            {row.facility_amount != null && (
+              <span>
+                <span className="font-medium text-foreground/70">Facility size:</span>{' '}
+                {fmtMoney(row.facility_amount)}{row.facility_amount_type ? ` (${row.facility_amount_type.replace(/_/g, ' ')})` : ''}
+              </span>
+            )}
+          </div>
+        </div>
+        {!isLoading && filings.length > 0 && (
+          <button
+            onClick={e => { e.stopPropagation(); exportFilings(); }}
+            className="shrink-0 inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-primary transition-colors"
+            title="Download this facility's filing history as CSV"
+          >
+            <Download size={11} /> CSV
+          </button>
         )}
       </div>
       {isLoading ? <Skeleton className="h-16" /> : (
@@ -246,10 +316,17 @@ function FilingHistory({ row }: { row: any }) {
   );
 }
 
-function StatCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
+function StatCard({ label, value, sub, info }: { label: string; value: string; sub?: string; info?: string }) {
   return (
     <div className="bg-card border border-border rounded-lg p-4">
-      <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">{label}</p>
+      <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium flex items-center gap-1">
+        {label}
+        {info && (
+          <span title={info} className="cursor-help shrink-0 inline-flex">
+            <Info size={11} className="text-muted-foreground/50 hover:text-muted-foreground" />
+          </span>
+        )}
+      </p>
       <p className="text-2xl font-bold mt-1 text-primary">{value}</p>
       {sub && <p className="text-[11px] text-muted-foreground mt-0.5">{sub}</p>}
     </div>
@@ -287,9 +364,32 @@ export default function CreditFacilities() {
     });
   };
 
-  const qs = `?lender=${encodeURIComponent(applied.lender)}&borrower=${encodeURIComponent(applied.borrower)}` +
-    `&facility_type=${encodeURIComponent(applied.facility_type)}&start_date=${applied.start_date}&end_date=${applied.end_date}` +
-    `&page=${page}&limit=50` + (sort ? `&sort=${sort.key}&dir=${sort.dir}` : '');
+  const filterQs = `?lender=${encodeURIComponent(applied.lender)}&borrower=${encodeURIComponent(applied.borrower)}` +
+    `&facility_type=${encodeURIComponent(applied.facility_type)}&start_date=${applied.start_date}&end_date=${applied.end_date}`;
+  const sortQs = sort ? `&sort=${sort.key}&dir=${sort.dir}` : '';
+  const qs = `${filterQs}&page=${page}&limit=50${sortQs}`;
+
+  // Pull the entire filtered/sorted relationship set (not just the visible
+  // page) and hand it to the browser as a CSV download.
+  const exportTable = async () => {
+    const r = await apiRequest('GET', `/api/credit-facility-events/facilities${filterQs}&page=1&limit=5000${sortQs}`);
+    const all = (await r.json())?.rows || [];
+    downloadCsv(
+      `lending_relationships_${new Date().toISOString().slice(0, 10)}.csv`,
+      ['lender', 'borrower', 'facility_type', 'credit_limit', 'amount_type', 'filings', 'first_filing', 'last_filing', 'agreement', 'agreement_date', 'agent'],
+      all.map((x: any) => [x.lender, x.borrower, x.facility_type, x.facility_amount, x.facility_amount_type, x.filings, x.first_date, x.last_date, x.agreement_name, x.agreement_date, x.agent_name]),
+    );
+  };
+
+  // Clicking a Top Lender fills + applies the lender filter; clicking the
+  // same lender again clears it.
+  const filterByLender = (name: string) => {
+    const next = applied.lender === name ? '' : name;
+    setDraft(d => ({ ...d, lender: next }));
+    setApplied(a => ({ ...a, lender: next }));
+    setPage(1);
+    setExpandedKey(null);
+  };
 
   const { data: _data, isLoading } = useQuery({
     queryKey: ['/api/credit-facility-events/facilities', qs],
@@ -319,6 +419,8 @@ export default function CreditFacilities() {
   });
 
   const distinctLenders = (topLenders as any[] | undefined)?.length ?? 0;
+  const typeCounts: Record<string, number> = Object.fromEntries(((byType as any[]) || []).map(t => [t.label, t.count]));
+  const totalTyped = ((byType as any[]) || []).reduce((s: number, t: any) => s + t.count, 0);
 
   return (
     <div className="p-6 space-y-5 max-w-screen-xl mx-auto">
@@ -339,12 +441,18 @@ export default function CreditFacilities() {
           label="Facility Relationships"
           value={data ? data.total.toLocaleString() : '—'}
           sub={data?.total_filings != null ? `across ${data.total_filings.toLocaleString()} filings` : undefined}
+          info="One row per lender-borrower pair. All filings citing the same facility agreement are grouped together, with capitalization and known name variants of the same institution merged."
         />
-        <StatCard label="Distinct Lenders" value={distinctLenders ? String(distinctLenders) : '—'} />
+        <StatCard
+          label="Distinct Lenders"
+          value={distinctLenders ? String(distinctLenders) : '—'}
+          info="Unique lending institutions after merging capitalization and name variants. The same bank extracted under slightly different names counts once."
+        />
         <StatCard
           label="Total Facility Volume"
           value={volume?.total != null ? fmtMoney(volume.total) : '—'}
           sub={volume?.distinct_facilities != null ? `${volume.distinct_facilities} distinct facilities — repeat filings not double-counted` : undefined}
+          info="Sum of each distinct facility's stated credit limit, counted once per facility no matter how many filings cite it. This is committed capacity, not loan volume — actual draw amounts are never in the public record."
         />
         <StatCard
           label="Institutional vs. Consumer"
@@ -354,6 +462,7 @@ export default function CreditFacilities() {
               : '—'
           }
           sub="institutional filings / consumer HELOCs"
+          info="Filing counts by extracted facility type. Consumer lines (mostly HELOCs to individual homeowners) use similar 'revolving credit' language, so they are detected too — but bucketed separately to keep the institutional funding story clean."
         />
       </div>
 
@@ -380,25 +489,34 @@ export default function CreditFacilities() {
 
         <div className="bg-card border border-border rounded-lg p-4">
           <h2 className="text-sm font-semibold text-foreground mb-1">Top Lenders</h2>
-          <p className="text-[10px] text-muted-foreground mb-3">Ranked by number of filings</p>
+          <p className="text-[10px] text-muted-foreground mb-3">Ranked by number of filings — click to filter the table</p>
           <div className="space-y-2">
             {(topLenders as any[] || []).slice(0, 8).map((row, i) => (
-              <div key={row.label} className="flex items-center justify-between gap-2 bg-muted/30 rounded px-3 py-2">
+              <button
+                key={row.label}
+                onClick={() => filterByLender(row.label)}
+                title={applied.lender === row.label ? 'Click again to clear the filter' : `Show only ${row.label} in the table below`}
+                className={`w-full flex items-center justify-between gap-2 rounded px-3 py-2 text-left transition-colors ${
+                  applied.lender === row.label
+                    ? 'bg-primary/10 ring-1 ring-primary/40'
+                    : 'bg-muted/30 hover:bg-muted/60'
+                }`}
+              >
                 <div className="flex items-center gap-2 min-w-0">
                   <span className="text-xs text-muted-foreground w-4 shrink-0">{i + 1}</span>
                   <span className="text-xs font-medium truncate" title={row.label}>{row.label}</span>
                 </div>
                 <span className="text-xs font-mono text-blue-500 shrink-0">{row.count}</span>
-              </div>
+              </button>
             ))}
             {!topLenders && <Skeleton className="h-32" />}
           </div>
         </div>
       </div>
 
-      {/* Filters */}
+      {/* Filters — a real <form> so Enter in any field applies, like every search box */}
       <div className="bg-card border border-border rounded-lg p-4 space-y-3">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+        <form onSubmit={e => { e.preventDefault(); apply(); }} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
           <div>
             <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Lender</label>
             <Input placeholder="e.g. City National Bank" value={draft.lender}
@@ -420,27 +538,41 @@ export default function CreditFacilities() {
               onChange={e => setDraft(d => ({ ...d, end_date: e.target.value }))} className="h-8 text-xs mt-1" />
           </div>
           <div className="flex items-end gap-2">
-            <Button size="sm" onClick={apply} className="h-8 text-xs flex-1">Apply</Button>
-            {hasFilters && <Button size="sm" variant="ghost" onClick={clear} className="h-8 text-xs">Clear</Button>}
+            <Button size="sm" type="submit" className="h-8 text-xs flex-1">Apply</Button>
+            {hasFilters && <Button size="sm" type="button" variant="ghost" onClick={clear} className="h-8 text-xs">Clear</Button>}
           </div>
-        </div>
+        </form>
         <div className="flex flex-wrap gap-1.5">
           <button
             onClick={() => { setDraft(d => ({ ...d, facility_type: '' })); setApplied(a => ({ ...a, facility_type: '' })); setPage(1); }}
             className={`h-7 px-2.5 rounded-full border text-[11px] font-medium transition-colors ${!applied.facility_type ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground hover:border-foreground/40'}`}
-          >All Types</button>
+          >All Types{totalTyped ? ` (${totalTyped.toLocaleString()})` : ''}</button>
           {Object.entries(FACILITY_TYPE_META).map(([key, meta]) => (
             <button
               key={key}
               onClick={() => { setDraft(d => ({ ...d, facility_type: key })); setApplied(a => ({ ...a, facility_type: key })); setPage(1); }}
               className={`h-7 px-2.5 rounded-full border text-[11px] font-medium transition-colors ${applied.facility_type === key ? meta.color + ' border-current' : 'border-border text-muted-foreground hover:text-foreground hover:border-foreground/40'}`}
-            >{meta.label}</button>
+              title={`${typeCounts[key] ?? 0} filings of this type`}
+            >{meta.label}{typeCounts[key] != null ? ` (${typeCounts[key].toLocaleString()})` : ''}</button>
           ))}
         </div>
       </div>
 
       {/* Table */}
       <div className="bg-card border border-border rounded-lg overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-muted/10">
+          <span className="text-[11px] text-muted-foreground">
+            {data ? `${data.total.toLocaleString()} relationship${data.total === 1 ? '' : 's'}${hasFilters ? ' (filtered)' : ''}` : ''}
+          </span>
+          <button
+            onClick={exportTable}
+            disabled={!data?.rows?.length}
+            className="inline-flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground hover:text-primary transition-colors disabled:opacity-40 disabled:pointer-events-none"
+            title="Download the full filtered relationship list as CSV (all pages, current sort)"
+          >
+            <Download size={12} /> Export CSV
+          </button>
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead className="border-b border-border bg-muted/20">
@@ -492,7 +624,10 @@ export default function CreditFacilities() {
                           </td>
                           <td className="px-3 py-2 text-right font-mono text-blue-500">{r.filings}</td>
                           <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">
-                            {r.first_date === r.last_date ? fmtDateMonth(r.last_date) : `${fmtDateMonth(r.first_date)} → ${fmtDateMonth(r.last_date)}`}
+                            <span className="inline-flex items-center gap-1.5">
+                              {r.first_date === r.last_date ? fmtDateMonth(r.last_date) : `${fmtDateMonth(r.first_date)} → ${fmtDateMonth(r.last_date)}`}
+                              {isRecentlyActive(r.last_date) && <ActiveBadge />}
+                            </span>
                           </td>
                           <td className="px-2 py-2 text-center text-muted-foreground/50">
                             {expandedKey === k ? <ChevronUp size={13} /> : <ChevronDown size={13} />}

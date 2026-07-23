@@ -632,7 +632,9 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   app.get('/api/credit-facility-events/facilities', (req, res) => {
     const { lender, borrower, facility_type, start_date, end_date, page = '1', limit = '50', sort = '', dir = '' } = req.query as Record<string, string>;
     const pageNum = Math.max(1, parseInt(page));
-    const limitNum = Math.min(parseInt(limit) || 50, 500);
+    // Cap is generous (5000) because the client's CSV export pulls the whole
+    // filtered set in one request; the grouped query is cheap.
+    const limitNum = Math.min(parseInt(limit) || 50, 5000);
     const offset = (pageNum - 1) * limitNum;
 
     const cacheKey = makeCacheKey('/api/credit-facility-events/facilities', { lender, borrower, facility_type, start_date, end_date, page, limit, sort, dir });
@@ -751,12 +753,15 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       // Group case-insensitively — the same lender is sometimes extracted with
       // different capitalization across filings (e.g. "City National Bank of
       // Florida" vs "CITY NATIONAL BANK OF FLORIDA").
+      // No LIMIT: the client slices its own display (top 8) and uses the full
+      // length as the "Distinct Lenders" stat — a server-side cap here would
+      // silently freeze that stat at the cap.
       const rows = db.prepare(`
         SELECT MAX(facility_lender_name) as label, COUNT(*) as count
         FROM credit_facility_events
         WHERE ${[...dateClauses, 'facility_lender_name IS NOT NULL'].join(' AND ')}
         GROUP BY COALESCE(lender_key, UPPER(facility_lender_name))
-        ORDER BY count DESC LIMIT 15
+        ORDER BY count DESC
       `).all(...dateParams);
       return res.json(rows);
     }
