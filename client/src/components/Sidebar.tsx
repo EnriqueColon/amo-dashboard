@@ -72,25 +72,24 @@ export default function Sidebar() {
                   </span>
                 </div>
               )}
-              <Link href={href}>
-                <a
-                  data-testid={`nav-${label.toLowerCase().replace(/\s+/g, '-')}`}
-                  className={`flex items-center gap-2.5 px-2.5 py-2 rounded-md text-sm transition-colors cursor-pointer mb-0.5
-                    ${active
-                      ? 'bg-primary/15 text-primary font-medium'
-                      : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                    }`}
-                >
-                  <Icon size={15} className="shrink-0" />
-                  {!collapsed && (
-                    <span className="truncate flex-1 text-xs">{label}</span>
-                  )}
-                  {!collapsed && badge && (
-                    <span className="text-[9px] font-bold bg-primary/20 text-primary px-1.5 py-0.5 rounded-full shrink-0">
-                      {badge}
-                    </span>
-                  )}
-                </a>
+              <Link
+                href={href}
+                data-testid={`nav-${label.toLowerCase().replace(/\s+/g, '-')}`}
+                className={`flex items-center gap-2.5 px-2.5 py-2 rounded-md text-sm transition-colors cursor-pointer mb-0.5
+                  ${active
+                    ? 'bg-primary/15 text-primary font-medium'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                  }`}
+              >
+                <Icon size={15} className="shrink-0" />
+                {!collapsed && (
+                  <span className="truncate flex-1 text-xs">{label}</span>
+                )}
+                {!collapsed && badge && (
+                  <span className="text-[9px] font-bold bg-primary/20 text-primary px-1.5 py-0.5 rounded-full shrink-0">
+                    {badge}
+                  </span>
+                )}
               </Link>
             </div>
           );
