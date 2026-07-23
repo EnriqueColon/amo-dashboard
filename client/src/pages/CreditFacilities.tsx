@@ -269,8 +269,17 @@ function FilingHistory({ row }: { row: any }) {
                     </span>
                   </td>
                   <td className="py-1.5 pr-3 max-w-[200px] truncate text-muted-foreground" title={f.property_address}>{f.property_address || '—'}</td>
-                  <td className="py-1.5 pr-3 text-right font-mono whitespace-nowrap" title="Principal of the underlying mortgage pledged/released in this filing">
-                    {fmtMoney(f.loan_amount)}
+                  <td
+                    className="py-1.5 pr-3 text-right font-mono whitespace-nowrap"
+                    title={
+                      f.loan_amount_source === 'quote'
+                        ? "Recovered from the evidence quote text, not this document's structured extraction — this document type (often a loan-interest assignment) wasn't captured by the general amount extractor. Verify against the county document if precision matters."
+                        : 'Principal of the underlying mortgage pledged/released in this filing'
+                    }
+                  >
+                    {f.loan_amount_source === 'quote' ? (
+                      <span className="border-b border-dotted border-muted-foreground/50 cursor-help">{fmtMoney(f.loan_amount)}</span>
+                    ) : fmtMoney(f.loan_amount)}
                   </td>
                   <td className="py-1.5 text-center whitespace-nowrap">
                     {f.facility_evidence_quote && (

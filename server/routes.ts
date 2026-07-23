@@ -689,6 +689,23 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     res.json(payload);
   });
 
+  // Fallback for documents where the general extraction pipeline never
+  // captured a structured loan_amount — seen on loan-interest assignments
+  // (doc_type "ASSIGNMENT - ASG"), a document shape distinct from a typical
+  // mortgage assignment that the general prompt wasn't built to parse
+  // amounts from. The facility-specific extraction still reads the document
+  // and often quotes a dollar figure in its evidence text (e.g. "...that
+  // certain $22,650,000.00 Loan Interest..."). Recover it from there, but
+  // only when unambiguous — if the quote contains more than one qualifying
+  // dollar figure (or none), we don't guess which one is the loan amount.
+  const DOLLAR_RE = /\$[\d,]+(?:\.\d{1,2})?/g;
+  function amountFromQuote(quote: string | null, facilityAmount: number | null): number | null {
+    if (!quote) return null;
+    const found = Array.from(quote.matchAll(DOLLAR_RE), m => Number(m[0].replace(/[$,]/g, '')));
+    const candidates = Array.from(new Set(found)).filter(n => n > 0 && n !== facilityAmount);
+    return candidates.length === 1 ? candidates[0] : null;
+  }
+
   // ─── GET /api/credit-facility-events/filings ──────────────────────────────
   // Filing history for one facility relationship. lender/borrower are the
   // UPPER()'d keys returned by /facilities (empty string = extracted as null).
@@ -722,10 +739,18 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       WHERE COALESCE(e.lender_key, UPPER(COALESCE(e.facility_lender_name, '')))     = ?
         AND COALESCE(e.borrower_key, UPPER(COALESCE(e.facility_borrower_name, ''))) = ?
       ORDER BY e.rec_date DESC
-    `).all(lender.toUpperCase(), borrower.toUpperCase());
+    `).all(lender.toUpperCase(), borrower.toUpperCase()) as any[];
 
-    setCached(cacheKey, rows);
-    res.json(rows);
+    const enriched = rows.map(r => {
+      if (r.loan_amount != null) return { ...r, loan_amount_source: 'structured' };
+      const fallback = amountFromQuote(r.facility_evidence_quote, r.facility_amount);
+      return fallback != null
+        ? { ...r, loan_amount: fallback, loan_amount_source: 'quote' }
+        : { ...r, loan_amount_source: null };
+    });
+
+    setCached(cacheKey, enriched);
+    res.json(enriched);
   });
 
   // ─── GET /api/credit-facility-events/chart ────────────────────────────────
