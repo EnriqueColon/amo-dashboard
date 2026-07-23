@@ -135,3 +135,7 @@ Also learned: `tsx server/index.ts` (this project's dev command) does **not** ho
 5. Known lingering repo-hygiene item, deliberately not touched (risk to live production DB): `miami_dade_amo.db-shm`/`-wal` are tracked in git from before `*.db-shm`/`*.db-wal` were added to `.gitignore` — untracking them (`git rm --cached`) should be done deliberately/separately, not blindly, since it interacts with `git pull` against the live production database file.
 
 ---
+
+## 2026-07-22 (later) — Sidebar nested-anchor fix
+
+Fixed the `validateDOMNesting: <a> cannot appear as a descendant of <a>` console warning that fired on every page. Cause: `Sidebar.tsx` wrapped a styled `<a>` inside wouter's `<Link>`, but wouter v3 renders its own `<a>` and forwards props. Moved `className`/`data-testid` onto `<Link>` and removed the inner anchor. Verified on local dev (port 5050): 0 nested anchors in DOM, nav routing + active-state styling intact, console clean. Committed `f89b21f`, pushed to origin/main. No other Link-wrapping-anchor patterns exist in the client.
