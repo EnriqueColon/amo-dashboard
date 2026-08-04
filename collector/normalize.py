@@ -14,6 +14,8 @@ import time
 import requests
 from collections import defaultdict
 
+import entity_names
+
 DB = os.environ.get('AMO_DB_PATH', '/opt/amo-dashboard/miami_dade_amo.db')
 
 # ── OCR sanity filter ─────────────────────────────────────────────────────────
@@ -625,38 +627,66 @@ _FAC_ROLE_PREFIX_RE = re.compile(
 _FAC_ROLE_ONLY = {'LENDER', 'BORROWER', 'ASSIGNEE', 'ASSIGNOR', 'AGENT', 'TRUSTEE', 'BANK'}
 # Exact-match aliases (keyed on the aggressive key form) for OCR misreads that
 # rules can't safely catch. Add entries as new variants show up in production.
+# Seed data only — these two OCR fixes used to live here as the single source
+# of truth. They now live in the entity_aliases table (scope='facility') and are
+# inserted once by seed_facility_aliases(); the dict is kept solely so an empty
+# database still gets them. Add new corrections from the dashboard, not here.
 _FAC_ALIASES = {
     'GIDY NATIONAL BANK OF FLORIDA': 'City National Bank of Florida',
     'BGI FINANCIAL LEC': 'BGI Financial, LLC',
 }
 
 
-def _fac_alias_key(s: str) -> str:
-    return re.sub(r'\s+', ' ', re.sub(r'[^A-Z0-9 ]', '', s.upper())).strip()
+def seed_facility_aliases(conn) -> None:
+    """Insert the legacy hardcoded aliases if they aren't in the table yet.
+
+    INSERT OR IGNORE, so a correction the user has since edited from the
+    dashboard is never overwritten by this seed.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS entity_aliases (
+            variant TEXT PRIMARY KEY, canonical TEXT NOT NULL,
+            created_at TEXT, created_by TEXT, note TEXT
+        )
+    """)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(entity_aliases)")}
+    if 'scope' not in cols:
+        conn.execute("ALTER TABLE entity_aliases ADD COLUMN scope TEXT DEFAULT 'all'")
+    for variant, canonical in _FAC_ALIASES.items():
+        conn.execute(
+            "INSERT OR IGNORE INTO entity_aliases "
+            "(variant, canonical, created_at, created_by, note, scope) "
+            "VALUES (?, ?, datetime('now'), 'migration', ?, 'facility')",
+            (variant, canonical, 'migrated from normalize._FAC_ALIASES'))
 
 
+# Both delegate to entity_names, the shared address book. Kept as named
+# functions because they are registered as SQLite user functions below and
+# referenced by name in the facility table build.
 def clean_facility_name(name):
     """Display-level cleanup of an extracted facility lender/borrower name."""
-    if name is None or not str(name).strip():
-        return None
-    s = re.sub(r'\s+', ' ', str(name)).strip()
-    s = _FAC_ROLE_PREFIX_RE.sub('', s)
-    if s.endswith(')') and s.count(')') > s.count('('):   # "Assignee (X)" → "X"
-        s = s[:-1].rstrip()
-    s = re.sub(r'(\w)\s*-\s*(\w)', r'\1 \2', s)           # "VASTER-LOANS" → "VASTER LOANS"
-    s = re.sub(r'\bIIL\b', 'III', s)                      # OCR misread of roman numeral III
-    s = re.sub(r'\s+', ' ', s).strip(' ,')
-    if not s or s.upper() in _FAC_ROLE_ONLY:
-        return None
-    return _FAC_ALIASES.get(_fac_alias_key(s), s)
+    return entity_names.display_name(name)
 
 
 def facility_name_key(name):
-    """Aggressive grouping key: cleaned name, uppercased, punctuation removed.
+    """Exact-entity grouping key — punctuation-free, legal suffixes preserved.
+
     Returns '' (not NULL) when there is no usable name, so SQL grouping and
-    exact-match lookups behave consistently."""
-    cleaned = clean_facility_name(name)
-    return _fac_alias_key(cleaned) if cleaned else ''
+    exact-match lookups behave consistently.
+    """
+    return entity_names.entity_key(name)
+
+
+def facility_brand_key(name):
+    """Brand-family key for the same name: the entity's parent brand.
+
+    Stored alongside the entity key so the dashboard can roll filings up by
+    institution WITHOUT losing the individual borrower shell or trust, which is
+    what the entity key preserves. Brand folding is deliberately reused from
+    canonicalize() rather than reimplemented — the two must not drift.
+    """
+    cleaned = entity_names.display_name(name)
+    return canonicalize(cleaned) if cleaned else ''
 
 
 def get_txn_type(assignor_canon: str, assignee_canon: str,
@@ -753,6 +783,12 @@ def build_normalized_tables():
     n_aliases = load_aliases(conn)
     if n_aliases:
         print(f"Loaded {n_aliases} user-managed entity aliases")
+
+    # Shared address book (entity_names). Seeded once from the legacy hardcoded
+    # dict, then read from entity_aliases like every other correction.
+    seed_facility_aliases(conn)
+    n_fac_aliases = entity_names.load_aliases(conn, scope='facility')
+    print(f"Loaded {n_fac_aliases} facility-scope aliases from the address book")
 
     # ── Step 0: Collect suffix signals from ALL raw filing names ───────────
     print("Extracting suffix signals from raw filings...")
@@ -1047,6 +1083,7 @@ def build_normalized_tables():
     print("Building credit_facility_events...")
     conn.create_function('clean_fac_name', 1, clean_facility_name)
     conn.create_function('fac_name_key', 1, facility_name_key)
+    conn.create_function('fac_brand_key', 1, facility_brand_key)
     conn.executescript("""
         DROP TABLE IF EXISTS credit_facility_events;
         CREATE TABLE credit_facility_events (
@@ -1068,7 +1105,13 @@ def build_normalized_tables():
             facility_evidence_quote  TEXT,
             facility_confidence      TEXT,
             lender_key               TEXT,
-            borrower_key             TEXT
+            borrower_key             TEXT,
+            -- Brand-family keys, stored ALONGSIDE the entity keys above so the
+            -- dashboard can roll up by institution without losing the
+            -- individual borrower shell or trust. Never group by these alone
+            -- on the borrower side: brand folding merges distinct SPEs.
+            lender_brand             TEXT,
+            borrower_brand           TEXT
         );
     """)
     # facility_amount <= 1000 is the standard deed recital ("for $10.00 and
@@ -1086,7 +1129,9 @@ def build_normalized_tables():
                px.facility_amount_type, px.facility_evidence_quote,
                px.facility_confidence,
                fac_name_key(px.facility_lender_name),
-               fac_name_key(px.facility_borrower_name)
+               fac_name_key(px.facility_borrower_name),
+               fac_brand_key(px.facility_lender_name),
+               fac_brand_key(px.facility_borrower_name)
         FROM pdf_extractions px
         JOIN assignments a ON a.cfn = px.cfn
         WHERE px.status = 'OK'

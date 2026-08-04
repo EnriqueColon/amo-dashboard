@@ -54,11 +54,25 @@ v1 carries exactly one source of variation: facility-side regrouping.
 | `d5f6d16` | canonicalize() baseline harness | none — new files only | `git revert` |
 | `c5bfe89` | name-system disagreement harness | none — new files only | `git revert` |
 | `6b3f57e` | this rollback ledger | none — new file only | `git revert` |
-| _pending_ | `collector/entity_names.py` shared address book | none — additive, nothing imports it yet | `git revert` |
+| `7aa26a1` | `collector/entity_names.py` shared address book | none — additive, nothing imported it | `git revert` |
+| _this_ | wire normalize.py to the address book; add brand-key columns | **first change that touches the pipeline** — needs a rebuild to undo | see below |
 
-Nothing is wired in yet. Until `normalize.py` imports `entity_names`, reverting
-is a pure code operation with no rebuild step — the derived tables cannot have
-been affected because no pipeline code path reads the new module.
+### Reverting the wiring commit
+
+Code revert alone leaves `credit_facility_events` holding the new columns and
+keys. Full undo:
+
+    git revert <sha> && npm run build && pm2 restart amo-dashboard
+    # then rebuild derived tables (see Production procedure below)
+
+The seeded `entity_aliases` rows survive a revert. That is intentional and
+harmless: nothing reads facility-scoped aliases once the wiring is gone. Remove
+them only if you want a truly pristine state:
+
+    DELETE FROM entity_aliases WHERE created_by = 'migration';
+
+Note it uses `INSERT OR IGNORE`, so re-running never overwrites a correction you
+have since edited from the dashboard.
 
 ## Rollback procedures
 

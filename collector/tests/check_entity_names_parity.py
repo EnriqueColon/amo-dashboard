@@ -29,10 +29,52 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 COLLECTOR = os.path.dirname(HERE)
 sys.path.insert(0, COLLECTOR)
 
+import re               # noqa: E402
 import normalize        # noqa: E402
 import entity_names     # noqa: E402
 
 SHOW = 15
+
+# ── Frozen reference implementation ───────────────────────────────────────────
+# Verbatim copy of normalize.clean_facility_name / facility_name_key as they
+# stood at tag pre-entity-normalization, BEFORE they were repointed at
+# entity_names.  Frozen here on purpose: once normalize.py delegates to the
+# shared module, comparing against its live functions would compare the module
+# to itself and pass trivially.  Do not "simplify" this by importing normalize —
+# that silently voids the guarantee.
+
+_LEGACY_ROLE_PREFIX_RE = re.compile(
+    r'^\s*(?:ASSIGNEE|ASSIGNOR|LENDER|BORROWER)\s*[:\(]\s*', re.IGNORECASE)
+_LEGACY_ROLE_ONLY = {'LENDER', 'BORROWER', 'ASSIGNEE', 'ASSIGNOR', 'AGENT',
+                     'TRUSTEE', 'BANK'}
+LEGACY_FAC_ALIASES = {
+    'GIDY NATIONAL BANK OF FLORIDA': 'City National Bank of Florida',
+    'BGI FINANCIAL LEC': 'BGI Financial, LLC',
+}
+
+
+def _legacy_alias_key(s: str) -> str:
+    return re.sub(r'\s+', ' ', re.sub(r'[^A-Z0-9 ]', '', s.upper())).strip()
+
+
+def legacy_clean_facility_name(name, aliases=None):
+    if name is None or not str(name).strip():
+        return None
+    s = re.sub(r'\s+', ' ', str(name)).strip()
+    s = _LEGACY_ROLE_PREFIX_RE.sub('', s)
+    if s.endswith(')') and s.count(')') > s.count('('):
+        s = s[:-1].rstrip()
+    s = re.sub(r'(\w)\s*-\s*(\w)', r'\1 \2', s)
+    s = re.sub(r'\bIIL\b', 'III', s)
+    s = re.sub(r'\s+', ' ', s).strip(' ,')
+    if not s or s.upper() in _LEGACY_ROLE_ONLY:
+        return None
+    return (aliases or {}).get(_legacy_alias_key(s), s)
+
+
+def legacy_facility_name_key(name, aliases=None):
+    cleaned = legacy_clean_facility_name(name, aliases)
+    return _legacy_alias_key(cleaned) if cleaned else ''
 
 
 def collect_names(db_path: str) -> list[str]:
@@ -81,26 +123,26 @@ def main():
     names = collect_names(db_path)
     print(f"Comparing old facility logic vs entity_names.py over {len(names):,} names\n")
 
-    original_aliases = dict(normalize._FAC_ALIASES)
+    original_aliases = dict(LEGACY_FAC_ALIASES)
     failures = 0
 
     # ── 1. Pure rules — no aliases on either side ─────────────────────────
     print("1. Pure rules (no aliases loaded)")
-    normalize._FAC_ALIASES = {}
     entity_names.clear_aliases()
-    failures += compare(names, 'entity_key   vs facility_name_key',
-                        normalize.facility_name_key, entity_names.entity_key)
-    failures += compare(names, 'display_name vs clean_facility_name',
-                        normalize.clean_facility_name, entity_names.display_name)
+    failures += compare(names, 'entity_key   vs legacy facility_name_key',
+                        legacy_facility_name_key, entity_names.entity_key)
+    failures += compare(names, 'display_name vs legacy clean_facility_name',
+                        legacy_clean_facility_name, entity_names.display_name)
 
     # ── 2. Migration — hardcoded aliases move into the address book ───────
     print(f"\n2. Migration ({len(original_aliases)} hardcoded aliases -> address book)")
-    normalize._FAC_ALIASES = original_aliases
     entity_names.set_aliases(original_aliases)
-    failures += compare(names, 'entity_key   vs facility_name_key',
-                        normalize.facility_name_key, entity_names.entity_key)
-    failures += compare(names, 'display_name vs clean_facility_name',
-                        normalize.clean_facility_name, entity_names.display_name)
+    failures += compare(names, 'entity_key   vs legacy facility_name_key',
+                        lambda n: legacy_facility_name_key(n, original_aliases),
+                        entity_names.entity_key)
+    failures += compare(names, 'display_name vs legacy clean_facility_name',
+                        lambda n: legacy_clean_facility_name(n, original_aliases),
+                        entity_names.display_name)
 
     # The aliases only prove anything if the names they target actually appear.
     hit = [v for v in original_aliases
