@@ -53,6 +53,12 @@ v1 carries exactly one source of variation: facility-side regrouping.
 |---|---|---|---|
 | `d5f6d16` | canonicalize() baseline harness | none — new files only | `git revert` |
 | `c5bfe89` | name-system disagreement harness | none — new files only | `git revert` |
+| `6b3f57e` | this rollback ledger | none — new file only | `git revert` |
+| _pending_ | `collector/entity_names.py` shared address book | none — additive, nothing imports it yet | `git revert` |
+
+Nothing is wired in yet. Until `normalize.py` imports `entity_names`, reverting
+is a pure code operation with no rebuild step — the derived tables cannot have
+been affected because no pipeline code path reads the new module.
 
 ## Rollback procedures
 
