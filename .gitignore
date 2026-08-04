@@ -17,3 +17,6 @@ data/
 collector/.venv/
 collector/research/
 collector/batch/
+
+# Generated diagnostic reports (regenerable, DB-specific)
+collector/tests/name_system_disagreements.tsv
