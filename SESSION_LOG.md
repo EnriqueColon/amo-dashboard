@@ -4,6 +4,46 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-08-04 — Entity-normalization refactor started (v1 built, NOT deployed; blocked on prod snapshot)
+
+Goal chosen by user: **one shared address book every part of the app reads.** See [ROLLBACK.md](ROLLBACK.md) — it is the live tracking doc for this work (ledger + revert procedures); read it before touching any of this.
+
+### What the code actually looked like (measured, not assumed)
+- **Two normalization systems, deliberately separate** (`normalize.py:619` says so): `canonicalize()` = brand folding (strips LLC/INC/NA); `clean_facility_name()`/`facility_name_key()` = display-safe, suffixes preserved. No shared aliases, no shared rules.
+- **They disagree on 6,267 clusters** across 31,113 distinct raw names (entity path → 23,699 groups, facility path → 31,094).
+- **Entity path is very aggressive:** all **180 Towd Point securitization trusts** fold into one `TOWD POINT`, via a MANUAL_OVERRIDES *prefix* match (`normalize.py:251`) — overrides return before suffix stripping. This is existing live behavior, not new. Confirms brand folding must NEVER be applied to facility borrower names (SPEs differ only by suffix/number).
+- **Facility path is better at punctuation, and the entity path has a real defect because of it:** `canonicalize()` never normalizes ampersands, so **A&D Mortgage (real active Miami-Dade lender) is counted as three separate entities** — `A & D MORTGAGE` / `A&D MORTGAGE` / `A D MORTGAGE`. Same defect: James B. Nutter & Company, Village Capital & Investment, Fidelity & Guaranty Life Mortgage Trust 2018-1, Inter & Co Payments. 14 clusters total; 4 are marginal OCR truncations (`EVOLVE &`, `GROVE &`, `UNIVERSAL &`, and `AD`↔`A&D` — a 2-char key, needs a real decision, not a wave-through).
+
+### Decisions
+1. **v1 is strictly non-breaking: the canonicalize baseline must stay GREEN.** The A&D punctuation fix is correct but deferred to its own reviewed change, so v1 carries exactly one source of variation (facility-side regrouping) and post-deploy attribution stays unambiguous.
+2. **User wants corporate architecture AND property-shell detail preserved** — so `credit_facility_events` now stores brand keys *alongside* entity keys rather than choosing one. Verified divergence: `BGI FINANCIAL, LLC` → entity `BGI FINANCIAL LLC`, brand `BGI FINANCIAL`.
+3. Migrated facility aliases are **scope='facility'** so v1 provably cannot move brand-level output. Promoting them to `'all'` rides with the A&D change.
+
+### Built (all pushed; tag `pre-entity-normalization` = `c5bfe89` is the known-good anchor)
+- `d5f6d16` `collector/tests/{gen,check}_canonicalize_baseline.py` + `canonicalize_baseline.tsv` — 31,113 inputs → 23,700 canonical names. **Needs no DB**, runs in seconds. Verified in both directions (a simulated over-merge is caught with a −48 distinct-name delta).
+- `c5bfe89` `collector/tests/diff_name_systems.py` — the disagreement measurement above. Report output is gitignored (regenerable, DB-specific).
+- `6b3f57e` `ROLLBACK.md`.
+- `7aa26a1` **`collector/entity_names.py`** — the shared address book. Standalone (imports nothing from normalize.py). `entity_key()` keeps suffixes; brand folding stays in `canonicalize()` and is NOT reimplemented. Aliases move from code to `entity_aliases` with a new `scope` column.
+- `39e1225` wiring: `clean_facility_name`/`facility_name_key` now delegate to `entity_names`; `seed_facility_aliases()` migrates the 2 hardcoded OCR fixes with `INSERT OR IGNORE` (never clobbers user edits); `credit_facility_events` gains `lender_brand`/`borrower_brand`; `server/db.ts` CREATE + defensive ALTERs updated.
+
+### Guardrails (run both before committing anything that touches naming)
+    collector/.venv/bin/python3 collector/tests/check_canonicalize_baseline.py
+    AMO_DB_PATH=./miami_dade_amo.db collector/.venv/bin/python3 collector/tests/check_entity_names_parity.py
+- **The parity test compares against a FROZEN copy of the pre-refactor logic**, inlined in the test file. Do NOT "simplify" it to import `normalize`'s live functions — now that they delegate, that would compare the module to itself and pass trivially.
+- Current status: all green. Full `normalize.py` run against a DB copy exits clean and populates both key levels.
+
+### Rollback safety (verified, not assumed)
+`normalize.py` writes ONLY to `aom_events_clean`, `credit_facility_events`, `entity_classifications`, `entity_nodes`, `entity_relationships`, `fdic_institution_cache` — **never** `assignments` or `pdf_extractions`. Every affected table is rebuildable from raw source, so **no rollback scenario loses data**; the cost of a bad deploy is a rebuild. Full detail is also retained per-row: `aom_events_clean` keeps raw `assignor`/`assignee` next to `assignor_canon`/`assignee_canon`. Nothing about this refactor destroys shell/trust granularity.
+
+### Open / next session
+1. **BLOCKED: production snapshot.** Local DB has only **11** `credit_facility_events` rows (prod had 86+ pre-backfill) and **46** `pdf_extractions`, so the facility side is untestable locally and the 2 migrated aliases match nothing here — those DB-backed parity checks currently pass *vacuously* (the script says so in its own output; synthetic tests cover the mechanism). Droplet is **password-auth** — user's `id_ed25519` is not installed (`Permission denied (publickey)`), though the host is in `known_hosts`. Plan: `ssh-copy-id root@165.22.35.75`, then `scp root@165.22.35.75:/opt/amo-dashboard/miami_dade_amo.db ./prod_snapshot.db`. User has the root password in their notes.
+2. Then: point both harnesses at the snapshot, produce the merge/split review list, and only then wire the server + client. **Three things must move in lockstep or they break silently:** the hand-written JS twin `nameKey()` at `client/src/pages/CreditFacilities.tsx:82` (drives Pledge/Release labels and 3rd-party chips — already mislabeled once, `f8f19d6`), the four `COALESCE(lender_key, UPPER(name))` sites in `server/routes.ts` (654/739/788/813), and `/filings?lender=&borrower=` URL params (changing key format breaks bookmarks).
+3. `assignor_parent`/`assignee_parent` exist on `aom_events_clean` but are populated on **9 of 48,820 rows** — a scaffolded, never-built corporate-hierarchy feature. Natural next feature now that both key levels exist; deliberately NOT bundled into this plumbing change.
+4. **SECURITY, user to action 2026-08-05:** a GitHub PAT (`ghp_…`) sits in plaintext in the `origin` remote URL in `.git/config`, on this Mac and almost certainly on the droplet. Verified it was **never committed** (`git log --all -S` clean) and is not in shell history — but classic PATs are account-wide and GitHub secret scanning never saw it, so nothing auto-revokes it. **Repo is PUBLIC.** Plan: revoke → check security log → SSH remote here → read-only deploy key on droplet.
+5. Housekeeping: `run_weekly.sh` exec bit had drifted again (restored, undoing a re-break of `0deb97f`). `miami_dade_amo.db-shm`/`-wal` show as deleted locally (sqlite checkpointed them on read) — **deliberately not committed**, since they are tracked from before the gitignore rule and interact with `git pull` against the live prod DB.
+
+---
+
 ## 2026-07-22 — UX round built while backfill runs (commit `31fd48c` — NOT yet deployed)
 
 All 7 proposed enhancements from 2026-07-20 implemented in `CreditFacilities.tsx` + small `routes.ts` changes, verified in-browser locally (login: dev default password, form_input not synthetic keypress — CDP Enter doesn't trigger implicit form submit; requestSubmit() confirmed the handler):
