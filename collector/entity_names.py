@@ -155,3 +155,47 @@ def entity_key(raw) -> str:
     """
     name = display_name(raw)
     return squash(name) if name else ''
+
+
+# ── Parent families (belongs_to) ──────────────────────────────────────────────
+# Deliberately a SEPARATE table from entity_aliases, because the two answer
+# different questions and must never be confused:
+#
+#   entity_aliases   same_as     "this is a misspelling of that"  -> merges rows
+#   entity_parents   belongs_to  "this is a subsidiary of that"   -> groups rows
+#
+# Storing a parent as an alias would collapse sub-entities into one another and
+# destroy exactly the shell-level detail the parent view exists to show.
+
+_PARENTS: dict[str, str] = {}
+
+
+def load_parents(conn) -> int:
+    """Load confirmed entity -> parent assignments. Returns the count."""
+    global _PARENTS
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS entity_parents (
+            entity_key TEXT PRIMARY KEY,
+            parent     TEXT NOT NULL,
+            created_at TEXT,
+            created_by TEXT,
+            note       TEXT
+        )
+    """)
+    _PARENTS = {squash(k): v for k, v in
+                conn.execute("SELECT entity_key, parent FROM entity_parents")}
+    return len(_PARENTS)
+
+
+def set_parents(mapping: dict) -> None:
+    """Set assignments directly, without a database. For tests and one-offs."""
+    global _PARENTS
+    _PARENTS = {squash(k): v for k, v in mapping.items()}
+
+
+def parent_of(raw) -> str | None:
+    """Confirmed parent for a name, or None. Never guesses — an unassigned
+    entity returns None so it surfaces as a proposal rather than being
+    silently folded into a family."""
+    key = entity_key(raw)
+    return _PARENTS.get(key) if key else None

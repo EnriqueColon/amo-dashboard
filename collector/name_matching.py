@@ -266,3 +266,106 @@ def propose(records: list[dict]) -> dict:
     return {'auto': auto, 'review': review, 'ambiguous': ambiguous,
             'siblings': siblings,
             'stems_grouped': grouped_stems}
+
+
+# ── Parent families ───────────────────────────────────────────────────────────
+# A parent groups sub-entities WITHOUT merging them. VASTER LOANS III and VASTER
+# SUB II stay separate rows with separate facilities; the parent is a folder
+# above them, not a combination of them.
+#
+# This can never be fully automatic. "Shared leading word" groups Vaster
+# correctly and would also group BANK OF AMERICA with BANK OF THE OZARKS. So it
+# proposes, a human confirms, and confirmations persist. New entities matching a
+# confirmed family are proposed again rather than absorbed silently — otherwise
+# an unrelated company could join a family months later with nobody seeing it.
+
+# Leading words that describe a place or a line of business rather than a
+# corporate family. Observed in production: NORTH, METRO, SHORE, SAFE all
+# produced spurious families.
+GENERIC_LEAD = {
+    'NORTH', 'SOUTH', 'EAST', 'WEST', 'MIAMI', 'BEACH', 'METRO', 'SHORE',
+    'SAFE', 'BANK', 'CAPITAL', 'FIRST', 'NEW', 'THE', 'GRAND', 'ROYAL',
+    'AMERICAN', 'ATLANTIC', 'PACIFIC', 'CENTRAL', 'UNITED', 'GLOBAL',
+    'PREMIER', 'PRIME', 'STAR', 'SUN', 'PALM', 'BAY', 'OCEAN', 'CITY',
+}
+PARENT_MIN_LEAD_LEN = 4      # shorter leads (BI, GJ, FC) are too weak alone
+PARENT_MIN_ENTITIES = 2
+
+
+def propose_parents(records: list[dict], confirmed: dict | None = None) -> list[dict]:
+    """Propose corporate families. records need name, filings, and lender.
+
+    Returns proposals only — nothing is assigned. `confirmed` maps an already
+    approved entity stem to its parent, so settled entities are not re-proposed.
+    """
+    confirmed = confirmed or {}
+    families = defaultdict(list)
+    for r in records:
+        stem, suffix = split_suffix(tokens(r['name']))
+        if not stem:
+            continue
+        lead = stem.split()[0]
+        families[lead].append({**r, 'stem': stem, 'suffix': suffix})
+
+    proposals = []
+    for lead, members in families.items():
+        distinct = {m['stem'] for m in members}
+        if len(distinct) < PARENT_MIN_ENTITIES:
+            continue
+        pending = [m for m in members if m['stem'] not in confirmed]
+        if not pending:
+            continue
+
+        lenders = {m.get('lender') for m in members if m.get('lender')}
+        # A corporate family almost always carries legal suffixes; a cluster of
+        # bare personal names sharing a first name (JOSE) is not a family.
+        corporate = sum(1 for m in members if m['suffix']) / len(members)
+
+        if lead in GENERIC_LEAD or len(lead) < PARENT_MIN_LEAD_LEN:
+            confidence = 'low'
+        elif len(lenders) == 1 and corporate >= 0.8:
+            confidence = 'high'      # same lender, all incorporated
+        elif corporate >= 0.8:
+            confidence = 'medium'
+        else:
+            confidence = 'low'
+
+        proposals.append({
+            'parent': lead.title(),
+            'lead': lead,
+            'entities': sorted(distinct),
+            'members': members,
+            'filings': sum(m['filings'] for m in members),
+            'lenders': sorted(lenders),
+            'shared_lender': len(lenders) == 1,
+            'corporate_ratio': round(corporate, 2),
+            'confidence': confidence,
+        })
+    order = {'high': 0, 'medium': 1, 'low': 2}
+    proposals.sort(key=lambda p: (order[p['confidence']], -p['filings']))
+    return proposals
+
+
+def apply_auto(records: list[dict], result: dict) -> list[dict]:
+    """Collapse the AUTO groups into single records.
+
+    Parent proposals must run on POST-merge entities. Otherwise OCR variants
+    inflate a family — TG CAPITAL LENDING and TG CAPITAL LENDINGY are one
+    company, and counting them as two members makes the family look broader
+    than it is.
+    """
+    merged, absorbed = [], set()
+    for grp in result['auto']:
+        keep = max(grp, key=lambda m: (health(m['stem'], m['raw_suffix']), m['filings']))
+        merged.append({
+            'name': keep['name'],
+            'amounts': {a for m in grp for a in m['amounts']},
+            'filings': sum(m['filings'] for m in grp),
+            'lender': keep.get('lender'),
+        })
+        absorbed.update(m['name'] for m in grp)
+    # Match on name, not identity: propose() works on copies of the input
+    # records, so an identity check silently absorbs nothing and every row
+    # gets counted twice.
+    merged.extend(r for r in records if r['name'] not in absorbed)
+    return merged

@@ -45,7 +45,8 @@ def from_db(db_path):
     rows = conn.execute("""
         SELECT facility_borrower_name,
                GROUP_CONCAT(DISTINCT facility_amount) AS amounts,
-               COUNT(*) AS filings
+               COUNT(*) AS filings,
+               MIN(facility_lender_name) AS lender
           FROM credit_facility_events
          WHERE facility_borrower_name IS NOT NULL
       GROUP BY facility_borrower_name
@@ -53,7 +54,7 @@ def from_db(db_path):
     conn.close()
     return [{'name': r[0],
              'amounts': {a for a in (r[1] or '').split(',') if a},
-             'filings': r[2], 'period': ''} for r in rows]
+             'filings': r[2], 'lender': r[3], 'period': ''} for r in rows]
 
 
 def main():
@@ -113,6 +114,22 @@ def main():
         print("=" * 72)
         for s in sibs:
             print(f"  {s['name']!r}  is a sibling of  {s['sibling_of']}")
+
+    # Merges first: a family should count companies, not misspellings.
+    parents = nm.propose_parents(nm.apply_auto(records, result))
+    if parents:
+        print("\n" + "=" * 72)
+        print(f"PARENT FAMILIES — proposed, none assigned ({len(parents)})")
+        print("=" * 72)
+        for fam in parents:
+            note = ('same lender' if fam['shared_lender']
+                    else f"{len(fam['lenders'])} lenders")
+            print(f"\n  [{fam['confidence'].upper():6}] {fam['parent']}  "
+                  f"({len(fam['entities'])} entities, {fam['filings']} filings, {note})")
+            for e in fam['entities'][:6]:
+                print(f"            {e}")
+            if len(fam['entities']) > 6:
+                print(f"            ... and {len(fam['entities']) - 6} more")
 
     print(f"\nNothing was changed. {absorbed} automatic, {len(review)} awaiting review.")
 
