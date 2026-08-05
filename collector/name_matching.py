@@ -386,3 +386,90 @@ def apply_auto(records: list[dict], result: dict) -> list[dict]:
     # gets counted twice.
     merged.extend(r for r in records if r['name'] not in absorbed)
     return merged
+
+
+# ── County-recorded names are the authority ───────────────────────────────────
+# facility_borrower_name is LLM-extracted from OCR'd document body text — two
+# lossy steps. grantor/grantee come from the county's own typed index. Verified
+# on CFN 2025R173932: the extractor produced "VASTER SUBIII, LLG" while the
+# county index recorded "VASTER SUB III LLC" — a real third entity, not a
+# misreading of SUB II. Matching on the extracted name merged five distinct
+# Vaster entities incorrectly; matching on the recorded name does not.
+#
+# The extracted name is still useful as a HINT: a filing records two parties and
+# only one is the borrower, so we use the extraction to choose between them.
+
+RECORD_MATCH_MIN = 0.55   # below this the extraction matches neither party
+
+
+def similarity(a: str, b: str) -> float:
+    """0..1 similarity of two names, punctuation- and case-insensitive."""
+    a, b = entity_names.squash(a or ''), entity_names.squash(b or '')
+    if not a or not b:
+        return 0.0
+    if a == b:
+        return 1.0
+    longest = max(len(a), len(b))
+    d = edit_distance(a, b, longest)
+    return max(0.0, 1.0 - d / longest)
+
+
+def resolve_recorded_name(extracted, grantor, grantee, lender) -> tuple[str, str]:
+    """Return (name, source) — the county-recorded borrower where we can find it.
+
+    source is 'recorded' when a recorded party matched the extraction well
+    enough to be trusted, else 'extracted' with the original name returned
+    unchanged. Never invents a name.
+    """
+    if not extracted:
+        return extracted, 'extracted'
+
+    candidates = []
+    for party in (grantor, grantee):
+        if not party:
+            continue
+        # A party that IS the lender cannot be the borrower.
+        if lender and similarity(party, lender) > 0.85:
+            continue
+        candidates.append((similarity(party, extracted), party))
+
+    if not candidates:
+        return extracted, 'extracted'
+    score, best = max(candidates, key=lambda c: c[0])
+    if score < RECORD_MATCH_MIN:
+        # Recorded parties are third parties (an affiliate co-borrower or a
+        # prior holder), not this filing's borrower. Keep the extraction.
+        return extracted, 'extracted'
+    return best, 'recorded'
+
+
+def load_facility_records(conn) -> list[dict]:
+    """Borrower records for matching, keyed on COUNTY-RECORDED names.
+
+    Resolves each filing individually before aggregating — the recorded name
+    varies per filing, so grouping first would pick one arbitrarily and discard
+    the evidence that distinguishes SUB II from SUB III.
+    """
+    rows = conn.execute("""
+        SELECT facility_borrower_name, grantor, grantee, facility_lender_name,
+               facility_amount
+          FROM credit_facility_events
+         WHERE facility_borrower_name IS NOT NULL
+    """).fetchall()
+
+    agg: dict = {}
+    for extracted, grantor, grantee, lender, amount in rows:
+        name, source = resolve_recorded_name(extracted, grantor, grantee, lender)
+        rec = agg.setdefault(name, {'name': name, 'amounts': set(), 'filings': 0,
+                                    'lender': lender, 'from_recorded': 0,
+                                    'extracted_as': set()})
+        rec['filings'] += 1
+        if amount is not None:
+            rec['amounts'].add(str(amount))
+        if source == 'recorded':
+            rec['from_recorded'] += 1
+        if extracted != name:
+            rec['extracted_as'].add(extracted)
+        if not rec['lender']:
+            rec['lender'] = lender
+    return list(agg.values())

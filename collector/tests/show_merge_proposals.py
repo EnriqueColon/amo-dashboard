@@ -38,23 +38,11 @@ def from_fixture(path=FIXTURE):
 
 
 def from_db(db_path):
+    """Load from the DB using county-recorded names (see name_matching)."""
     conn = sqlite3.connect(db_path)
-    # Collect EVERY distinct amount per name. Selecting a bare
-    # facility_amount alongside GROUP BY would let SQLite pick an arbitrary
-    # row's value, making the amount evidence silently meaningless.
-    rows = conn.execute("""
-        SELECT facility_borrower_name,
-               GROUP_CONCAT(DISTINCT facility_amount) AS amounts,
-               COUNT(*) AS filings,
-               MIN(facility_lender_name) AS lender
-          FROM credit_facility_events
-         WHERE facility_borrower_name IS NOT NULL
-      GROUP BY facility_borrower_name
-    """).fetchall()
+    records = nm.load_facility_records(conn)
     conn.close()
-    return [{'name': r[0],
-             'amounts': {a for a in (r[1] or '').split(',') if a},
-             'filings': r[2], 'lender': r[3], 'period': ''} for r in rows]
+    return records
 
 
 def main():

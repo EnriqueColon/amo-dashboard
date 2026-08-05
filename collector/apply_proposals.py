@@ -31,17 +31,8 @@ import name_matching as nm     # noqa: E402
 
 
 def load_records(conn):
-    rows = conn.execute("""
-        SELECT facility_borrower_name,
-               GROUP_CONCAT(DISTINCT facility_amount) AS amounts,
-               COUNT(*) AS filings,
-               MIN(facility_lender_name) AS lender
-          FROM credit_facility_events
-         WHERE facility_borrower_name IS NOT NULL
-      GROUP BY facility_borrower_name
-    """).fetchall()
-    return [{'name': r[0], 'amounts': {a for a in (r[1] or '').split(',') if a},
-             'filings': r[2], 'lender': r[3]} for r in rows]
+    """County-recorded names are the matching authority — see name_matching."""
+    return nm.load_facility_records(conn)
 
 
 def ensure_tables(conn):
