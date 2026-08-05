@@ -4,6 +4,52 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-08-05 — Matching reworked onto county-recorded names; parent layer wired. NOT deployed.
+
+Production snapshot obtained. Continues 2026-08-04 below; [ROLLBACK.md](ROLLBACK.md) is still the live tracking doc.
+
+### THE finding — we were matching on the wrong column
+`facility_borrower_name` is LLM-extracted from OCR'd document **body text** (two lossy steps). `grantor`/`grantee` come from the county's own **typed index**. The clean name was one column over the whole time.
+- **Proof, CFN `2025R173932`:** extractor produced `VASTER SUBIII, LLG`; county index recorded **`VASTER SUB III LLC`** — a real third entity, not a misread of SUB II.
+- Cross-checking merges already applied to a test DB: **5 of 12 Vaster merges were WRONG**, all collapsing SUB III filings into SUB II. `VASTER SUB III` has **7 filings** and would have been erased.
+- **`VASTER LOANS II` does not exist.** Every filing extracted as "II" records as "III" — the sibling-protection rule was guarding a phantom entity.
+- Fix: `name_matching.resolve_recorded_name()` picks the recorded party that is not the lender and best matches the extraction (extraction used only as a HINT to choose between the two recorded parties). Below `RECORD_MATCH_MIN` both parties are third parties (affiliate co-borrower / prior holder) → keep the extracted name, never invent one. Resolution is **per filing, before aggregation** — grouping first picks one recorded name arbitrarily and destroys the SUB II/SUB III evidence.
+- **Effect: auto-merges 15 → 7, review queue 14 → 8.** The entire Vaster OCR mess (`SUB IL`/`HU`/`dI`/`SUBMIT`/`SUBLII`) evaporated — it only ever existed in the extracted column. Vaster resolves to **4 real companies**: SUB II (27f), LOANS III (32f), SUB III (7f), MANAGEMENT (6f). Previously-invisible entities surfaced: EOS Loans, Atlantis, Mathon, HPL. Residual candidates are genuine typos in the county index itself (`PRECEDENT ASSET MANAGMENT`, `ATLANTIC` vs `ATLANTIS HOLDINGS`, `VASTER SUB II LL`).
+
+### Second real bug — alias scope leak (found by rebuilding, not by assuming)
+`normalize.load_aliases()` selected **every** `entity_aliases` row ignoring `scope`, so all 12 facility-scoped merges were being applied by `canonicalize()` — silently voiding the "v1 changes nothing on the entity side" guarantee the scope column exists to provide. Now filters `COALESCE(scope,'all') = 'all'`.
+**The canonicalize baseline cannot catch this** — it forces `_ALIAS_MAP` empty, so it tests the rules, not the loader. New `collector/tests/check_alias_scope.py` covers the gap. Gotcha for future edits: **aliases are looked up AFTER suffix stripping**, so an `'all'`-scoped variant must be written in its post-stripping form (`GLOBAL PROBE`, not `GLOBAL PROBE CO`).
+
+### Built (all pushed)
+- `40cf7df` `collector/name_matching.py` — two-tier merge proposals (AUTO / REVIEW), never mutates. AUTO rules: punctuation→space; OCR'd LLC (LEC/LUC/LLG) corrected **only when the corrected name already exists** ("confirmed landing"); absent suffix matches any, conflicting suffixes never match. Fixture of 46 real City National rows at `collector/tests/fixtures/`.
+- `acb80fe` amounts are a SET (one entity files at several amounts); `are_siblings()` — names differing only by a valid trailing numeral ≤20 are never merged. **`facility_amount` is the parent facility's credit limit quoted on every filing, so sub-entities SHARE it** — amount agreement proves "same facility", not "same entity".
+- `2393ad9` parent layer. **Separate `entity_parents` table on purpose:** `entity_aliases`=`same_as` (merges rows) vs `entity_parents`=`belongs_to` (groups rows). Storing a parent as an alias would collapse sub-entities and destroy the shell detail the view exists to show. `parent_of()` never guesses.
+- `a89185d` confidence fixes: lender names normalized through the address book (raw-text compare made Vaster look like a 2-lender family when all 21 filings face City National); **multi-lender no longer lowers confidence** — Winston runs one entity per bank (`WINSTON AB`→Amerant, `BAN`→Banesco, `USC`→U.S. Century); `CORPORATION`/`INCORPORATED`/`COMPANY`/`LIMITED` added to SUFFIXES.
+- `5c2809a` `collector/apply_proposals.py` — dry-run by default, `--write` commits. CONFLICT tier and siblings are NEVER applied (they assert names are *different*). Review targets resolve to the healthiest surviving name per stem.
+- `a7f5504` the county-recorded rework. `6417d42` parent wiring + scope fix.
+
+### Guardrails (run all three before committing anything touching naming)
+    collector/.venv/bin/python3 collector/tests/check_canonicalize_baseline.py
+    collector/.venv/bin/python3 collector/tests/check_alias_scope.py
+    AMO_DB_PATH=./prod_snapshot.db collector/.venv/bin/python3 collector/tests/check_entity_names_parity.py
+All green. Review the proposal list any time with `collector/tests/show_merge_proposals.py [--db]`.
+
+### Operational facts learned
+- **Production snapshot: `./prod_snapshot.db`** (gitignored, 91MB). Droplet key auth now works (`ssh-copy-id` route was blocked — no root password; installed the pubkey via the DigitalOcean **web console** instead, no reboot needed). Key is passphrase-protected → needs `ssh-add --apple-use-keychain` in the agent or non-interactive ssh/scp fails.
+- **NEVER plain-`scp` the live DB:** it had a 53MB `-wal` newer than the 95MB main file; copying only the `.db` silently loses it. Use `sqlite3 <db> ".backup /tmp/snap.db"` on the droplet, then copy that.
+- Production scale: `credit_facility_events` **445 rows / 241 borrower names**, `pdf_extractions` **70,355**, `assignments` **70,355** (through 2026-07-30), `entity_aliases` **0**. Full-history backfill is complete.
+- **A full `normalize.py` run takes ~15 minutes** at production scale (4 vCPU droplet is comparable). Facility build is inline in `build_normalized_tables()` — no fast path for facility-only rebuilds.
+
+### Open / next session
+1. **DECISION PENDING — Vaster scored MEDIUM so it was not assigned a parent** (only HIGH families were applied). Cause: the ≥0.8 corporate-suffix threshold; 2 of its 6 members are junk (`VASTER SUB II LL` truncation, `Vaster II and Vaster I` sentence fragment) → 67%. Claude's recommendation: **exclude junk entries from the scoring denominator** rather than lowering the bar or applying MEDIUM wholesale.
+2. Re-run proposals for user review against the corrected (county-recorded) list, then apply.
+3. **UI work not started.** Extend the existing "Duplicate review & merge tool" (`client/src/pages/Entities.tsx:57`, `POST /api/aliases/merge`) with both actions — `same_as` and `belongs_to` — per user's "whatever is easier for the user". Nothing surfaces `borrower_parent` yet. **Three things must move in lockstep:** the JS twin `nameKey()` at `CreditFacilities.tsx:82`, the four `COALESCE(lender_key, ...)` sites in `routes.ts` (654/739/788/813), and `/filings?lender=&borrower=` URL params.
+4. `Vaster II and Vaster I` is a sentence fragment stored as a borrower — an extraction defect, separate from this work.
+5. **User decision recorded:** tool proposes → user confirms → confirmed assignments never re-ask, but NEW entities matching a confirmed family are proposed again, never silently absorbed.
+6. **STILL OUTSTANDING from 2026-08-04:** the leaked GitHub PAT in `.git/config` (repo is PUBLIC; never committed, so secret scanning never saw it). Revoke → security log → SSH remote → read-only deploy key.
+
+---
+
 ## 2026-08-04 — Entity-normalization refactor started (v1 built, NOT deployed; blocked on prod snapshot)
 
 Goal chosen by user: **one shared address book every part of the app reads.** See [ROLLBACK.md](ROLLBACK.md) — it is the live tracking doc for this work (ledger + revert procedures); read it before touching any of this.
