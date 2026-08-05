@@ -64,7 +64,8 @@ export function getDb(): Database.Database {
         facility_amount REAL, facility_amount_type TEXT,
         facility_evidence_quote TEXT, facility_confidence TEXT,
         lender_key TEXT, borrower_key TEXT,
-        lender_brand TEXT, borrower_brand TEXT
+        lender_brand TEXT, borrower_brand TEXT,
+        borrower_recorded TEXT, borrower_parent TEXT, lender_parent TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_assignments_grantor ON assignments(grantor);
       CREATE INDEX IF NOT EXISTS idx_assignments_grantee ON assignments(grantee);
@@ -139,7 +140,8 @@ export function getDb(): Database.Database {
 
     // Migration: facility grouping-key columns (populated by normalize.py;
     // NULL until it re-runs — the routes COALESCE onto UPPER(name) meanwhile)
-    for (const col of ['lender_key', 'borrower_key', 'lender_brand', 'borrower_brand']) {
+    for (const col of ['lender_key', 'borrower_key', 'lender_brand', 'borrower_brand',
+                       'borrower_recorded', 'borrower_parent', 'lender_parent']) {
       try { _db.exec(`ALTER TABLE credit_facility_events ADD COLUMN ${col} TEXT`); } catch (_e) {}
     }
 

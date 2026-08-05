@@ -15,6 +15,7 @@ import requests
 from collections import defaultdict
 
 import entity_names
+import name_matching
 
 DB = os.environ.get('AMO_DB_PATH', '/opt/amo-dashboard/miami_dade_amo.db')
 
@@ -725,7 +726,17 @@ def load_aliases(conn) -> int:
             note TEXT
         )
     """)
-    raw = dict(conn.execute("SELECT variant, canonical FROM entity_aliases"))
+    # Scope matters: only 'all'-scoped entries may affect canonicalize(), which
+    # drives aom_events_clean and every dashboard tab built on it. Facility-
+    # scoped merges are for the facility path alone. Selecting every row here
+    # silently applied them brand-wide and voided the non-breaking guarantee.
+    # Rows predating the scope column are NULL and count as 'all'.
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(entity_aliases)")}
+    if 'scope' not in cols:
+        conn.execute("ALTER TABLE entity_aliases ADD COLUMN scope TEXT DEFAULT 'all'")
+    raw = dict(conn.execute(
+        "SELECT variant, canonical FROM entity_aliases "
+        "WHERE COALESCE(scope, 'all') = 'all'"))
     # Resolve chains (A→B, B→C  ⇒  A→C), guarding against cycles
     resolved = {}
     for variant, canon in raw.items():
@@ -789,6 +800,8 @@ def build_normalized_tables():
     seed_facility_aliases(conn)
     n_fac_aliases = entity_names.load_aliases(conn, scope='facility')
     print(f"Loaded {n_fac_aliases} facility-scope aliases from the address book")
+    n_parents = entity_names.load_parents(conn)
+    print(f"Loaded {n_parents} confirmed parent assignments")
 
     # ── Step 0: Collect suffix signals from ALL raw filing names ───────────
     print("Extracting suffix signals from raw filings...")
@@ -1084,6 +1097,19 @@ def build_normalized_tables():
     conn.create_function('clean_fac_name', 1, clean_facility_name)
     conn.create_function('fac_name_key', 1, facility_name_key)
     conn.create_function('fac_brand_key', 1, facility_brand_key)
+    # County-recorded borrower name. grantor/grantee come from the county's
+    # typed index; facility_borrower_name is LLM-extracted from OCR'd body
+    # text. Stored ALONGSIDE the extracted name rather than replacing it, so
+    # existing queries and the UI are untouched while the accurate name becomes
+    # available. Verified on CFN 2025R173932, where the extractor produced
+    # "VASTER SUBIII, LLG" for a filing the county recorded as VASTER SUB III.
+    conn.create_function(
+        'fac_recorded', 4,
+        lambda ext, gr, ge, ln: name_matching.resolve_recorded_name(ext, gr, ge, ln)[0])
+    # Confirmed parent only — parent_of() never guesses, so an unassigned
+    # entity stays NULL and surfaces as a proposal instead of being folded
+    # into a family nobody approved.
+    conn.create_function('fac_parent', 1, entity_names.parent_of)
     conn.executescript("""
         DROP TABLE IF EXISTS credit_facility_events;
         CREATE TABLE credit_facility_events (
@@ -1111,7 +1137,14 @@ def build_normalized_tables():
             -- individual borrower shell or trust. Never group by these alone
             -- on the borrower side: brand folding merges distinct SPEs.
             lender_brand             TEXT,
-            borrower_brand           TEXT
+            borrower_brand           TEXT,
+            -- County-recorded borrower name and the confirmed corporate family.
+            -- The parent GROUPS sub-entities without merging them: VASTER SUB II
+            -- and VASTER SUB III both sit under "Vaster" and stay separate rows
+            -- with their own facilities and filing histories.
+            borrower_recorded        TEXT,
+            borrower_parent          TEXT,
+            lender_parent            TEXT
         );
     """)
     # facility_amount <= 1000 is the standard deed recital ("for $10.00 and
@@ -1131,7 +1164,12 @@ def build_normalized_tables():
                fac_name_key(px.facility_lender_name),
                fac_name_key(px.facility_borrower_name),
                fac_brand_key(px.facility_lender_name),
-               fac_brand_key(px.facility_borrower_name)
+               fac_brand_key(px.facility_borrower_name),
+               fac_recorded(px.facility_borrower_name, a.grantor, a.grantee,
+                            px.facility_lender_name),
+               fac_parent(fac_recorded(px.facility_borrower_name, a.grantor,
+                                       a.grantee, px.facility_lender_name)),
+               fac_parent(px.facility_lender_name)
         FROM pdf_extractions px
         JOIN assignments a ON a.cfn = px.cfn
         WHERE px.status = 'OK'
