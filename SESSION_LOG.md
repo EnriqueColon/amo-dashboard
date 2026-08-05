@@ -35,6 +35,32 @@ Goal chosen by user: **one shared address book every part of the app reads.** Se
 ### Rollback safety (verified, not assumed)
 `normalize.py` writes ONLY to `aom_events_clean`, `credit_facility_events`, `entity_classifications`, `entity_nodes`, `entity_relationships`, `fdic_institution_cache` — **never** `assignments` or `pdf_extractions`. Every affected table is rebuildable from raw source, so **no rollback scenario loses data**; the cost of a bad deploy is a rebuild. Full detail is also retained per-row: `aom_events_clean` keeps raw `assignor`/`assignee` next to `assignor_canon`/`assignee_canon`. Nothing about this refactor destroys shell/trust granularity.
 
+### LATE SESSION — user pasted real production data (City National, 46 rows). Rethink required.
+**v1 as built merges 0 of those 46 rows.** Tested directly. The dominant failure mode in production is **character-level OCR damage**, not punctuation/casing — so key normalization alone barely touches it.
+- **`VASTER SUB II, LLC` is split across ~12 rows**: `SUB II LUC`, `SUB IL`, `SUB HU`, `SUB dI,,.`, `SUBIII LLG`, `SUBLII`, `SUBMIT`, `SUB LI`, `SUB' H,.`, `VASTER'SUB II`, `SUB II LEC`. **Every variant carrying an amount shows $95M** — the corroborating signal.
+- **USER CLARIFICATION (important):** the Vaster entities are **sub-entities of one parent (Vaster)**, NOT variants of each other. `VASTER LOANS II` ($102.5M), `VASTER LOANS III` ($127.5M), `VASTER SUB II` ($95M), `VASTER MANAGEMENT` ($10M) are **separate legal entities with separate facilities** and must NOT be merged. Merging them would destroy exactly the property-shell detail the user asked to preserve.
+- **Therefore three levels are needed, not two:** (1) exact entity `VASTER SUB II LLC` — what OCR breaks; (2) family — `canonicalize()` yields `VASTER LOANS` / `VASTER SUB` / `VASTER MANAGEMENT`, i.e. three families, not one; (3) **parent `VASTER` — does not exist yet.** Bug found in passing: `VASTER LOANS IH, LLC` → brand `VASTER LOANS IH`, so OCR damage prevents it from even reaching the right family.
+- **Two distinct correction types that must never be conflated:** `same_as` (OCR fix — merges rows) vs `belongs_to` (parent — groups rows *without* merging, sub-entities stay individually visible).
+
+**Signals investigated (two hypotheses killed):**
+- `sponsor_address` = **2 rows**, `signatory_officer` = **7 rows** of 48,820. Scaffolded, never populated — unusable.
+- `facility_agreement_name` is **generic boilerplate**, not a facility identifier ("Warehouse Mortgage Loan and Security Agreement" repeated across unrelated filings) and is itself OCR-damaged (`Warchouse`). **Weak** signal — earlier guess that it would be the strongest was wrong.
+- What remains: name similarity + `facility_amount` + lender + date-range overlap. **Asymmetry:** matching amounts ⇒ same entity misread; differing amounts ⇒ normal for siblings under one parent. Amount is strong for the merge question, useless for the parent question.
+
+**Existing infrastructure found — extend, do not reinvent:** `client/src/pages/Entities.tsx:57` already has a "Duplicate review & merge tool", backed by `GET /api/aliases`, `POST /api/aliases/merge` (records the rule AND cascades the merge, re-pointing earlier merges whose target is now itself merged), `DELETE /api/aliases/:variant`. `alias_suggestion_dismissals` exists too.
+
+**Three safe rules proposed (measured: absorb 5 of the 46 rows — `VASTER SUB II` core, Winston, PFG Loan Funder):**
+1. Punctuation → **space, not deletion** (`VASTER'SUB II` currently keys to `VASTERSUB II`, matching nothing).
+2. Known OCR misreads of LLC (`LEC`/`LUC`/`LLG`/`LCC`/`IIC`), final position only, **and only applied when the corrected name already exists in the data** — a "confirmed landing" turns a guess into a verified match.
+3. Absent suffix matches any suffix; **conflicting suffixes never match** (`X LLC` ≠ `X INC`). Ambiguous case (bare name could match both `X LLC` and `X INC`) — undecided.
+All automatic merges to be logged as reversible entries; nothing silent.
+
+**Open design questions — user stopped here, to discuss fresh:**
+(a) Does the user define parents, or does the tool propose clusters for confirmation? (Prefix inference is unsafe in general: `BANK OF AMERICA` vs `BANK OF THE OZARKS`.)
+(b) Review surface: extend the existing Entities merge tool, or a new parent-hierarchy view?
+(c) Rule 3's ambiguous case: flag for review, or leave untouched?
+Claude's leaning: parents curated by the user with tool-proposed candidates, reviewed in an extended version of the existing merge tool.
+
 ### Open / next session
 1. **BLOCKED: production snapshot.** Local DB has only **11** `credit_facility_events` rows (prod had 86+ pre-backfill) and **46** `pdf_extractions`, so the facility side is untestable locally and the 2 migrated aliases match nothing here — those DB-backed parity checks currently pass *vacuously* (the script says so in its own output; synthetic tests cover the mechanism). Droplet is **password-auth** — user's `id_ed25519` is not installed (`Permission denied (publickey)`), though the host is in `known_hosts`. Plan: `ssh-copy-id root@165.22.35.75`, then `scp root@165.22.35.75:/opt/amo-dashboard/miami_dade_amo.db ./prod_snapshot.db`. User has the root password in their notes.
 2. Then: point both harnesses at the snapshot, produce the merge/split review list, and only then wire the server + client. **Three things must move in lockstep or they break silently:** the hand-written JS twin `nameKey()` at `client/src/pages/CreditFacilities.tsx:82` (drives Pledge/Release labels and 3rd-party chips — already mislabeled once, `f8f19d6`), the four `COALESCE(lender_key, UPPER(name))` sites in `server/routes.ts` (654/739/788/813), and `/filings?lender=&borrower=` URL params (changing key format breaks bookmarks).
