@@ -1,0 +1,51 @@
+# Real production rows from the Lending Relationships tab (City National Bank of
+# Florida, captured 2026-08-04). Public county-record data. Kept as a fixture
+# because this is the exact case the matching engine exists to handle — the
+# local dev DB has only 11 facility rows and cannot exercise it.
+# name<TAB>amount<TAB>filings<TAB>period
+TG Capital Lending; LLC	$15M	30	Jan 23 - Jan 26
+VASTER LOANS III, LLC	$127.5M	29	May 24 - Jun 26
+VASTER SUB II, LLC	$95M	24	Jan 23 - Sep 25
+BGI Financial, LLC		12	Jan 23 - May 25
+PRECEDENT ASSET MANAGEMENT 4C, LLC	$45M	6	Sep 24 - Jul 26
+VASTER MANAGEMENT, LLC	$10M	6	Aug 24 - Dec 25
+Action Loan, LLC	$15M	4	May 23 - Oct 24
+GJ1, LLC	$5M	4	Jan 25 - Jul 25
+VASTER LOANS IH, LLC	$102.5M	2	Apr 25 - Sep 25
+CRE Lendco II, LLC	$80.5M	2	Dec 23 - Mar 24
+WINSTON STRUCTURED FINANCE GROUP, LLC	$25M	2	Oct 25 - Feb 26
+SAFE HARBOR EQUITY DISTRESSED DEBT FUND 3, L.P.	$3.9M	2	Aug 24 - May 25
+TG Capital Lendingy LLC		2	May 24 - Aug 24
+VASTER LOANS II, LLC	$102.5M	1	Oct 24
+PAM	$100M	1	Jan 26
+BI 109 LLC	$100M	1	Mar 25
+BI 117 LLC	$100M	1	Aug 24
+BI 85 LLC	$100M	1	Oct 23
+VASTER SUB II, LUC	$95M	1	Jan 24
+VASTER SUB IL, LLC	$95M	1	Jan 24
+VASTER SUB HU, LLC	$95M	1	May 23
+VASTER’SUB II, LLC	$95M	1	Jan 23
+5940. NBR OWNER, LLC	$85M	1	Jul 25
+G4 18260, LLC	$31.5M	1	May 24
+WINSTON STRUCTURED FINANCE GROUP	$25M	1	Jan 25
+PFG LOAN FUNDER I LEC	$10M	1	Jul 26
+VS 73 Street Holdings LLC	$10M	1	Mar 26
+6727 Miami Beach LLC	$1.4M	1	May 25
+SHE 3	$1.0M	1	May 25
+PFG Loan Funder I, LLC		1	Apr 26
+MIAMI A/T PARCEL 3 SUBSIDIARY, LLC		1	Mar 26
+GJ, LLC		1	Jul 25
+NORTH TOWNE PHASE T, LLC		1	Jun 25
+VASTER SUB dI,,.LLC		1	Mar 25
+VASTER SUB II, LEC		1	Mar 25
+VASTER SUBIII, LLG		1	Mar 25
+VASTER SUBLII, LLC		1	Mar 25
+VASTER SUBMIT, LLC		1	Mar 25
+G11, LLC		1	Jan 25
+CMGHOFF 2, LLC		1	Jun 24
+VASTER SUB LI, LLC		1	May 24
+VASTER SUB’ H,.LLC		1	May 24
+1G Capital Lending, LLC		1	May 24
+Vaster II and Vaster I		1	Apr 24
+LV Lending I, LLC		1	Mar 24
+KABOUNA, LLC		1	Apr 23
