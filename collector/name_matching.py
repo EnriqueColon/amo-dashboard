@@ -53,6 +53,45 @@ REVIEW_MIN_STEM_LEN = 6
 _ROMAN_RE = re.compile(r'^(?=[IVXL])M*(C[MD]|D?C*)(X[CL]|L?X*)(I[XV]|V?I*)$')
 
 
+# Entity series really do run I, II, III... so two names differing ONLY in a
+# valid trailing numeral are siblings, not misreadings of each other. Bounded,
+# because "SUB LI" (51) is a scanner mangling "SUB II" rather than the
+# fifty-first entity in a series.
+MAX_PLAUSIBLE_SERIES = 20
+_ROMAN_VALUES = {'I': 1, 'V': 5, 'X': 10, 'L': 50, 'C': 100, 'D': 500, 'M': 1000}
+
+
+def numeral_value(tok: str) -> int | None:
+    """Value of a trailing series marker, or None if it is not a valid one."""
+    if tok.isdigit():
+        return int(tok)
+    if not tok or not _ROMAN_RE.match(tok):
+        return None
+    total, prev = 0, 0
+    for ch in reversed(tok):
+        v = _ROMAN_VALUES[ch]
+        total += -v if v < prev else v
+        prev = max(prev, v)
+    return total
+
+
+def are_siblings(stem_a: str, stem_b: str) -> bool:
+    """True when two stems differ only by a plausible series numeral.
+
+    This is the rule that protects sub-entities: VASTER LOANS II and VASTER
+    LOANS III are separate companies under one parent, and they legitimately
+    share a facility amount because facility_amount is the parent facility's
+    credit limit quoted on every filing. Amount agreement therefore cannot be
+    trusted to tell them apart — the numeral can.
+    """
+    a, b = stem_a.split(), stem_b.split()
+    if len(a) != len(b) or a[:-1] != b[:-1] or not a or not b:
+        return False
+    va, vb = numeral_value(a[-1]), numeral_value(b[-1])
+    return (va is not None and vb is not None and va != vb
+            and va <= MAX_PLAUSIBLE_SERIES and vb <= MAX_PLAUSIBLE_SERIES)
+
+
 def health(stem: str, suffix: str | None) -> int:
     """How likely a spelling is to be the UNDAMAGED one.
 
@@ -114,7 +153,12 @@ def _corrected_suffix(suffix: str | None, stem: str, known_stems_with_llc: set) 
 
 
 def propose(records: list[dict]) -> dict:
-    """records: [{name, amount, filings, first, last}, ...]  (amount may be None)
+    """records: [{name, amounts, filings}, ...]
+
+    `amounts` is a SET of every distinct facility amount seen for that name, not
+    a single value. Production data settled this: one entity legitimately files
+    at several amounts (4774 North Bay appears at $13.0M and $10.36M), so a
+    scalar would make "the" amount arbitrary and the evidence meaningless.
 
     Returns {'auto': [...], 'review': [...], 'groups': {name: group_id}}.
     Nothing is written; the caller decides what to do with the proposals.
@@ -162,13 +206,13 @@ def propose(records: list[dict]) -> dict:
     # the healthy spelling is almost always the one with the most filings.
     anchors = sorted(
         ({'stem': s, 'filings': sum(m['filings'] for m in ms),
-          'amounts': {m['amount'] for m in ms if m['amount']},
+          'amounts': {a for m in ms for a in m['amounts']},
           'health': max(health(s, m['raw_suffix']) for m in ms)}
          for s, ms in by_stem.items()),
         key=lambda a: (-a['health'], -a['filings']))
 
     grouped_stems = {m['stem'] for grp in auto for m in grp}
-    review = []
+    review, siblings = [], []
     for p in parsed:
         if len(p['stem']) < REVIEW_MIN_STEM_LEN:
             continue
@@ -191,12 +235,15 @@ def propose(records: list[dict]) -> dict:
             d = edit_distance(p['stem'], anchor['stem'], REVIEW_MAX_DISTANCE)
             if d > REVIEW_MAX_DISTANCE:
                 continue
-            agrees = bool(p['amount'] and p['amount'] in anchor['amounts'])
-            # Both sides quote an amount and they disagree: that is positive
-            # evidence of DIFFERENT entities, not merely missing evidence.
-            # VASTER LOANS II ($102.5M) vs III ($127.5M) are real siblings.
-            conflicts = bool(p['amount'] and anchor['amounts']
-                             and p['amount'] not in anchor['amounts'])
+            if are_siblings(p['stem'], anchor['stem']):
+                siblings.append({'name': p['name'], 'stem': p['stem'],
+                                 'sibling_of': anchor['stem']})
+                continue
+            # Any shared amount is corroboration. Full disjointness is
+            # counter-evidence — but only weak counter-evidence, since one
+            # entity really does file at several amounts.
+            agrees = bool(p['amounts'] & anchor['amounts'])
+            conflicts = bool(p['amounts'] and anchor['amounts'] and not agrees)
             candidates.append((agrees, d, anchor, conflicts))
         if candidates:
             # Amount agreement outranks closeness; closeness outranks size.
@@ -204,7 +251,7 @@ def propose(records: list[dict]) -> dict:
                 candidates, key=lambda c: (c[3], not c[0], c[1], -c[2]['filings']))
             review.append({
                 'name': p['name'], 'stem': p['stem'], 'filings': p['filings'],
-                'amount': p['amount'], 'target': anchor['stem'],
+                'amounts': sorted(p['amounts']), 'target': anchor['stem'],
                 'distance': d, 'amount_agrees': amount_agrees,
                 'amount_conflicts': conflicts,
                 # Matching amounts mean "same entity, misread". Differing
@@ -217,4 +264,5 @@ def propose(records: list[dict]) -> dict:
             })
 
     return {'auto': auto, 'review': review, 'ambiguous': ambiguous,
+            'siblings': siblings,
             'stems_grouped': grouped_stems}

@@ -31,7 +31,7 @@ def from_fixture(path=FIXTURE):
                 continue
             parts = line.rstrip('\n').split('\t')
             name, amount, filings = parts[0], parts[1], int(parts[2])
-            out.append({'name': name, 'amount': amount or None,
+            out.append({'name': name, 'amounts': {amount} if amount else set(),
                         'filings': filings,
                         'period': parts[3] if len(parts) > 3 else ''})
     return out
@@ -39,15 +39,21 @@ def from_fixture(path=FIXTURE):
 
 def from_db(db_path):
     conn = sqlite3.connect(db_path)
+    # Collect EVERY distinct amount per name. Selecting a bare
+    # facility_amount alongside GROUP BY would let SQLite pick an arbitrary
+    # row's value, making the amount evidence silently meaningless.
     rows = conn.execute("""
-        SELECT facility_borrower_name, facility_amount, COUNT(*) AS filings
+        SELECT facility_borrower_name,
+               GROUP_CONCAT(DISTINCT facility_amount) AS amounts,
+               COUNT(*) AS filings
           FROM credit_facility_events
          WHERE facility_borrower_name IS NOT NULL
       GROUP BY facility_borrower_name
     """).fetchall()
     conn.close()
-    return [{'name': r[0], 'amount': r[1], 'filings': r[2], 'period': ''}
-            for r in rows]
+    return [{'name': r[0],
+             'amounts': {a for a in (r[1] or '').split(',') if a},
+             'filings': r[2], 'period': ''} for r in rows]
 
 
 def main():
@@ -59,6 +65,7 @@ def main():
 
     result = nm.propose(records)
     auto, review, amb = result['auto'], result['review'], result['ambiguous']
+    sibs = result['siblings']
 
     absorbed = sum(len(g) - 1 for g in auto)
     print(f"Source: {src}")
@@ -75,7 +82,8 @@ def main():
         print(f"\n  -> {keep['name']}")
         for m in sorted(grp, key=lambda m: -m['filings']):
             mark = '  (keep)' if m is keep else ''
-            print(f"       {str(m['amount'] or '-'):>9}  {m['filings']:>2}f   "
+            amt = ', '.join(sorted(m['amounts'])) or '-'
+            print(f"       {amt:>24}  {m['filings']:>2}f   "
                   f"{m['name']!r}{mark}")
 
     print("\n" + "=" * 72)
@@ -87,7 +95,7 @@ def main():
               else 'AMOUNTS CONFLICT - likely different entities'
               if r['amount_conflicts'] else 'no amount to compare')
         print(f"\n  [{r['confidence'].upper():6}] {r['name']!r}  ({r['filings']}f, "
-              f"{r['amount'] or 'no amount'})")
+              f"{', '.join(r['amounts']) or 'no amount'})")
         print(f"           looks like: {r['target']}")
         print(f"           evidence:   {r['distance']} character(s) different, {eq}")
 
@@ -98,6 +106,13 @@ def main():
         for a in amb:
             print(f"  {a['member']['name']!r}: {a['reason']} "
                   f"({', '.join(a['candidates'])})")
+
+    if sibs:
+        print("\n" + "=" * 72)
+        print(f"SIBLINGS — separate entities in a series, never merged ({len(sibs)})")
+        print("=" * 72)
+        for s in sibs:
+            print(f"  {s['name']!r}  is a sibling of  {s['sibling_of']}")
 
     print(f"\nNothing was changed. {absorbed} automatic, {len(review)} awaiting review.")
 
