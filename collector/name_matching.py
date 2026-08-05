@@ -41,8 +41,14 @@ does not.  So near-misses carry their evidence to a human instead.
 import re
 from collections import defaultdict
 
+import entity_names
+
 # Legal suffixes, and the OCR corruptions of LLC we are willing to correct.
-SUFFIXES = {'LLC', 'INC', 'LP', 'LLP', 'CORP', 'LTD', 'CO', 'PA', 'PLLC', 'PC'}
+SUFFIXES = {'LLC', 'INC', 'LP', 'LLP', 'CORP', 'LTD', 'CO', 'PA', 'PLLC', 'PC',
+            # Spelled-out forms appear in county records as often as the
+            # abbreviations. Omitting them made incorporated entities look
+            # like private individuals and sank real families to LOW.
+            'CORPORATION', 'INCORPORATED', 'COMPANY', 'LIMITED'}
 LLC_OCR = {'LEC', 'LUC', 'LLG', 'LCC', 'IIC', 'L1C', 'LLO', 'LIC'}
 
 # How far apart two stems may be and still be worth a human's attention.
@@ -316,19 +322,30 @@ def propose_parents(records: list[dict], confirmed: dict | None = None) -> list[
         if not pending:
             continue
 
-        lenders = {m.get('lender') for m in members if m.get('lender')}
+        # Normalize lender names through the shared address book. Comparing
+        # raw text split "City National Bank of Florida" from its all-caps form
+        # and made Vaster look like a two-lender family when all 21 of its
+        # filings face one bank.
+        lenders = {entity_names.entity_key(m['lender'])
+                   for m in members if m.get('lender')}
+        lenders.discard('')
         # A corporate family almost always carries legal suffixes; a cluster of
         # bare personal names sharing a first name (JOSE) is not a family.
         corporate = sum(1 for m in members if m['suffix']) / len(members)
 
+        # Lender count is reported but does NOT affect confidence. A real
+        # corporate group borrows from several banks — Winston runs one entity
+        # per relationship (WINSTON AB -> Amerant, BAN -> Banesco, USC -> U.S.
+        # Century), so multiple lenders is normal structure, not doubt. Scoring
+        # it as doubt buried the most clear-cut families in the list.
         if lead in GENERIC_LEAD or len(lead) < PARENT_MIN_LEAD_LEN:
             confidence = 'low'
-        elif len(lenders) == 1 and corporate >= 0.8:
-            confidence = 'high'      # same lender, all incorporated
         elif corporate >= 0.8:
+            confidence = 'high'
+        elif corporate >= 0.5:
             confidence = 'medium'
         else:
-            confidence = 'low'
+            confidence = 'low'       # mostly bare names: people, not a family
 
         proposals.append({
             'parent': lead.title(),
