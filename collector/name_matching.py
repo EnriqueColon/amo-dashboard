@@ -49,7 +49,11 @@ SUFFIXES = {'LLC', 'INC', 'LP', 'LLP', 'CORP', 'LTD', 'CO', 'PA', 'PLLC', 'PC',
             # abbreviations. Omitting them made incorporated entities look
             # like private individuals and sank real families to LOW.
             'CORPORATION', 'INCORPORATED', 'COMPANY', 'LIMITED'}
-LLC_OCR = {'LEC', 'LUC', 'LLG', 'LCC', 'IIC', 'L1C', 'LLO', 'LIC'}
+LLC_OCR = {'LEC', 'LUC', 'LLG', 'LCC', 'IIC', 'L1C', 'LLO', 'LIC',
+           # Truncation, not a misread: the scan simply lost the final C.
+           # Safe because rule 2 still requires a confirmed landing — the
+           # corrected name must already exist in the corpus.
+           'LL'}
 
 # How far apart two stems may be and still be worth a human's attention.
 REVIEW_MAX_DISTANCE = 2
@@ -329,9 +333,13 @@ def propose_parents(records: list[dict], confirmed: dict | None = None) -> list[
         lenders = {entity_names.entity_key(m['lender'])
                    for m in members if m.get('lender')}
         lenders.discard('')
-        # A corporate family almost always carries legal suffixes; a cluster of
-        # bare personal names sharing a first name (JOSE) is not a family.
-        corporate = sum(1 for m in members if m['suffix']) / len(members)
+        # Weight by FILINGS, not by distinct names. Counting names let two
+        # stray one-filing rows — a truncated suffix and a sentence fragment
+        # the extractor stored as a borrower — outvote 72 filings of properly
+        # incorporated entities and drop Vaster from HIGH to MEDIUM. Evidence
+        # should carry weight proportional to how much of it there is.
+        total_filings = sum(m['filings'] for m in members) or 1
+        corporate = sum(m['filings'] for m in members if m['suffix']) / total_filings
 
         # Lender count is reported but does NOT affect confidence. A real
         # corporate group borrows from several banks — Winston runs one entity
