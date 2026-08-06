@@ -1,8 +1,15 @@
 # Rollback — entity-normalization refactor
 
-Live tracking document for the shared-address-book work (started 2026-08-04).
-Update the ledger as each change lands. Delete this file once the refactor is
-deployed, verified in production, and no longer a rollback candidate.
+**DEPLOYED 2026-08-06 and verified live.** Kept as the revert path while the
+change is still fresh. Delete once you are confident it will not be rolled back.
+
+Pre-deploy backup: `/opt/amo-dashboard/backup_pre_entity_norm.db` (91MB,
+integrity-checked). Keep it until this file goes.
+
+Fastest full revert: restore that backup over `miami_dade_amo.db`, then
+`git checkout pre-entity-normalization`, `npm run build`, `pm2 restart`.
+Reverting decisions only (keeping the code) is a DELETE on the two tables plus
+a `normalize.py` re-run — see below.
 
 ## Known-good anchor
 

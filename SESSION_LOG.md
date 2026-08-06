@@ -4,6 +4,47 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-08-06 — Entity normalization DEPLOYED to production
+
+Live and verified. Production was 21 commits behind (`d834771`); all 21 were this workstream plus the `run_weekly.sh` exec-bit fix, so nothing unrelated shipped.
+
+### Deploy, all seven steps
+1. `sqlite3 .backup` → `/opt/amo-dashboard/backup_pre_entity_norm.db` (91MB, integrity-checked). **Keep until confident.**
+2. `git checkout -- collector/run_weekly.sh` — prod carried the same exec-bit change `0deb97f` applies; it would have blocked the pull.
+3. `git pull --ff-only` → `b6f7f47`.
+4. `npm run build` → `pm2 restart amo-dashboard`.
+5. `apply_proposals.py --write --merges auto,high --families high` → **11 merges, 25 parent assignments**. The dry run against production returned identical counts to the snapshot rehearsal — that match is what confirmed the rehearsal was faithful.
+6. `normalize.py` via `nohup`+`disown`, ~15 min.
+7. `pm2 restart` to clear the 7-day cache. **Not optional** — without it a correct deploy looks like it failed.
+
+### Live result (matches the rehearsal exactly)
+- **231 → 224 distinct borrowers**, 237 → 229 lender/borrower pairs, 445 filings unchanged.
+- Families: Vaster 5/74, Atlantis 2/27, Mathon 2/20, Eastern 4/11, Winston 5/9, Precedent 2/9, Pace 2/4, Brora 2/2.
+- Vaster resolves to 4 real companies + 1 artifact: LOANS III 32f, SUB II 28f, **SUB III 7f**, MANAGEMENT 6f, `Vaster II and Vaster I` 1f.
+- User confirmed the expansion works in the live UI.
+
+### Also shipped this session
+- **JS key twin deleted.** `direction`/`grantor_role`/`grantee_role` are computed in `normalize.py` and served by `/filings`; the client renders them. `nameKey`/`keysMatch`/`filingDirection`/`isThirdParty` are gone — no second implementation left to drift (it had already mislabelled directions once, `f8f19d6`).
+- **Server-side family pagination.** `/facilities` groups by lender + `COALESCE(borrower_parent, borrower_key)`; new `/credit-facility-events/family` returns members on expand. Client-side grouping split families across page boundaries and reported partial counts (Vaster read "4 entities").
+- Display fix: grouped query labelled rows with `MAX(facility_borrower_name)`, an arbitrary OCR-damaged extraction — correctly merged rows still read `VASTER'SUB II, LLC`. Now shows `borrower_recorded`.
+- Family scoring weights by filings, not distinct names (two junk 1-filing rows were outvoting 72 filings and holding Vaster at MEDIUM). `LL` added to `LLC_OCR` as a truncation.
+
+### Three bugs that only running it could catch — typecheck and success messages both lied
+1. **Inert merges.** A full rebuild with 12 aliases and 25 parents loaded changed nothing: `borrower_key` still derived from the extracted name, so an alias on `VASTER SUB II LL` never matched. Apply reported 25 writes, rebuild reported loading them, `borrower_parent` even populated. Only the unchanged borrower count exposed it.
+2. **Hooks-order crash.** `FamilyMembers` was called as a plain function inside a map; it uses a hook, so expanding a family white-screened the page. `tsc` passed clean before and after.
+3. **Watcher that could never fire.** `pgrep -f "normalize.py"` matched the ssh/bash command line containing that string, so the completion poll looped forever. Use `ps -eo pid,cmd | grep "[n]ormalize.py" | grep -v "bash -c"`.
+
+### Open / next session
+1. **`Vaster II and Vaster I` is a sentence fragment stored as a borrower** — extraction defect, unrelated to normalization. Also `SHE 3`, `PAM` and similar short/junk names are worth a sweep.
+2. **Old bookmarked facility links are dead** — `/filings?lender=&borrower=` keys changed. Accepted deliberately; no fallback added.
+3. Not applied, deliberately: 4 CONFLICT-tier proposals (`B&B 18` vs `26`, `Precedent 4A` vs `4C`, `Metro Parc Hialeah` variants, `Winston AB` vs `BAN`), the sibling pair, and 14 LOW families (`Jose`/`David`/`Jared` are people; `Metro`/`North`/`Shore`/`Safe` are place words). Re-run `show_merge_proposals.py --db` to review.
+4. **UI for approving merges/parents was never built.** Decisions still go through `collector/apply_proposals.py`. Agreed design: extend the existing "Duplicate review & merge tool" (`client/src/pages/Entities.tsx:57`, `POST /api/aliases/merge`) with both `same_as` and `belongs_to`. **User's rule: confirmed assignments never re-ask, but NEW entities matching a confirmed family are proposed again, never silently absorbed.**
+5. **STILL OUTSTANDING — GitHub PAT** in `.git/config` on this Mac and the droplet. Repo is PUBLIC; never committed, so secret scanning never saw it and nothing auto-revokes it. Revoke → security log → SSH remote → read-only deploy key.
+6. `.claude/launch.json` (parent dir) gained an `amo-dashboard-snapshot` entry on port 5051 pointing at `/tmp/final2.db` — a scratch file that will not survive a reboot. Repoint or delete.
+7. Guardrails, run all three before touching naming: `check_canonicalize_baseline.py`, `check_alias_scope.py`, `check_entity_names_parity.py` (last needs `AMO_DB_PATH=./prod_snapshot.db`).
+
+---
+
 ## 2026-08-05 — Matching reworked onto county-recorded names; parent layer wired. NOT deployed.
 
 Production snapshot obtained. Continues 2026-08-04 below; [ROLLBACK.md](ROLLBACK.md) is still the live tracking doc.
