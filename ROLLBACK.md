@@ -1,3 +1,79 @@
+# Rollback — Broward County expansion (ACTIVE workstream)
+
+**Nothing here has touched production.** All of it was rehearsed against a copy of
+`prod_snapshot.db`. This section is the live tracking doc for the Broward work; the
+entity-normalization section below is retained but that change is already deployed.
+
+## Current state
+
+| Piece | Status | Touches prod? |
+|---|---|---|
+| `collector/broward_collect.py` | built, rehearsed | no — new file |
+| `collector/migrate_add_county.py` | built, rehearsed | **yes when run** — schema change |
+| `collector/tests/check_county_isolation.py` | built, green | no — new file |
+| server / client / `normalize.py` | **not started** | no |
+
+## Why the schema migration is low-risk
+
+`migrate_add_county.py` only ever does `ALTER TABLE ... ADD COLUMN county TEXT`, an UPDATE of
+NULLs, and `CREATE INDEX IF NOT EXISTS`. It **drops nothing, rewrites no existing column, and
+recreates no table**. SQLite's ADD COLUMN is O(1) metadata-only. It is idempotent — re-running it
+is a no-op.
+
+Reverting it is therefore almost never necessary. If you must:
+
+    -- the column is additive and unread by any deployed code, so the honest revert is
+    -- simply to stop writing to it. To physically remove it (SQLite 3.35+):
+    ALTER TABLE assignments            DROP COLUMN county;
+    ALTER TABLE pdf_extractions        DROP COLUMN county;
+    ALTER TABLE aom_events_clean       DROP COLUMN county;
+    ALTER TABLE credit_facility_events DROP COLUMN county;
+    ALTER TABLE collection_log         DROP COLUMN county;
+
+**Do NOT drop the column while Broward rows are present** — it is the only thing distinguishing
+them from Miami-Dade rows. Delete the data first (below), then the column.
+
+## Removing Broward data
+
+Broward rows are confined to `assignments` until the pipeline is wired further, so:
+
+    DELETE FROM assignments    WHERE county = 'BROWARD';
+    DELETE FROM collection_log WHERE doc_type LIKE 'BROWARD:%';
+
+Nothing else references them. `normalize.py` is county-blind today, which means a Broward row
+with no `pdf_extractions` companion is simply never picked up — **that is why index ingestion is
+safe to land before the county filter exists.** It also means re-running `normalize.py` after a
+Broward ingest changes nothing, so no rebuild is needed either way.
+
+## The invariant this work depends on
+
+`assignments.cfn` stays globally UNIQUE instead of becoming `UNIQUE(county, cfn)`, because the two
+counties' key formats are disjoint:
+
+    Miami-Dade CFN     2026R521735    always contains 'R'
+    Broward instrument 121018052      always pure digits
+
+If that ever stops being true — a third county, or a Broward format change — the shortcut is
+unsafe and the table must be rebuilt with a composite key. **The guardrail below asserts it, so a
+violation surfaces as a test failure and not as silently overwritten records.**
+
+## Guardrail
+
+    AMO_DB_PATH=./prod_snapshot.db collector/.venv/bin/python3 \
+        collector/tests/check_county_isolation.py
+
+Checks: no NULL counties left by the migration; no CFN under two counties; key formats match the
+disjointness claim; derived tables agree with `assignments` about county.
+
+## Deploy prerequisites (not yet done)
+
+- `paramiko` must be installed in the droplet venv — `collector/.venv/bin/pip install paramiko`.
+- Run `migrate_add_county.py` BEFORE `broward_collect.py`; the collector fails fast with an
+  instruction if the column is missing.
+- Take a `sqlite3 .backup` first, as with any production data change.
+
+---
+
 # Rollback — entity-normalization refactor
 
 **DEPLOYED 2026-08-06 and verified live.** Kept as the revert path while the

@@ -4,6 +4,107 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-08-06 (later) — Broward County expansion started. Index ingestion BUILT + rehearsed, NOT deployed.
+
+User directive: bring the same information in from Broward. [ROLLBACK.md](ROLLBACK.md) has a
+new section for this workstream and is the live tracking doc.
+
+### THE finding — Broward needs no scraping at all
+Broward publishes its recording index as flat files on a **public SFTP server**. No Playwright,
+no reCAPTCHA, no login, no rate limit. This is a categorically better source than Miami-Dade.
+
+    Host BCFTP.Broward.org:22   user/pass crpublic/crpublic   (published by Broward RTT)
+    OR_Yearly_Exports/CY<YYYY>doc-rec.txt   full calendar year, 1978 → last completed year
+    Official_Records_Download/<MM-DD-YYYY>doc-ver.txt   one business day, ~10-day retention
+
+- **Measured: 42,523 Broward assignments ingested in under 30 seconds total.** Miami-Dade's
+  equivalent took days of browser automation.
+- **Party data is better than Miami-Dade's.** 0 of 42,523 rows are missing a grantor or grantee.
+  The name file is one row PER PARTY, so multi-party filings survive intact (one real example:
+  3 grantors → 5 grantees); Miami-Dade's index gives one name per side. Full list is kept in
+  `raw_json`; `grantor`/`grantee` hold the first of each to match the Miami-Dade column shape.
+- **`AST` is Broward's ONLY assignment code** — verified against all 65 codes present in CY2025,
+  where Miami-Dade splits across AMO/ASG/AIT. Harmless: `extract_pdfs.py` classifies the real
+  document and `normalize.py` keeps only true loan transfers, exactly as it already does for
+  Miami-Dade's generic buckets.
+- Bonus field Miami-Dade only gets via LLM extraction: **folio/parcel is in the index directly**
+  (field 11, populated on ~70k of 643k CY2025 rows).
+
+### Record layout (reverse-engineered — the county's published layout PDF 404s)
+Pipe-delimited, **CRLF line endings, BOM on the yearly files**, cp1252 not utf-8. 1-based:
+
+    1 instrument   2 recdate YYYYMMDD   3 recdate MM/DD/YYYY   4 rectime   5 doc type
+    6 consideration   7 legacy book   8 legacy page   9 book type ('O')   11 folio/parcel
+    12 doc stamps   14 page count   18 'E' when e-recorded   19 case number
+
+Name file: `<instrument>|<name>|<D|R>|<seq>|`. **D = direct = grantor/assignor, R = reverse =
+grantee/assignee** — verified against the portal's own column headers for instrument 119979096
+(First Direct = FUND-EX SOLUTIONS GROUP LLC, First Indirect = PINNACLE BANK).
+
+### Built (NOT yet committed to prod DB — rehearsed on a copy of prod_snapshot.db)
+- `collector/broward_collect.py` — SFTP ingest, `--year` / `--daily` / `--list`, doc-type and
+  date filters. **New dependency: `paramiko`** (macOS curl has no SFTP support; the droplet venv
+  needs `pip install paramiko` before this runs there).
+- `collector/migrate_add_county.py` — idempotent; adds `county` to `assignments`,
+  `pdf_extractions`, `aom_events_clean`, `credit_facility_events`, `collection_log`, backfills
+  existing rows to `MIAMI-DADE`, adds county indexes.
+- `collector/tests/check_county_isolation.py` — new guardrail. Green.
+
+### Deliberate shortcut, with the invariant that makes it safe
+`assignments.cfn` is globally UNIQUE and was NOT rebuilt to `UNIQUE(county, cfn)` — that needs a
+table recreation on the 70k-row table that just absorbed the entity-normalization refactor.
+Safe because the key formats are **provably disjoint**: Miami-Dade CFNs always contain `R`
+(`2026R521735`), Broward instruments are always pure digits (`121018052`). The guardrail asserts
+this rather than trusting it, and `broward_collect.insert_records()` refuses a cross-county CFN
+explicitly instead of letting `INSERT OR IGNORE` swallow it. **A third county whose keys are not
+disjoint is the moment to do the real rebuild.**
+
+### THE GAP — 2026-01-01 → 2026-07-20 is unreachable from the FTP feed
+Yearly exports stop at the last completed year (CY2025 was published 2026-02-17), and the daily
+feed only retains ~10 days. So ~7 months of 2026 (~8,000 assignments) sit in neither. CY2026
+will not publish until ~Feb 2027. Options, undecided: scrape AcclaimWeb for that window; ask
+Broward for a one-off bulk export (954-831-4000, they invite this); or run daily from now and
+backfill the hole when CY2026 lands.
+
+### Images are the real phase-2 problem
+Yearly exports are **index only**. Historical Broward PDFs would have to come from the
+AcclaimWeb portal, which is Acclaim/Harris (not Miami-Dade's stack) and:
+- gates everything behind an "I accept the conditions above" disclaimer (accepted this session at
+  the user's explicit instruction),
+- serves images from `/AcclaimWeb/Image/DocumentImage<tab>/<docId>` where `docId` is an
+  **internal id** (`55269190`), not the instrument number — it appears only as a checkbox value
+  in the results grid, so every document needs a search round-trip first,
+- **requires session state** — hitting that URL directly returns an Acclaim error page,
+- sits behind **Cloudflare bot management** (`cdn-cgi/challenge-platform` observed).
+
+The sanctioned alternative: the daily `img.zip` (~400–540MB/day) carries that day's images with
+no scraping at all. Forward-looking only. **No entity/facility extraction is possible for Broward
+until this is resolved** — index data alone feeds the assignment tables, not `pdf_extractions`.
+
+### Decisions recorded (user, this session)
+1. History depth: **2023-01-01, matching Miami-Dade** — so cross-county stats are apples-to-apples.
+2. Data model: **one DB, `county` column, county filter in the UI**, defaulting to All. Entity
+   resolution spans both counties on purpose — the same lenders operate in both.
+3. Disclaimer acceptance on the Broward portal: authorized.
+
+### Open / next session
+1. **Nothing is wired past `assignments`.** `normalize.py`, `server/routes.ts` and every client
+   page are still county-blind. The county filter, and `county` propagation through the derived
+   tables, are not built.
+2. **Every document link in the client is a Miami-Dade book/page URL** — 8 sites (`CleanEvents`
+   ×2, `CreditFacilities`, `DealIntelligence`, `PrivateCredit`, `Reporting`,
+   `EntityDetailPanel`, `routes.ts:1932`). Broward e-recorded docs have **no book/page at all**;
+   they link by instrument number. Needs a per-county link builder before any Broward row is
+   shown, or those links silently produce wrong documents.
+3. Decide the 2026 gap and the image strategy (above).
+4. Name variants are already visible in Broward: `U S BANK TRUST NATIONAL ASSN` (1,701) vs
+   `US BANK TRUST NATIONAL ASSN` (878). The existing address book should absorb these — but
+   `check_canonicalize_baseline.py` covers Miami-Dade names only, so regenerate the baseline
+   deliberately rather than letting Broward silently move it.
+5. Droplet needs `paramiko` installed and a cron entry for `--daily` before Broward stays fresh.
+
+---
+
 ## 2026-08-06 — Entity normalization DEPLOYED to production
 
 Live and verified. Production was 21 commits behind (`d834771`); all 21 were this workstream plus the `run_weekly.sh` exec-bit fix, so nothing unrelated shipped.
