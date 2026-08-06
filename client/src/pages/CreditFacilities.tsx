@@ -132,6 +132,50 @@ function fmtDateMonth(d: string | null) {
   return d ? fmtMonth(d.slice(0, 7)) : '—';
 }
 
+// Collapse rows belonging to one confirmed corporate family into a single
+// parent line. Grouped by LENDER + parent, not parent alone: a family that
+// borrows from four banks has four distinct relationships, and merging those
+// into one line would throw the lender away. Rows with no confirmed parent are
+// passed through untouched, so anything unassigned looks exactly as before.
+type Grouped =
+  | { kind: 'single'; key: string; row: any }
+  | { kind: 'family'; key: string; lender: string; parent: string; rows: any[];
+      filings: number; first_date: string; last_date: string; types: string[] };
+
+function groupByParent(rows: any[]): Grouped[] {
+  const out: Grouped[] = [];
+  const families = new Map<string, Grouped & { kind: 'family' }>();
+
+  for (const r of rows) {
+    const key = `${r.lender_key}|${r.borrower_key}`;
+    if (!r.borrower_parent) {
+      out.push({ kind: 'single', key, row: r });
+      continue;
+    }
+    const fk = `${r.lender_key}|parent:${r.borrower_parent}`;
+    let fam = families.get(fk);
+    if (!fam) {
+      fam = { kind: 'family', key: fk, lender: r.lender, parent: r.borrower_parent,
+              rows: [], filings: 0, first_date: r.first_date, last_date: r.last_date,
+              types: [] };
+      families.set(fk, fam);
+      out.push(fam);
+    }
+    fam.rows.push(r);
+    fam.filings += r.filings || 0;
+    if (r.first_date && r.first_date < fam.first_date) fam.first_date = r.first_date;
+    if (r.last_date && r.last_date > fam.last_date) fam.last_date = r.last_date;
+    if (r.facility_type && !fam.types.includes(r.facility_type)) fam.types.push(r.facility_type);
+  }
+
+  // A "family" of one is just a company — render it as a normal row rather than
+  // making the user open a group to find a single entry.
+  return out.map(g =>
+    g.kind === 'family' && g.rows.length === 1
+      ? { kind: 'single' as const, key: `${g.rows[0].lender_key}|${g.rows[0].borrower_key}`, row: g.rows[0] }
+      : g);
+}
+
 // Filing history panel shown when a facility relationship row is expanded.
 function FilingHistory({ row }: { row: any }) {
   const [quoteCfn, setQuoteCfn] = useState<string | null>(null);
@@ -325,6 +369,53 @@ export default function CreditFacilities() {
   const [applied, setApplied] = useState<Filters>(EMPTY);
   const [page, setPage] = useState(1);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  // Families start collapsed: the point of the parent line is to replace a
+  // wall of near-identical rows with one, so opening every group by default
+  // would defeat it.
+  const [expandedParents, setExpandedParents] = useState<Set<string>>(new Set());
+
+  // One relationship row. `nested` indents it under its family header; the row
+  // behaves identically either way, including its own expansion into filing
+  // history.
+  const renderRow = (r: any, nested: boolean) => {
+    const k = `${r.lender_key}|${r.borrower_key}`;
+    return (
+      <Fragment key={k}>
+        <tr
+          onClick={() => setExpandedKey(c => (c === k ? null : k))}
+          className="border-b border-border/50 hover:bg-muted/20 transition-colors cursor-pointer"
+        >
+          <td className="px-3 py-2 max-w-[200px] truncate font-medium text-foreground" title={r.lender}>
+            {nested ? '' : (r.lender || '—')}
+          </td>
+          <td className={`px-3 py-2 max-w-[200px] truncate font-medium text-foreground${nested ? ' pl-8' : ''}`} title={r.borrower}>
+            {r.borrower || '—'}
+          </td>
+          <td className="px-3 py-2"><FacilityTypeBadge type={r.facility_type} /></td>
+          <td className="px-3 py-2 text-right font-mono whitespace-nowrap" title={r.facility_amount != null ? fmtMoney(r.facility_amount) : undefined}>
+            {fmtMoneyCompact(r.facility_amount)}
+          </td>
+          <td className="px-3 py-2 text-right font-mono text-blue-500">{r.filings}</td>
+          <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">
+            <span className="inline-flex items-center gap-1.5">
+              {r.first_date === r.last_date ? fmtDateMonth(r.last_date) : `${fmtDateMonth(r.first_date)} → ${fmtDateMonth(r.last_date)}`}
+              {isRecentlyActive(r.last_date) && <ActiveBadge />}
+            </span>
+          </td>
+          <td className="px-2 py-2 text-center text-muted-foreground/50">
+            {expandedKey === k ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+          </td>
+        </tr>
+        {expandedKey === k && (
+          <tr className="border-b border-border/50 bg-muted/10">
+            <td colSpan={7} className="px-4 py-3">
+              <FilingHistory row={r} />
+            </td>
+          </tr>
+        )}
+      </Fragment>
+    );
+  };
   const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null);
 
   const apply = () => { setApplied(draft); setPage(1); setExpandedKey(null); };
@@ -586,40 +677,58 @@ export default function CreditFacilities() {
                       {Array(7).fill(0).map((_, j) => <td key={j} className="px-3 py-2"><Skeleton className="h-3 w-full" /></td>)}
                     </tr>
                   ))
-                : (data?.rows || []).map((r: any) => {
-                    const k = `${r.lender_key}|${r.borrower_key}`;
-                    return (
-                      <Fragment key={k}>
-                        <tr
-                          onClick={() => setExpandedKey(c => c === k ? null : k)}
-                          className="border-b border-border/50 hover:bg-muted/20 transition-colors cursor-pointer"
-                        >
-                          <td className="px-3 py-2 max-w-[200px] truncate font-medium text-foreground" title={r.lender}>{r.lender || '—'}</td>
-                          <td className="px-3 py-2 max-w-[200px] truncate font-medium text-foreground" title={r.borrower}>{r.borrower || '—'}</td>
-                          <td className="px-3 py-2"><FacilityTypeBadge type={r.facility_type} /></td>
-                          <td className="px-3 py-2 text-right font-mono whitespace-nowrap" title={r.facility_amount != null ? fmtMoney(r.facility_amount) : undefined}>
-                            {fmtMoneyCompact(r.facility_amount)}
-                          </td>
-                          <td className="px-3 py-2 text-right font-mono text-blue-500">{r.filings}</td>
-                          <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">
-                            <span className="inline-flex items-center gap-1.5">
-                              {r.first_date === r.last_date ? fmtDateMonth(r.last_date) : `${fmtDateMonth(r.first_date)} → ${fmtDateMonth(r.last_date)}`}
-                              {isRecentlyActive(r.last_date) && <ActiveBadge />}
-                            </span>
-                          </td>
-                          <td className="px-2 py-2 text-center text-muted-foreground/50">
-                            {expandedKey === k ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-                          </td>
-                        </tr>
-                        {expandedKey === k && (
-                          <tr className="border-b border-border/50 bg-muted/10">
-                            <td colSpan={7} className="px-4 py-3">
-                              <FilingHistory row={r} />
+                : groupByParent(data?.rows || []).flatMap((g: Grouped) => {
+                    // Family header. Collapsed by default; opening it reveals the
+                    // member companies, each of which still expands to its own
+                    // filing history.
+                    if (g.kind === 'family') {
+                      const open = expandedParents.has(g.key);
+                      return [(
+                        <Fragment key={g.key}>
+                          <tr
+                            onClick={() => setExpandedParents(s => {
+                              const n = new Set(s);
+                              n.has(g.key) ? n.delete(g.key) : n.add(g.key);
+                              return n;
+                            })}
+                            className="border-b border-border/50 bg-muted/20 hover:bg-muted/30 transition-colors cursor-pointer"
+                          >
+                            <td className="px-3 py-2 max-w-[200px] truncate font-medium text-foreground" title={g.lender}>{g.lender || '—'}</td>
+                            <td className="px-3 py-2 max-w-[200px] truncate font-semibold text-foreground">
+                              <span className="inline-flex items-center gap-1.5">
+                                {open ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                                {g.parent}
+                                <span className="text-[10px] font-normal text-muted-foreground">
+                                  {g.rows.length} entities
+                                </span>
+                              </span>
                             </td>
+                            <td className="px-3 py-2">
+                              {g.types.length === 1
+                                ? <FacilityTypeBadge type={g.types[0]} />
+                                : <span className="text-[10px] text-muted-foreground">Mixed</span>}
+                            </td>
+                            {/* Deliberately blank. Each sub-entity has its own
+                                facility, and facility_amount is a credit limit
+                                quoted on every filing — summing them across the
+                                family would invent a number that does not exist. */}
+                            <td className="px-3 py-2 text-right font-mono text-muted-foreground/50"
+                                title="Each company in this family has its own facility. Open the group to see individual credit limits — they are not summed, because a facility's limit is restated on every filing and adding them would double-count.">
+                              —
+                            </td>
+                            <td className="px-3 py-2 text-right font-mono text-blue-500">{g.filings}</td>
+                            <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">
+                              <span className="inline-flex items-center gap-1.5">
+                                {g.first_date === g.last_date ? fmtDateMonth(g.last_date) : `${fmtDateMonth(g.first_date)} → ${fmtDateMonth(g.last_date)}`}
+                                {isRecentlyActive(g.last_date) && <ActiveBadge />}
+                              </span>
+                            </td>
+                            <td className="px-2 py-2"></td>
                           </tr>
-                        )}
-                      </Fragment>
-                    );
+                        </Fragment>
+                      ), ...(open ? g.rows.map((r: any) => renderRow(r, true)) : [])];
+                    }
+                    return [renderRow(g.row, false)];
                   })
               }
               {!isLoading && !data?.rows?.length && (
