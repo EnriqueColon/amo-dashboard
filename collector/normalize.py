@@ -1103,9 +1103,24 @@ def build_normalized_tables():
     # existing queries and the UI are untouched while the accurate name becomes
     # available. Verified on CFN 2025R173932, where the extractor produced
     # "VASTER SUBIII, LLG" for a filing the county recorded as VASTER SUB III.
+    def _recorded(ext, gr, ge, ln):
+        return name_matching.resolve_recorded_name(ext, gr, ge, ln)[0]
+
+    # Cleaned + alias-resolved, so the IIL->III OCR fix and any approved merge
+    # actually reach the stored name.
     conn.create_function(
         'fac_recorded', 4,
-        lambda ext, gr, ge, ln: name_matching.resolve_recorded_name(ext, gr, ge, ln)[0])
+        lambda ext, gr, ge, ln: entity_names.display_name(_recorded(ext, gr, ge, ln)))
+    # The grouping key MUST derive from the recorded name too. Keying off the
+    # extracted name left every approved merge inert: an alias recorded as
+    # "VASTER SUB II LL" never matched a key built from the extraction
+    # "VASTER SUB II, LLC", so a full rebuild changed nothing at all.
+    conn.create_function(
+        'fac_recorded_key', 4,
+        lambda ext, gr, ge, ln: entity_names.entity_key(_recorded(ext, gr, ge, ln)))
+    conn.create_function(
+        'fac_recorded_brand', 4,
+        lambda ext, gr, ge, ln: facility_brand_key(_recorded(ext, gr, ge, ln)))
     # Confirmed parent only — parent_of() never guesses, so an unassigned
     # entity stays NULL and surfaces as a proposal instead of being folded
     # into a family nobody approved.
@@ -1162,9 +1177,11 @@ def build_normalized_tables():
                px.facility_amount_type, px.facility_evidence_quote,
                px.facility_confidence,
                fac_name_key(px.facility_lender_name),
-               fac_name_key(px.facility_borrower_name),
+               fac_recorded_key(px.facility_borrower_name, a.grantor, a.grantee,
+                                px.facility_lender_name),
                fac_brand_key(px.facility_lender_name),
-               fac_brand_key(px.facility_borrower_name),
+               fac_recorded_brand(px.facility_borrower_name, a.grantor, a.grantee,
+                                  px.facility_lender_name),
                fac_recorded(px.facility_borrower_name, a.grantor, a.grantee,
                             px.facility_lender_name),
                fac_parent(fac_recorded(px.facility_borrower_name, a.grantor,
