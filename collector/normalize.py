@@ -1125,6 +1125,11 @@ def build_normalized_tables():
     # entity stays NULL and surfaces as a proposal instead of being folded
     # into a family nobody approved.
     conn.create_function('fac_parent', 1, entity_names.parent_of)
+    # Direction and party roles move server-side. They were computed in the
+    # client from a hand-maintained JS copy of the key function, which had to
+    # stay byte-identical to the Python by hand and did not.
+    conn.create_function('fac_direction', 3, name_matching.filing_direction)
+    conn.create_function('fac_role', 5, name_matching.party_role)
     conn.executescript("""
         DROP TABLE IF EXISTS credit_facility_events;
         CREATE TABLE credit_facility_events (
@@ -1159,7 +1164,12 @@ def build_normalized_tables():
             -- with their own facilities and filing histories.
             borrower_recorded        TEXT,
             borrower_parent          TEXT,
-            lender_parent            TEXT
+            lender_parent            TEXT,
+            -- Pledge/release and the role of each recorded party, resolved
+            -- against the same keys the pipeline groups on.
+            direction                TEXT,
+            grantor_role             TEXT,
+            grantee_role             TEXT
         );
     """)
     # facility_amount <= 1000 is the standard deed recital ("for $10.00 and
@@ -1186,7 +1196,12 @@ def build_normalized_tables():
                             px.facility_lender_name),
                fac_parent(fac_recorded(px.facility_borrower_name, a.grantor,
                                        a.grantee, px.facility_lender_name)),
-               fac_parent(px.facility_lender_name)
+               fac_parent(px.facility_lender_name),
+               fac_direction(a.grantor, a.grantee, px.facility_lender_name),
+               fac_role(a.grantor, px.facility_borrower_name, a.grantor, a.grantee,
+                        px.facility_lender_name),
+               fac_role(a.grantee, px.facility_borrower_name, a.grantor, a.grantee,
+                        px.facility_lender_name)
         FROM pdf_extractions px
         JOIN assignments a ON a.cfn = px.cfn
         WHERE px.status = 'OK'

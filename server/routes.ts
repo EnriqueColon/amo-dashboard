@@ -654,7 +654,12 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       SELECT COALESCE(lender_key, UPPER(COALESCE(facility_lender_name, '')))     AS lender_key,
              COALESCE(borrower_key, UPPER(COALESCE(facility_borrower_name, ''))) AS borrower_key,
              MAX(facility_lender_name)    AS lender,
-             MAX(facility_borrower_name)  AS borrower,
+             -- Display the COUNTY-RECORDED name, not an arbitrary extraction.
+             -- MAX(facility_borrower_name) picked whichever OCR-damaged
+             -- spelling sorted highest, so correctly merged rows were still
+             -- labelled "VASTER'SUB II, LLC" and "VASTER SUBMIT, LLC".
+             MAX(COALESCE(borrower_recorded, facility_borrower_name)) AS borrower,
+             MAX(borrower_parent)         AS borrower_parent,
              MAX(facility_type)           AS facility_type,
              MAX(facility_amount)         AS facility_amount,
              MAX(facility_amount_type)    AS facility_amount_type,
@@ -730,6 +735,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
              e.facility_agreement_name, e.facility_agreement_date,
              e.facility_evidence_quote, e.facility_confidence,
              e.rec_book, e.rec_page,
+             e.direction, e.grantor_role, e.grantee_role,
              CASE WHEN px.loan_amount = e.facility_amount
                    AND e.facility_amount_type = 'credit_limit'
                   THEN NULL ELSE px.loan_amount END AS loan_amount,

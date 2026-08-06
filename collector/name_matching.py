@@ -481,3 +481,64 @@ def load_facility_records(conn) -> list[dict]:
         if not rec['lender']:
             rec['lender'] = lender
     return list(agg.values())
+
+
+# ── Filing roles and direction ────────────────────────────────────────────────
+# Computed here, in Python, and stored as columns. This logic used to live in a
+# hand-written JavaScript twin of the key function in CreditFacilities.tsx,
+# which had to be kept byte-identical to the Python by hand — it silently
+# mislabelled filings once already. Now the client renders what it is given.
+
+KEY_CONTAINMENT_MIN = 8   # below this, containment false-matches constantly
+
+
+def keys_match(a: str, b: str) -> bool:
+    """Equal keys, or one containing the other for reasonably long names.
+
+    Recorded index names are often longer or shorter than the extracted name
+    ("CITY NATIONAL BANK OF FLA" vs the full form). The length floor stops
+    short junk like "PAM" from matching everything it appears inside.
+    """
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    return (len(a) >= KEY_CONTAINMENT_MIN and len(b) >= KEY_CONTAINMENT_MIN
+            and (a in b or b in a))
+
+
+def filing_direction(grantor, grantee, lender) -> str | None:
+    """'pledge', 'release', or None — lender-anchored on purpose.
+
+    Collateral moving TO the bank is a pledge (drawing on the line); FROM the
+    bank is a release. The bank must actually be a recorded party: a third
+    party assigning TO the borrower is an acquisition, not the facility
+    releasing collateral, so borrower-only matches stay unlabelled.
+    """
+    lk = entity_names.entity_key(lender)
+    if not lk:
+        return None
+    if keys_match(entity_names.entity_key(grantee), lk):
+        return 'pledge'
+    if keys_match(entity_names.entity_key(grantor), lk):
+        return 'release'
+    return None
+
+
+def party_role(party, extracted, grantor, grantee, lender) -> str | None:
+    """'lender', 'borrower' or 'third_party' for one recorded party.
+
+    A third party is neither side of the facility — commonly an affiliate
+    co-borrower pledging into the line, or the prior holder of a warehoused
+    loan. The filing still belongs to the facility because its document text
+    cites the agreement, which is why these are labelled rather than dropped.
+    """
+    pk = entity_names.entity_key(party)
+    if not pk:
+        return None
+    if keys_match(pk, entity_names.entity_key(lender)):
+        return 'lender'
+    borrower = resolve_recorded_name(extracted, grantor, grantee, lender)[0]
+    if keys_match(pk, entity_names.entity_key(borrower)):
+        return 'borrower'
+    return 'third_party'

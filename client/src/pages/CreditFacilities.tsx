@@ -76,42 +76,12 @@ function downloadCsv(filename: string, header: string[], rows: any[][]) {
   URL.revokeObjectURL(url);
 }
 
-// JS twin of normalize.py's facility_name_key(): uppercase, punctuation-free,
-// collapsed — used to match a filing's recorded parties against the
-// facility's lender/borrower keys.
-function nameKey(s: string | null): string {
-  if (!s) return '';
-  return s.toUpperCase().replace(/[^A-Z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
-}
-
-// Two keys "match" when equal, or when one contains the other (recorded index
-// names are often longer/shorter than the extracted name). Containment only
-// counts for reasonably long strings, so short junk like "PAM" can't
-// false-positive its way into everything.
-function keysMatch(a: string, b: string): boolean {
-  if (!a || !b) return false;
-  if (a === b) return true;
-  return (a.length >= 8 && b.length >= 8) && (a.includes(b) || b.includes(a));
-}
-
-// Interpret a filing's direction relative to its facility: collateral moving
-// TO the bank is a pledge (drawing on the line); FROM the bank is a release
-// (loan paid off / sold out of the facility). Lender-anchored on purpose —
-// the bank must actually be a recorded party. A third party assigning to the
-// borrower (e.g. the prior holder of an acquired loan) is NOT the facility
-// releasing collateral, so borrower-only matches stay unlabeled.
-function filingDirection(f: any, lenderKey: string, _borrowerKey: string): 'pledge' | 'release' | null {
-  if (keysMatch(nameKey(f.grantee), lenderKey)) return 'pledge';
-  if (keysMatch(nameKey(f.grantor), lenderKey)) return 'release';
-  return null;
-}
-
-// A recorded party is a "third party" when its normalized name matches
-// neither the facility's lender key nor its borrower key.
-function isThirdParty(name: string | null, lenderKey: string, borrowerKey: string): boolean {
-  const k = nameKey(name);
-  return !!k && !keysMatch(k, lenderKey) && !keysMatch(k, borrowerKey);
-}
+// Direction and party roles are computed by the pipeline (see
+// name_matching.filing_direction / party_role) and delivered on each filing.
+// They used to be derived here from a hand-maintained JS copy of the Python
+// key function, which had to stay byte-identical by hand and did not — it
+// mislabelled pledges as releases once. The client now renders what it is
+// given; there is no second implementation to drift.
 
 // Marks a recorded party that is neither the facility's lender nor borrower,
 // and explains why the filing is still part of this facility.
@@ -171,12 +141,11 @@ function FilingHistory({ row }: { row: any }) {
     queryFn: () => apiRequest('GET', `/api/credit-facility-events/filings${qs}`).then(r => r.json()),
   });
   const filings = (data as any[]) || [];
-  const lenderKey = row.lender_key || '', borrowerKey = row.borrower_key || '';
-  const hasThirdParty = filings.some(f =>
-    isThirdParty(f.grantor, lenderKey, borrowerKey) || isThirdParty(f.grantee, lenderKey, borrowerKey));
+  const hasThirdParty = filings.some((f: any) =>
+    f.grantor_role === 'third_party' || f.grantee_role === 'third_party');
 
   // At-a-glance relationship profile, computed from the filings in hand
-  const dirs = filings.map(f => filingDirection(f, lenderKey, borrowerKey));
+  const dirs = filings.map((f: any) => f.direction ?? null);
   const pledges = dirs.filter(d => d === 'pledge').length;
   const releases = dirs.filter(d => d === 'release').length;
   const mortgageTotal = filings.reduce((s, f) => s + (f.loan_amount || 0), 0);
@@ -257,15 +226,15 @@ function FilingHistory({ row }: { row: any }) {
                   </td>
                   <td className="py-1.5 pr-3 max-w-[160px] truncate" title={f.doc_type}>{f.doc_type || '—'}</td>
                   <td className="py-1.5 pr-3">
-                    <DirectionBadge dir={filingDirection(f, row.lender_key || '', row.borrower_key || '')} />
+                    <DirectionBadge dir={f.direction ?? null} />
                   </td>
                   <td className="py-1.5 pr-3 max-w-[280px]">
                     <span className="flex items-center gap-1 min-w-0" title={`${f.grantor} → ${f.grantee}`}>
                       <span className="truncate">{f.grantor}</span>
-                      {isThirdParty(f.grantor, row.lender_key || '', row.borrower_key || '') && <ThirdPartyChip />}
+                      {f.grantor_role === 'third_party' && <ThirdPartyChip />}
                       <span className="shrink-0 text-muted-foreground">→</span>
                       <span className="truncate">{f.grantee}</span>
-                      {isThirdParty(f.grantee, row.lender_key || '', row.borrower_key || '') && <ThirdPartyChip />}
+                      {f.grantee_role === 'third_party' && <ThirdPartyChip />}
                     </span>
                   </td>
                   <td className="py-1.5 pr-3 max-w-[200px] truncate text-muted-foreground" title={f.property_address}>{f.property_address || '—'}</td>
