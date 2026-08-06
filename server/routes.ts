@@ -650,27 +650,52 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     if (end_date)      { where.push("rec_date <= ?"); params.push(end_date); }
     const wc = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
-    const grouped = `
-      SELECT COALESCE(lender_key, UPPER(COALESCE(facility_lender_name, '')))     AS lender_key,
-             COALESCE(borrower_key, UPPER(COALESCE(facility_borrower_name, ''))) AS borrower_key,
-             MAX(facility_lender_name)    AS lender,
-             -- Display the COUNTY-RECORDED name, not an arbitrary extraction.
-             -- MAX(facility_borrower_name) picked whichever OCR-damaged
-             -- spelling sorted highest, so correctly merged rows were still
-             -- labelled "VASTER'SUB II, LLC" and "VASTER SUBMIT, LLC".
-             MAX(COALESCE(borrower_recorded, facility_borrower_name)) AS borrower,
-             MAX(borrower_parent)         AS borrower_parent,
-             MAX(facility_type)           AS facility_type,
-             MAX(facility_amount)         AS facility_amount,
-             MAX(facility_amount_type)    AS facility_amount_type,
-             MAX(facility_agent_name)     AS agent_name,
-             MAX(facility_agreement_name) AS agreement_name,
-             MAX(facility_agreement_date) AS agreement_date,
-             COUNT(*)                     AS filings,
-             MIN(rec_date)                AS first_date,
-             MAX(rec_date)                AS last_date
+    // Two-level grouping. A relationship row is either a single company or a
+    // confirmed corporate FAMILY. Families must be grouped here, not in the
+    // browser: grouping a single page client-side splits any family whose
+    // members straddle a page boundary and reports a partial entity count.
+    const base = `
+      SELECT COALESCE(lender_key,   UPPER(COALESCE(facility_lender_name, '')))   AS lk,
+             COALESCE(borrower_key, UPPER(COALESCE(facility_borrower_name, ''))) AS bk,
+             borrower_parent, facility_lender_name, borrower_recorded,
+             facility_borrower_name, facility_type, facility_amount,
+             facility_amount_type, facility_agent_name, facility_agreement_name,
+             facility_agreement_date, rec_date
       FROM credit_facility_events ${wc}
-      GROUP BY 1, 2
+    `;
+    const grouped = `
+      SELECT lk                                  AS lender_key,
+             COALESCE(borrower_parent, bk)        AS group_key,
+             MAX(borrower_parent)                 AS borrower_parent,
+             -- A family of one at a given lender is just a company: render it
+             -- as a normal row rather than a group you must open to find a
+             -- single entry.
+             (MAX(borrower_parent) IS NOT NULL AND COUNT(DISTINCT bk) > 1) AS is_family,
+             COUNT(DISTINCT bk)                   AS entity_count,
+             MAX(facility_lender_name)            AS lender,
+             CASE WHEN MAX(borrower_parent) IS NOT NULL AND COUNT(DISTINCT bk) > 1
+                  THEN MAX(borrower_parent)
+                  ELSE MAX(COALESCE(borrower_recorded, facility_borrower_name))
+             END                                  AS borrower,
+             MAX(bk)                              AS borrower_key,
+             -- Mixed-type families report no single type rather than whichever
+             -- value happened to sort highest.
+             CASE WHEN COUNT(DISTINCT facility_type) = 1
+                  THEN MAX(facility_type) ELSE NULL END AS facility_type,
+             -- A family has no single credit limit: every member holds its own
+             -- facility, and facility_amount is a limit restated on each
+             -- filing, so summing would invent a figure.
+             CASE WHEN MAX(borrower_parent) IS NOT NULL AND COUNT(DISTINCT bk) > 1
+                  THEN NULL ELSE MAX(facility_amount) END AS facility_amount,
+             MAX(facility_amount_type)            AS facility_amount_type,
+             MAX(facility_agent_name)             AS agent_name,
+             MAX(facility_agreement_name)         AS agreement_name,
+             MAX(facility_agreement_date)         AS agreement_date,
+             COUNT(*)                             AS filings,
+             MIN(rec_date)                        AS first_date,
+             MAX(rec_date)                        AS last_date
+      FROM (${base})
+      GROUP BY lk, COALESCE(borrower_parent, bk)
     `;
     // Whitelisted sort columns (aliases from the grouped SELECT) — anything
     // else falls back to the default most-active-first ordering.
@@ -757,6 +782,46 @@ export async function registerRoutes(httpServer: Server, app: Express) {
 
     setCached(cacheKey, enriched);
     res.json(enriched);
+  });
+
+  // ─── GET /api/credit-facility-events/family ───────────────────────────────
+  // Member companies of one corporate family, fetched when a family row is
+  // expanded. Kept separate from /facilities so that endpoint can paginate on
+  // families without also having to carry every member of every family.
+  app.get('/api/credit-facility-events/family', (req, res) => {
+    const lender = typeof req.query.lender === 'string' ? req.query.lender : '';
+    const parent = typeof req.query.parent === 'string' ? req.query.parent : '';
+    if (!lender || !parent) return res.status(400).json({ error: 'lender and parent required' });
+
+    const cacheKey = `cfe:family:${lender}:${parent}`;
+    const hit = getCached(cacheKey);
+    if (hit) return res.json(hit);
+
+    const db = getDb();
+    const rows = db.prepare(`
+      SELECT COALESCE(lender_key,   UPPER(COALESCE(facility_lender_name, '')))   AS lender_key,
+             COALESCE(borrower_key, UPPER(COALESCE(facility_borrower_name, ''))) AS borrower_key,
+             MAX(facility_lender_name)    AS lender,
+             MAX(COALESCE(borrower_recorded, facility_borrower_name)) AS borrower,
+             MAX(borrower_parent)         AS borrower_parent,
+             MAX(facility_type)           AS facility_type,
+             MAX(facility_amount)         AS facility_amount,
+             MAX(facility_amount_type)    AS facility_amount_type,
+             MAX(facility_agent_name)     AS agent_name,
+             MAX(facility_agreement_name) AS agreement_name,
+             MAX(facility_agreement_date) AS agreement_date,
+             COUNT(*)                     AS filings,
+             MIN(rec_date)                AS first_date,
+             MAX(rec_date)                AS last_date
+      FROM credit_facility_events
+      WHERE COALESCE(lender_key, UPPER(COALESCE(facility_lender_name, ''))) = ?
+        AND borrower_parent = ?
+      GROUP BY 1, 2
+      ORDER BY filings DESC, facility_amount DESC
+    `).all(lender, parent);
+
+    setCached(cacheKey, rows);
+    res.json(rows);
   });
 
   // ─── GET /api/credit-facility-events/chart ────────────────────────────────

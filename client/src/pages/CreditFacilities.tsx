@@ -132,48 +132,23 @@ function fmtDateMonth(d: string | null) {
   return d ? fmtMonth(d.slice(0, 7)) : '—';
 }
 
-// Collapse rows belonging to one confirmed corporate family into a single
-// parent line. Grouped by LENDER + parent, not parent alone: a family that
-// borrows from four banks has four distinct relationships, and merging those
-// into one line would throw the lender away. Rows with no confirmed parent are
-// passed through untouched, so anything unassigned looks exactly as before.
-type Grouped =
-  | { kind: 'single'; key: string; row: any }
-  | { kind: 'family'; key: string; lender: string; parent: string; rows: any[];
-      filings: number; first_date: string; last_date: string; types: string[] };
-
-function groupByParent(rows: any[]): Grouped[] {
-  const out: Grouped[] = [];
-  const families = new Map<string, Grouped & { kind: 'family' }>();
-
-  for (const r of rows) {
-    const key = `${r.lender_key}|${r.borrower_key}`;
-    if (!r.borrower_parent) {
-      out.push({ kind: 'single', key, row: r });
-      continue;
-    }
-    const fk = `${r.lender_key}|parent:${r.borrower_parent}`;
-    let fam = families.get(fk);
-    if (!fam) {
-      fam = { kind: 'family', key: fk, lender: r.lender, parent: r.borrower_parent,
-              rows: [], filings: 0, first_date: r.first_date, last_date: r.last_date,
-              types: [] };
-      families.set(fk, fam);
-      out.push(fam);
-    }
-    fam.rows.push(r);
-    fam.filings += r.filings || 0;
-    if (r.first_date && r.first_date < fam.first_date) fam.first_date = r.first_date;
-    if (r.last_date && r.last_date > fam.last_date) fam.last_date = r.last_date;
-    if (r.facility_type && !fam.types.includes(r.facility_type)) fam.types.push(r.facility_type);
-  }
-
-  // A "family" of one is just a company — render it as a normal row rather than
-  // making the user open a group to find a single entry.
-  return out.map(g =>
-    g.kind === 'family' && g.rows.length === 1
-      ? { kind: 'single' as const, key: `${g.rows[0].lender_key}|${g.rows[0].borrower_key}`, row: g.rows[0] }
-      : g);
+// Members of a corporate family, fetched when its row is expanded. The server
+// groups families (see /credit-facility-events/family) so pagination operates
+// on families rather than companies — grouping a single page in the browser
+// split any family whose members straddled a page boundary and showed a
+// partial entity count.
+function FamilyMembers({ row, renderRow }: { row: any; renderRow: (r: any, nested: boolean) => any }): any {
+  const qs = `?lender=${encodeURIComponent(row.lender_key || '')}&parent=${encodeURIComponent(row.borrower_parent || '')}`;
+  const { data, isLoading } = useQuery({
+    queryKey: ['/api/credit-facility-events/family', row.lender_key, row.borrower_parent],
+    queryFn: () => apiRequest('GET', `/api/credit-facility-events/family${qs}`).then(r => r.json()),
+  });
+  if (isLoading) return (
+    <tr className="border-b border-border/50">
+      <td colSpan={7} className="px-8 py-2"><Skeleton className="h-3 w-1/2" /></td>
+    </tr>
+  );
+  return <>{((data as any[]) || []).map(m => renderRow(m, true))}</>;
 }
 
 // Filing history panel shown when a facility relationship row is expanded.
@@ -677,58 +652,61 @@ export default function CreditFacilities() {
                       {Array(7).fill(0).map((_, j) => <td key={j} className="px-3 py-2"><Skeleton className="h-3 w-full" /></td>)}
                     </tr>
                   ))
-                : groupByParent(data?.rows || []).flatMap((g: Grouped) => {
-                    // Family header. Collapsed by default; opening it reveals the
-                    // member companies, each of which still expands to its own
-                    // filing history.
-                    if (g.kind === 'family') {
-                      const open = expandedParents.has(g.key);
-                      return [(
-                        <Fragment key={g.key}>
-                          <tr
-                            onClick={() => setExpandedParents(s => {
-                              const n = new Set(s);
-                              n.has(g.key) ? n.delete(g.key) : n.add(g.key);
-                              return n;
-                            })}
-                            className="border-b border-border/50 bg-muted/20 hover:bg-muted/30 transition-colors cursor-pointer"
-                          >
-                            <td className="px-3 py-2 max-w-[200px] truncate font-medium text-foreground" title={g.lender}>{g.lender || '—'}</td>
-                            <td className="px-3 py-2 max-w-[200px] truncate font-semibold text-foreground">
-                              <span className="inline-flex items-center gap-1.5">
-                                {open ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-                                {g.parent}
-                                <span className="text-[10px] font-normal text-muted-foreground">
-                                  {g.rows.length} entities
-                                </span>
+                : (data?.rows || []).flatMap((g: any) => {
+                    // The server decides what a row is. A family row carries
+                    // borrower_parent and a true entity_count across ALL pages;
+                    // its members are fetched on expand.
+                    if (!g.is_family) return [renderRow(g, false)];
+                    const fk = `${g.lender_key}|parent:${g.borrower_parent}`;
+                    const open = expandedParents.has(fk);
+                    return [(
+                      <Fragment key={fk}>
+                        <tr
+                          onClick={() => setExpandedParents(s => {
+                            const n = new Set(s);
+                            n.has(fk) ? n.delete(fk) : n.add(fk);
+                            return n;
+                          })}
+                          className="border-b border-border/50 bg-muted/20 hover:bg-muted/30 transition-colors cursor-pointer"
+                        >
+                          <td className="px-3 py-2 max-w-[200px] truncate font-medium text-foreground" title={g.lender}>{g.lender || '—'}</td>
+                          <td className="px-3 py-2 max-w-[200px] truncate font-semibold text-foreground">
+                            <span className="inline-flex items-center gap-1.5">
+                              {open ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                              {g.borrower_parent}
+                              <span className="text-[10px] font-normal text-muted-foreground">
+                                {g.entity_count} {g.entity_count === 1 ? 'entity' : 'entities'}
                               </span>
-                            </td>
-                            <td className="px-3 py-2">
-                              {g.types.length === 1
-                                ? <FacilityTypeBadge type={g.types[0]} />
-                                : <span className="text-[10px] text-muted-foreground">Mixed</span>}
-                            </td>
-                            {/* Deliberately blank. Each sub-entity has its own
-                                facility, and facility_amount is a credit limit
-                                quoted on every filing — summing them across the
-                                family would invent a number that does not exist. */}
-                            <td className="px-3 py-2 text-right font-mono text-muted-foreground/50"
-                                title="Each company in this family has its own facility. Open the group to see individual credit limits — they are not summed, because a facility's limit is restated on every filing and adding them would double-count.">
-                              —
-                            </td>
-                            <td className="px-3 py-2 text-right font-mono text-blue-500">{g.filings}</td>
-                            <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">
-                              <span className="inline-flex items-center gap-1.5">
-                                {g.first_date === g.last_date ? fmtDateMonth(g.last_date) : `${fmtDateMonth(g.first_date)} → ${fmtDateMonth(g.last_date)}`}
-                                {isRecentlyActive(g.last_date) && <ActiveBadge />}
-                              </span>
-                            </td>
-                            <td className="px-2 py-2"></td>
-                          </tr>
-                        </Fragment>
-                      ), ...(open ? g.rows.map((r: any) => renderRow(r, true)) : [])];
-                    }
-                    return [renderRow(g.row, false)];
+                            </span>
+                          </td>
+                          <td className="px-3 py-2">
+                            {g.facility_type
+                              ? <FacilityTypeBadge type={g.facility_type} />
+                              : <span className="text-[10px] text-muted-foreground">Mixed</span>}
+                          </td>
+                          {/* Blank on purpose: every member holds its own
+                              facility, and facility_amount is a credit limit
+                              restated on each filing, so a family total would
+                              be a number that does not exist. */}
+                          <td className="px-3 py-2 text-right font-mono text-muted-foreground/50"
+                              title="Each company in this family has its own facility. Open the group to see individual credit limits — they are not summed, because a facility's limit is restated on every filing and adding them would double-count.">
+                            —
+                          </td>
+                          <td className="px-3 py-2 text-right font-mono text-blue-500">{g.filings}</td>
+                          <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">
+                            <span className="inline-flex items-center gap-1.5">
+                              {g.first_date === g.last_date ? fmtDateMonth(g.last_date) : `${fmtDateMonth(g.first_date)} → ${fmtDateMonth(g.last_date)}`}
+                              {isRecentlyActive(g.last_date) && <ActiveBadge />}
+                            </span>
+                          </td>
+                          <td className="px-2 py-2"></td>
+                        </tr>
+                      </Fragment>
+                      // Rendered as a COMPONENT, never called as a function:
+                      // FamilyMembers uses a hook, and invoking it conditionally
+                      // inside this map changes hook order between renders and
+                      // crashes the page. TypeScript cannot catch that.
+                      ), ...(open ? [<FamilyMembers key={`${fk}:members`} row={g} renderRow={renderRow} />] : [])];
                   })
               }
               {!isLoading && !data?.rows?.length && (
