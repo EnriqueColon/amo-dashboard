@@ -13,8 +13,8 @@ entity-normalization section below is retained but that change is already deploy
 | `collector/tests/check_county_isolation.py` | built, green | no — new file |
 | `collector/broward_images.py` | built, rehearsed (553 docs) | no — new file + new table |
 | `collector/run_broward_daily.sh` | built, not installed | no until cron is added |
-| county-aware server (`routes.ts`, `db.ts`) | built, verified | **yes when deployed** — needs build + pm2 restart |
-| `normalize.py` county scoping | built, verified (zero drift) | **yes when deployed** |
+| county-aware server (`routes.ts`, `db.ts`) | **DEPLOYED 2026-08-07** | yes — live |
+| `normalize.py` county scoping | **DEPLOYED 2026-08-07** | yes — live |
 | client county selector | **not started** | no |
 
 ## Reverting the county-aware server
@@ -28,6 +28,16 @@ pre-change server. **Verified**: on a two-county database (70,355 Miami-Dade + 1
 To revert, `git revert` the commit, `npm run build`, `pm2 restart amo-dashboard`. Nothing needs
 undoing in the data: the county column is additive and `normalize.py`'s scoping only ever removes
 Broward rows from consideration, so re-running the old code rebuilds the same tables.
+
+Pre-deploy backup: `/opt/amo-dashboard/backup_pre_county.db` (92MB, integrity-checked, taken
+2026-08-07). Keep it until the county work has settled. Deploy-day verification: `/api/stats` on
+the default scope returned the pre-deploy baseline `70,834 | 28,644 | 13,512` exactly, and the DB
+counts were unchanged.
+
+**Careful with PM2 here:** `ecosystem.config.cjs` on the droplet has drifted from the running
+process — the file's `AMO_PASSWORD` differs from the one PM2 actually holds. `pm2 restart` keeps
+the running env, but a `pm2 delete` + fresh start would adopt the file's value and silently change
+the dashboard password.
 
 **The one-way door is `NORMALIZE_COUNTIES` in `collector/normalize.py`.** Widening it to include
 Broward lets Broward names into the entity-classification signal sweep, which can change

@@ -4,9 +4,35 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
-## 2026-08-07 (later still) — County-aware server BUILT + verified. NOT deployed.
+## 2026-08-07 (later still) — County-aware server DEPLOYED. Phase 2 live.
 
-Phase 2. Default scope is Miami-Dade, so production output is unchanged until the UI opts in.
+Default scope is Miami-Dade, so production output is unchanged until the UI opts in.
+
+### Deploy
+Backup `/opt/amo-dashboard/backup_pre_county.db` (92MB, integrity-checked) → `migrate_add_county.py`
+→ `git pull` → **`npm run build` → `pm2 restart`** (this one needed both; the harvester deploy did
+not). Migration added `county` to all five tables and backfilled 70,834 / 70,834 / 51,425 / 445 /
+1,315 rows to MIAMI-DADE.
+
+### Verified live, against the pre-deploy baseline `70,834 | 28,644 | 13,512 | 51,425 | 20,320`
+- `/api/stats` default → **identical to baseline**, range `2023-01-03..2026-08-06`.
+- `?county=BROWARD` → 0 (nothing ingested yet, as expected). `?county=ALL` → same as default.
+- `/api/network-stats` → 200, i.e. the shared-statement bug is fixed in production.
+- Post-deploy DB counts byte-identical to the baseline. County isolation guardrail green.
+- Harvester unaffected: 553 images still recorded.
+
+### Two operational findings from the deploy
+1. **`ecosystem.config.cjs` has drifted from the running process.** The file's `AMO_PASSWORD` is 9
+   characters; the process PM2 is actually running has an 11-character one. PM2 captured the env at
+   start and has kept it across restarts, so the file is stale and misleading. **A `pm2 delete` +
+   restart would silently change the dashboard password to the file's value.** Reconcile it.
+2. `pm2 env 0` prints secrets in `KEY: value` form (not `KEY=value`), so redaction patterns written
+   for `.env` files do not match it. The password was echoed into a session transcript this way —
+   worth rotating, and worth remembering before running `pm2 env` again.
+
+---
+
+## 2026-08-07 — County-aware server BUILT + verified (superseded by the deploy above)
 
 ### The change is far smaller than the raw grep suggests
 98 query sites touch county-able tables, but **only `assignments` and `collection_log` can
