@@ -52,9 +52,29 @@ per day and warns on anything PENDING. **A monthly cadence loses ~20 days of ima
 permanently.** Cron is written for daily at 12:30 UTC; Broward's own uploads were observed landing
 10:27–11:01 UTC.
 
+### `--from-feed` — the harvester is deployable on its own (added same session)
+Checked before recommending a deploy, and it changed the plan: **`assignments` is read directly by
+the Dashboard stat cards and the Assignments page** (`server/routes.ts:15-18`, `193`, `234`).
+Ingesting the Broward index before the server is county-aware would jump the live document count
+from 70,355 to ~112,878, inflate distinct grantors/grantees, and mix unlabelled Broward rows into
+the Assignments table.
+
+So the harvester no longer needs the database at all: `--from-feed` reads the work list from the
+day's own `doc-ver.txt`. **Verified against a pristine copy of production** — no county column, no
+Broward rows — and it harvested the identical 553 documents / 77.6MB. Schema diff after the run
+is exactly one new table (`broward_images` + its index); all four dashboard stat queries and every
+table row count are byte-identical.
+
+**This is the deploy order that matters: the retention clock is the only piece with a deadline,
+and it is now fully decoupled from the work that needs care.** `run_broward_daily.sh` defaults to
+this mode; set `BROWARD_INGEST_INDEX=1` once the server is county-aware and it switches to
+ingesting the index and sourcing the work list from the DB.
+
 ### Open / next session
 1. **Nothing is deployed.** Production still has no `county` column, no Broward rows, no images,
-   no cron. Droplet needs `paramiko` installed first.
+   no cron. Droplet needs `paramiko` installed first. **Phase 1 (harvester + cron, `--from-feed`)
+   is safe to deploy on its own and should go first** — every day of delay permanently loses
+   ~55 documents' images to the free channel.
 2. **Broward documents cannot reach the extractor yet.** `pending_documents()`
    (`extract_pdfs.py:250`) requires non-empty `rec_book`/`rec_page`, and Broward e-recorded docs
    have neither — so Broward rows are silently skipped. Protective for now (they'd otherwise hit

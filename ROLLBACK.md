@@ -15,6 +15,23 @@ entity-normalization section below is retained but that change is already deploy
 | `collector/run_broward_daily.sh` | built, not installed | no until cron is added |
 | server / client / `normalize.py` | **not started** | no |
 
+## Phase 1 deploy (harvester only) — what it can and cannot touch
+
+`run_broward_daily.sh` defaults to `--from-feed`, which reads the work list from the feed's own
+index file rather than the database. Deploying it therefore needs **no migration and no Broward
+rows in any table the dashboard reads**.
+
+Verified by running it against a pristine copy of production (no `county` column, no Broward
+data). Afterwards:
+
+- schema diff = exactly one new table, `broward_images`, plus its index
+- `COUNT(*)`, date range, and distinct grantor/grantee counts on `assignments`: **identical**
+- row counts on `pdf_extractions`, `aom_events_clean`, `credit_facility_events`, `entity_nodes`,
+  `entity_aliases`, `collection_log`: **all identical**
+
+The only prerequisite is `paramiko` in the droplet venv. To back it out entirely: remove the cron
+entry, `DROP TABLE broward_images`, delete `BROWARD_IMAGE_DIR`. Nothing else is involved.
+
 ## Reverting the image harvester
 
 `broward_images.py` only ever creates its own table and writes files under

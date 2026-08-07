@@ -42,6 +42,9 @@ from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(__file__))
 from database import get_conn  # noqa: E402
+from broward_collect import (  # noqa: E402
+    DOC_TYPES, parse_doc_records, read_remote_text,
+)
 
 try:
     import paramiko
@@ -122,6 +125,27 @@ def wanted_instruments(rec_date: str) -> set[str]:
             (COUNTY, rec_date))}
     finally:
         conn.close()
+
+
+def wanted_from_feed(sftp, rec_date: str, doc_types: set[str]) -> set[str]:
+    """Same list, read from the feed's own index file instead of the database.
+
+    This is what makes the harvester deployable ahead of everything else. The
+    day's `doc-ver.txt` already says which documents are assignments, so nothing
+    has to be ingested into `assignments` first — which means no schema
+    migration, no Broward rows in tables the dashboard reads, and no visible
+    change to production. The retention clock is the only thing with a deadline;
+    this decouples it from the work that needs care.
+    """
+    yyyy, mm, dd = rec_date[0:4], rec_date[5:7], rec_date[8:10]
+    path = f'{DAILY_DIR}/{mm}-{dd}-{yyyy}doc-ver.txt'
+    return set(parse_doc_records(read_remote_text(sftp, path), doc_types, None, None))
+
+
+def resolve_wanted(sftp, rec_date: str, from_feed: bool,
+                   doc_types: set[str]) -> set[str]:
+    return (wanted_from_feed(sftp, rec_date, doc_types) if from_feed
+            else wanted_instruments(rec_date))
 
 
 def record_harvest(cfn: str, rec_date: str, pages: int,
@@ -227,12 +251,18 @@ def extract_entry(handle, info) -> bytes:
 
 # ── Harvest ──────────────────────────────────────────────────────────────────
 
-def harvest_day(sftp, rec_date: str, zip_name: str, force: bool = False) -> tuple[int, int]:
+def harvest_day(sftp, rec_date: str, zip_name: str, force: bool = False,
+                from_feed: bool = False,
+                doc_types: set[str] | None = None) -> tuple[int, int]:
     """Pull every assignment image for one day. Returns (documents, bytes)."""
-    wanted = wanted_instruments(rec_date)
+    wanted = resolve_wanted(sftp, rec_date, from_feed, doc_types or set(DOC_TYPES))
     if not wanted:
-        log.warning(f'  {rec_date}: no Broward assignments in the index — run '
-                    f'broward_collect.py --daily first, then re-run this')
+        if from_feed:
+            log.warning(f'  {rec_date}: the feed lists no assignments for this day')
+        else:
+            log.warning(f'  {rec_date}: no Broward assignments in the index — run '
+                        f'broward_collect.py --daily first, or pass --from-feed '
+                        f'to read the work list off the feed instead')
         return 0, 0
 
     have = set() if force else already_harvested(rec_date)
@@ -288,7 +318,8 @@ def available_zips(sftp) -> list[tuple[str, str]]:
     return sorted(out)
 
 
-def show_status(sftp) -> None:
+def show_status(sftp, from_feed: bool = False,
+                doc_types: set[str] | None = None) -> None:
     zips = available_zips(sftp)
     if not zips:
         log.warning('no img.zip files on the feed')
@@ -296,14 +327,15 @@ def show_status(sftp) -> None:
 
     log.info(f'Feed retains {len(zips)} day(s): {zips[0][0]} → {zips[-1][0]}')
     log.info('')
-    log.info('  date         indexed  harvested  status')
+    log.info(f'  date        {"on feed" if from_feed else "indexed"}  harvested  status')
 
     at_risk = 0
     for rec_date, _ in zips:
-        wanted = wanted_instruments(rec_date)
+        wanted = resolve_wanted(sftp, rec_date, from_feed,
+                                doc_types or set(DOC_TYPES))
         have = already_harvested(rec_date)
         if not wanted:
-            state = 'INDEX MISSING'
+            state = 'NO ASSIGNMENTS' if from_feed else 'INDEX MISSING'
         elif have >= wanted:
             state = 'complete'
         else:
@@ -331,7 +363,17 @@ def main() -> int:
                     help='report feed retention vs what has been harvested')
     ap.add_argument('--force', action='store_true',
                     help='re-download documents already harvested')
+    ap.add_argument('--from-feed', action='store_true',
+                    help="read the work list from the feed's own index file "
+                         'instead of the assignments table — lets the harvester '
+                         'run before any Broward data is ingested')
+    ap.add_argument('--doc-types', default=None,
+                    help='comma-separated Broward doc type codes '
+                         f'(default: {",".join(sorted(DOC_TYPES))})')
     args = ap.parse_args()
+
+    doc_types = ({t.strip().upper() for t in args.doc_types.split(',')}
+                 if args.doc_types else set(DOC_TYPES))
 
     if not (args.all or args.date or args.status):
         ap.error('nothing to do — pass --all, --date or --status')
@@ -343,7 +385,7 @@ def main() -> int:
     client, sftp = connect()
     try:
         if args.status:
-            show_status(sftp)
+            show_status(sftp, args.from_feed, doc_types)
             return 0
 
         zips = dict(available_zips(sftp))
@@ -361,7 +403,8 @@ def main() -> int:
 
         docs = total = 0
         for rec_date in sorted(set(targets)):
-            d, b = harvest_day(sftp, rec_date, zips[rec_date], args.force)
+            d, b = harvest_day(sftp, rec_date, zips[rec_date], args.force,
+                               args.from_feed, doc_types)
             docs += d
             total += b
         log.info(f'✅ harvested {docs} document(s), {total / 1e6:.1f}MB → {IMAGE_DIR}')
