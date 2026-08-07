@@ -4,6 +4,69 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-08-07 — Broward image harvester BUILT + rehearsed. Still NOT deployed.
+
+User chose to scrape rather than buy bulk data, reasoning that collection is recurring. Important
+correction that came out of building this: **recurring collection is exactly the case that needs
+NO scraping.** The SFTP feed handles ongoing pulls better than a scraper ever could. Scraping is
+now scoped to history only (2023-01-01 → the retention window) plus the 2026 index gap.
+
+### THE finding — images are keyed by instrument number, and selectively readable
+Entries inside the daily `img.zip` are named **`<instrument>.<page>.tif`** — the same instrument
+number already in `assignments`. No internal docId, no session, no portal. And because a zip's
+central directory lives at the END of the file, the harvester can read the last few MB over SFTP
+to get the full entry list plus byte offsets, then seek to only the entries it wants.
+
+**Measured across all 10 retained days: 553 documents / 1,530 pages / 77.6MB pulled from 4.1GB of
+zips — 1.8%. 70 seconds total.** A typical day is ~55 documents and ~8MB.
+
+### OCR quality is far better than Miami-Dade's, and this matters
+The county ships **quality-assured G4 bi-level TIFFs at 2550×4381 (~300 DPI)**. Miami-Dade's path
+re-rasterizes a downloaded PDF via `pdftoppm` at `OCR_DPI = 200`. Sample Broward OCR came back
+essentially clean — full addresses, phone numbers and book/page references intact.
+
+**Expect the VASTER-class name mangling to be much rarer in Broward.** The entire OCR'd-LLC
+correction machinery (`LEC`/`LUC`/`LLG`, "confirmed landing", the sibling-protection rules) exists
+because Miami-Dade's extracted names are damaged. Do NOT assume Broward needs the same treatment
+— measure first, or the correction rules will fire on names that were never broken.
+
+### Built (pushed; nothing has touched production)
+- `collector/broward_images.py` — `--status` / `--all` / `--date` / `--force`. New table
+  `broward_images` (cfn, rec_date, page_count, bytes_on_disk, harvested_at, source_zip) makes it
+  idempotent and resumable. Images land in `BROWARD_IMAGE_DIR` (default `collector/broward_images/`,
+  gitignored) as `<instrument>/<page>.tif`.
+- `collector/run_broward_daily.sh` — index then images then the retention report, for cron.
+
+**Raw TIFFs are stored, not OCR text**, on the same principle that keeps `pdf_extractions`
+around: the image is the irreplaceable artifact, OCR settings and prompts are re-appliable.
+
+### Deliberate implementation choice
+`extract_entry()` bypasses `zipfile.open()` and does one contiguous ranged read per entry, then
+`zlib.decompress(blob, -15)`. `zipfile.open()` issues many small reads and each is an SFTP round
+trip. Also: **never `prefetch()` a 500MB remote zip** — it drops the connection with
+`MessageOrderError`; that was the first attempt and it failed.
+
+### The retention clock, quantified
+Feed retains ~10 days (currently 2026-07-21 → 2026-08-03). `--status` prints indexed vs harvested
+per day and warns on anything PENDING. **A monthly cadence loses ~20 days of images every month,
+permanently.** Cron is written for daily at 12:30 UTC; Broward's own uploads were observed landing
+10:27–11:01 UTC.
+
+### Open / next session
+1. **Nothing is deployed.** Production still has no `county` column, no Broward rows, no images,
+   no cron. Droplet needs `paramiko` installed first.
+2. **Broward documents cannot reach the extractor yet.** `pending_documents()`
+   (`extract_pdfs.py:250`) requires non-empty `rec_book`/`rec_page`, and Broward e-recorded docs
+   have neither — so Broward rows are silently skipped. Protective for now (they'd otherwise hit
+   the Miami-Dade downloader), but it is the next thing to fix, alongside an OCR path that reads
+   local TIFFs instead of `download_pdf()` + `pdftoppm`.
+3. Then the history scraper (~49,000 docs, 2023-01-01 → retention window) and the 2026 index gap.
+   The results grid has an **Export to CSV** button — prefer it over parsing HTML.
+4. Everything from the 2026-08-06 entry below still stands: county filter, per-county document
+   links, `normalize.py` county propagation.
+
+---
+
 ## 2026-08-06 (later) — Broward County expansion started. Index ingestion BUILT + rehearsed, NOT deployed.
 
 User directive: bring the same information in from Broward. [ROLLBACK.md](ROLLBACK.md) has a

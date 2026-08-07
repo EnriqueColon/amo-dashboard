@@ -11,7 +11,25 @@ entity-normalization section below is retained but that change is already deploy
 | `collector/broward_collect.py` | built, rehearsed | no — new file |
 | `collector/migrate_add_county.py` | built, rehearsed | **yes when run** — schema change |
 | `collector/tests/check_county_isolation.py` | built, green | no — new file |
+| `collector/broward_images.py` | built, rehearsed (553 docs) | no — new file + new table |
+| `collector/run_broward_daily.sh` | built, not installed | no until cron is added |
 | server / client / `normalize.py` | **not started** | no |
+
+## Reverting the image harvester
+
+`broward_images.py` only ever creates its own table and writes files under
+`BROWARD_IMAGE_DIR`. It never touches `assignments`, `pdf_extractions` or anything the dashboard
+reads, so removing it cannot affect the running site:
+
+    DROP TABLE broward_images;      -- then delete BROWARD_IMAGE_DIR
+
+**Think before deleting the images themselves.** They are only re-fetchable while their day is
+still inside the ~10-day feed window. Past that, re-acquiring them means scraping the portal one
+document at a time — the expensive path this whole design exists to avoid. Dropping the table
+while keeping the files is the cheap, safe reset: the harvester will simply re-harvest and
+overwrite.
+
+If cron has been installed, remove the entry too, or it will re-populate both.
 
 ## Why the schema migration is low-risk
 

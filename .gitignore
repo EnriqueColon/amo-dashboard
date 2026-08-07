@@ -21,3 +21,5 @@ collector/batch/
 # Generated diagnostic reports (regenerable, DB-specific)
 collector/tests/name_system_disagreements.tsv
 collector/broward_collector.log
+collector/broward_images.log
+collector/broward_images/
