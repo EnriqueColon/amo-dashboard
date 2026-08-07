@@ -4,6 +4,41 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-08-07 (later) — Broward image harvester DEPLOYED to production. Phase 1 live.
+
+Images only, no county migration, no Broward rows in any table the dashboard reads. The retention
+clock has stopped.
+
+### Deploy, all six steps
+1. `ssh-add --apple-use-keychain ~/.ssh/id_ed25519` — **the agent had no identities**; key auth
+   fails with `Permission denied (publickey)` until this is done each session.
+2. `collector/.venv/bin/pip install paramiko` → 5.0.0.
+3. `git pull --ff-only` from `b6f7f47` → collector-only changes, so **no `npm run build` and no
+   `pm2 restart`** (the Node bundle is untouched — this is the rare deploy that skips both).
+4. First harvest: `broward_images.py --all --from-feed` via `nohup`+`disown`, ~4 min,
+   **553 documents / 77.6MB / 80MB on disk**.
+5. Cron installed: `30 12 * * * run_broward_daily.sh` (4th entry alongside weekly, tick, nightly).
+6. Ran the wrapper under `env -i` to imitate cron's bare environment → exit 0, idempotent
+   (0 new documents, every day `complete`).
+
+### Verified after deploy
+- `assignments` **70,834** — up from the snapshot's 70,355 purely from Miami-Dade collection
+  through 2026-08-06, not contamination. Explicitly confirmed: `SELECT COUNT(*) FROM assignments
+  WHERE cfn GLOB '[0-9]*' AND cfn NOT GLOB '*[^0-9]*'` → **0**, i.e. no Broward-format keys.
+- `county` column still absent, as intended for phase 1.
+- `broward_images` = 553 rows. App online, HTTP 302 (login redirect). Disk 147G free.
+- **Droplet tesseract reads the harvested TIFFs directly** — no `pdftoppm` step needed, which
+  removes a dependency the Miami-Dade path has.
+
+### Ops notes
+- Droplet throughput is ~3× slower than local (4 min vs 70s for the same 553 documents) — network
+  bound, not CPU. Still trivial against a daily run of ~55 documents.
+- Growth is ~8MB/day ≈ 2GB/year against 147GB free.
+- Watch `collector/broward_daily.log`. **Any day showing PENDING that then scrolls off the top of
+  the retention window is permanently lost to the free channel.**
+
+---
+
 ## 2026-08-07 — Broward image harvester BUILT + rehearsed. Still NOT deployed.
 
 User chose to scrape rather than buy bulk data, reasoning that collection is recurring. Important

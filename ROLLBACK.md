@@ -15,6 +15,26 @@ entity-normalization section below is retained but that change is already deploy
 | `collector/run_broward_daily.sh` | built, not installed | no until cron is added |
 | server / client / `normalize.py` | **not started** | no |
 
+## Phase 1 is DEPLOYED (2026-08-07)
+
+Live on the droplet: `paramiko` installed, code pulled, 553 documents harvested to
+`/opt/amo-dashboard/collector/broward_images`, cron at `30 12 * * *`. No `npm run build` and no
+`pm2 restart` were needed — the change is collector-only.
+
+Post-deploy verification: `assignments` holds **0** Broward-format (pure-numeric) CFNs, the
+`county` column is still absent, and the app is online. The count moving 70,355 → 70,834 is
+ordinary Miami-Dade collection through 2026-08-06.
+
+**To back it out completely:**
+
+    ssh root@165.22.35.75
+    crontab -e                                    # delete the run_broward_daily.sh line
+    sqlite3 /opt/amo-dashboard/miami_dade_amo.db "DROP TABLE broward_images;"
+    rm -rf /opt/amo-dashboard/collector/broward_images
+
+Think before that last line — see the warning under "Reverting the image harvester" below.
+Nothing the dashboard reads is involved, so no rebuild or restart is required either way.
+
 ## Phase 1 deploy (harvester only) — what it can and cannot touch
 
 `run_broward_daily.sh` defaults to `--from-feed`, which reads the work list from the feed's own
