@@ -13,7 +13,26 @@ entity-normalization section below is retained but that change is already deploy
 | `collector/tests/check_county_isolation.py` | built, green | no — new file |
 | `collector/broward_images.py` | built, rehearsed (553 docs) | no — new file + new table |
 | `collector/run_broward_daily.sh` | built, not installed | no until cron is added |
-| server / client / `normalize.py` | **not started** | no |
+| county-aware server (`routes.ts`, `db.ts`) | built, verified | **yes when deployed** — needs build + pm2 restart |
+| `normalize.py` county scoping | built, verified (zero drift) | **yes when deployed** |
+| client county selector | **not started** | no |
+
+## Reverting the county-aware server
+
+The whole change is gated behind one constant. `DEFAULT_SCOPE` in `server/routes.ts` is
+`'MIAMI-DADE'`, and the client sends no `county` parameter, so every response is identical to the
+pre-change server. **Verified**: on a two-county database (70,355 Miami-Dade + 13,674 Broward),
+`/api/stats` returned the exact Miami-Dade baseline, and a full `normalize.py` run left
+`aom_events_clean`, `entity_classifications` and `entity_nodes` byte-identical.
+
+To revert, `git revert` the commit, `npm run build`, `pm2 restart amo-dashboard`. Nothing needs
+undoing in the data: the county column is additive and `normalize.py`'s scoping only ever removes
+Broward rows from consideration, so re-running the old code rebuilds the same tables.
+
+**The one-way door is `NORMALIZE_COUNTIES` in `collector/normalize.py`.** Widening it to include
+Broward lets Broward names into the entity-classification signal sweep, which can change
+`assignor_type`/`assignee_type` on existing Miami-Dade rows. That is a data change, not a code
+change — reverting the constant afterwards requires a further `normalize.py` run to undo it.
 
 ## Phase 1 is DEPLOYED (2026-08-07)
 

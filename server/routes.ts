@@ -7,22 +7,61 @@ import {
   makeCacheKey, DEFAULT_TTL_MS, STATS_TTL_MS,
 } from './cache';
 
+// ── Multi-county scoping ─────────────────────────────────────────────────────
+// Only `assignments` and `collection_log` can currently hold Broward rows, so
+// scoping is applied exactly there rather than sprayed across all ~98 query
+// sites. The derived tables are unreachable by Broward data today: normalize.py's
+// loan-transfer filter admits a non-AMO doc type only when the PDF is classified
+// LOAN_TRANSFER (collector/normalize.py:1002), and Broward documents have no
+// extractions yet — while entity_nodes and entity_relationships are built from
+// aom_events_clean, so they inherit the same barrier.
+//
+// WHEN BROWARD EXTRACTIONS LAND, THAT BARRIER DISAPPEARS. At that point
+// aom_events_clean, credit_facility_events and the entity tables all become
+// reachable and need their own scoping decision — note that the entity
+// aggregates are pre-aggregated by normalize.py and cannot simply be filtered at
+// query time; they would have to be rebuilt per-county, or deliberately left
+// cross-county (which is what the user asked for: the same lenders operate in
+// both counties, and resolving them together is the point).
+const DEFAULT_COUNTY = 'MIAMI-DADE';
+
+// Flip to null once the UI exposes a county selector and Broward data is
+// complete enough to show. Until then the default keeps production identical.
+const DEFAULT_SCOPE: string | null = DEFAULT_COUNTY;
+
+/** `?county=ALL` widens to every county; anything else scopes to that county. */
+function countyScope(req: { query: Record<string, any> }): string | null {
+  const raw = String(req.query.county ?? '').trim().toUpperCase();
+  if (!raw) return DEFAULT_SCOPE;
+  return raw === 'ALL' ? null : raw;
+}
+
+/**
+ * COALESCE rather than a bare comparison: a row written by an older collector
+ * build has a NULL county but is Miami-Dade by definition, and must not vanish
+ * from a scoped result.
+ */
+function countyPredicate(alias = ''): string {
+  const col = `${alias}county`;
+  return `(:county IS NULL OR COALESCE(${col}, '${DEFAULT_COUNTY}') = :county)`;
+}
+
 export async function registerRoutes(httpServer: Server, app: Express) {
   const db = getDb();
 
   // ── Pre-compile all frequently-used statements once at startup ─────────────
   const stmts = {
-    statsTotal:          db.prepare('SELECT COUNT(*) as n FROM assignments'),
-    statsRange:          db.prepare('SELECT MIN(rec_date) as min_date, MAX(rec_date) as max_date FROM assignments'),
-    statsGrantors:       db.prepare('SELECT COUNT(DISTINCT grantor) as n FROM assignments'),
-    statsGrantees:       db.prepare('SELECT COUNT(DISTINCT grantee) as n FROM assignments'),
+    statsTotal:          db.prepare(`SELECT COUNT(*) as n FROM assignments WHERE ${countyPredicate()}`),
+    statsRange:          db.prepare(`SELECT MIN(rec_date) as min_date, MAX(rec_date) as max_date FROM assignments WHERE ${countyPredicate()}`),
+    statsGrantors:       db.prepare(`SELECT COUNT(DISTINCT grantor) as n FROM assignments WHERE ${countyPredicate()}`),
+    statsGrantees:       db.prepare(`SELECT COUNT(DISTINCT grantee) as n FROM assignments WHERE ${countyPredicate()}`),
     statsUniqueEntities: db.prepare('SELECT COUNT(DISTINCT entity) as n FROM entity_nodes'),
     statsSelfAssigns:    db.prepare(`SELECT COUNT(*) as n FROM aom_events_clean WHERE txn_type='SELF_ASSIGN'`),
     statsPrivCredit:     db.prepare(`SELECT COUNT(*) as n FROM aom_events_clean WHERE (assignor_type='PRIVATE_CREDIT' OR assignee_type='PRIVATE_CREDIT') AND txn_type != 'SELF_ASSIGN'`),
     statsMarketTransfers:db.prepare(`SELECT COUNT(*) as n FROM aom_events_clean WHERE txn_type='MARKET_TRANSFER'`),
     statsTxnBreakdown:   db.prepare(`SELECT txn_type, COUNT(*) as n FROM aom_events_clean GROUP BY txn_type ORDER BY n DESC`),
-    statsLogCount:       db.prepare('SELECT COUNT(*) as n FROM collection_log'),
-    statsLastCollected:  db.prepare(`SELECT MAX(date_to) as dt FROM collection_log WHERE status='OK'`),
+    statsLogCount:       db.prepare(`SELECT COUNT(*) as n FROM collection_log WHERE ${countyPredicate()}`),
+    statsLastCollected:  db.prepare(`SELECT MAX(date_to) as dt FROM collection_log WHERE status='OK' AND ${countyPredicate()}`),
     monthlyVolume:       db.prepare(`
       SELECT strftime('%Y-%m', rec_date) as month,
         COUNT(*) as total,
@@ -82,7 +121,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       GROUP BY assignee_canon
       ORDER BY count DESC LIMIT 10
     `),
-    collectionLog:       db.prepare('SELECT date_from, date_to, records_found, status FROM collection_log ORDER BY date_from DESC'),
+    collectionLog:       db.prepare(`SELECT date_from, date_to, records_found, status FROM collection_log WHERE ${countyPredicate()} ORDER BY date_from DESC`),
   };
 
   // ─── POST /api/cache/bust ─────────────────────────────────────────────────
@@ -99,22 +138,25 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   });
 
   // ─── GET /api/stats ───────────────────────────────────────────────────────
-  app.get('/api/stats', (_req, res) => {
-    const KEY = '/api/stats';
+  app.get('/api/stats', (req, res) => {
+    const county = countyScope(req as any);
+    // The county MUST be part of the cache key — otherwise the first scope to be
+    // requested is served to every other one for the next 7 days.
+    const KEY = makeCacheKey('/api/stats', { county: county ?? 'ALL' });
     const cached = getCached(KEY);
     if (cached) return res.json(cached);
 
-    const total               = (stmts.statsTotal.get() as any).n;
-    const { min_date, max_date } = stmts.statsRange.get() as any;
-    const unique_grantors     = (stmts.statsGrantors.get() as any).n;
-    const unique_grantees     = (stmts.statsGrantees.get() as any).n;
+    const total               = (stmts.statsTotal.get({ county }) as any).n;
+    const { min_date, max_date } = stmts.statsRange.get({ county }) as any;
+    const unique_grantors     = (stmts.statsGrantors.get({ county }) as any).n;
+    const unique_grantees     = (stmts.statsGrantees.get({ county }) as any).n;
     const unique_entities     = (stmts.statsUniqueEntities.get() as any).n;
     const self_assigns        = (stmts.statsSelfAssigns.get() as any).n;
     const private_credit_txns = (stmts.statsPrivCredit.get() as any).n;
     const market_transfers    = (stmts.statsMarketTransfers.get() as any).n;
     const txn_breakdown       = stmts.statsTxnBreakdown.all();
-    const collection_log_count = (stmts.statsLogCount.get() as any).n;
-    const last_collected      = (stmts.statsLastCollected.get() as any)?.dt;
+    const collection_log_count = (stmts.statsLogCount.get({ county }) as any).n;
+    const last_collected      = (stmts.statsLastCollected.get({ county }) as any)?.dt;
     const unique_cfns = total;
     const payload = { total, unique_cfns, unique_entities, self_assigns, min_date, max_date, unique_grantors, unique_grantees, private_credit_txns, market_transfers, txn_breakdown, collection_log_count, last_collected };
     setCached(KEY, payload, STATS_TTL_MS);
@@ -156,13 +198,18 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       ? (Array.isArray(category) ? category : [category])
       : (req.query['category[]'] ? (Array.isArray(req.query['category[]']) ? req.query['category[]'] : [req.query['category[]']]) : []);
 
-    const cacheKey = makeCacheKey('/api/assignments', { grantor, grantee, start_date, end_date, categories, page, limit });
+    const county = countyScope(req as any);
+    const cacheKey = makeCacheKey('/api/assignments', { grantor, grantee, start_date, end_date, categories, page, limit, county: county ?? 'ALL' });
     const cached = getCached(cacheKey);
     if (cached) return res.json(cached);
 
     const where: string[] = [];
     const params: any[] = [];
 
+    // Positional rather than the named countyPredicate() helper: this query is
+    // assembled dynamically with `?` placeholders, and better-sqlite3 refuses to
+    // mix named and positional parameters in one statement.
+    if (county) { where.push(`COALESCE(a.county, '${DEFAULT_COUNTY}') = ?`); params.push(county); }
     if (grantor)    { where.push("UPPER(a.grantor) LIKE UPPER(?)"); params.push(`%${grantor}%`); }
     if (grantee)    { where.push("UPPER(a.grantee) LIKE UPPER(?)"); params.push(`%${grantee}%`); }
     if (start_date) { where.push("a.rec_date >= ?"); params.push(start_date); }
@@ -227,6 +274,10 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const { q } = req.query as Record<string, string>;
     if (!q || q.trim().length < 2) return res.json([]);
     const term = `%${q.trim()}%`;
+    const county = countyScope(req as any);
+    // The county filter is ANDed around the whole OR group — without the
+    // parentheses a Broward CFN match would leak past the scope.
+    const countyClause = county ? `COALESCE(a.county, '${DEFAULT_COUNTY}') = ? AND` : '';
     const rows = db.prepare(`
       SELECT a.cfn, a.rec_date, a.grantor, a.grantee, a.address,
         COALESCE(ec_g.category,'UNCLASSIFIED') as grantor_category,
@@ -234,9 +285,9 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       FROM assignments a
       LEFT JOIN entity_classifications ec_g ON UPPER(a.grantor)=UPPER(ec_g.name)
       LEFT JOIN entity_classifications ec_a ON UPPER(a.grantee)=UPPER(ec_a.name)
-      WHERE UPPER(a.grantor) LIKE UPPER(?) OR UPPER(a.grantee) LIKE UPPER(?) OR a.cfn LIKE ?
+      WHERE ${countyClause} (UPPER(a.grantor) LIKE UPPER(?) OR UPPER(a.grantee) LIKE UPPER(?) OR a.cfn LIKE ?)
       ORDER BY a.rec_date DESC LIMIT 100
-    `).all(term, term, term);
+    `).all(...(county ? [county] : []), term, term, term);
     res.json(rows);
   });
 
@@ -437,11 +488,12 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   });
 
   // ─── GET /api/collection-log ──────────────────────────────────────────────
-  app.get('/api/collection-log', (_req, res) => {
-    const KEY = '/api/collection-log';
+  app.get('/api/collection-log', (req, res) => {
+    const county = countyScope(req as any);
+    const KEY = makeCacheKey('/api/collection-log', { county: county ?? 'ALL' });
     const cached = getCached(KEY);
     if (cached) return res.json(cached);
-    const data = stmts.collectionLog.all();
+    const data = stmts.collectionLog.all({ county });
     setCached(KEY, data, STATS_TTL_MS);
     res.json(data);
   });
@@ -474,14 +526,18 @@ export async function registerRoutes(httpServer: Server, app: Express) {
 
 
   // ─── GET /api/network-stats ───────────────────────────────────────────────
-  app.get('/api/network-stats', (_req, res) => {
-    const KEY = '/api/network-stats';
+  app.get('/api/network-stats', (req, res) => {
+    // Shares stmts.statsTotal with /api/stats, so it has to pass :county too.
+    // The other statements here read the entity aggregates, which are built from
+    // aom_events_clean and so carry no county of their own.
+    const county = countyScope(req as any);
+    const KEY = makeCacheKey('/api/network-stats', { county: county ?? 'ALL' });
     const cached = getCached(KEY);
     if (cached) return res.json(cached);
     const clean_total    = (stmts.networkStats.get() as any)?.n ?? 0;
     const node_count     = (stmts.nodeCount.get() as any)?.n ?? 0;
     const edge_count     = (stmts.edgeCount.get() as any)?.n ?? 0;
-    const raw_total      = (stmts.statsTotal.get() as any).n;
+    const raw_total      = (stmts.statsTotal.get({ county }) as any).n;
     const top_acquirers  = stmts.topAcquirers.all();
     const top_sellers    = stmts.topSellers.all();
     const most_connected = stmts.mostConnected.all();

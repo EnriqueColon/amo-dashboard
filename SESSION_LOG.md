@@ -4,6 +4,69 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-08-07 (later still) — County-aware server BUILT + verified. NOT deployed.
+
+Phase 2. Default scope is Miami-Dade, so production output is unchanged until the UI opts in.
+
+### The change is far smaller than the raw grep suggests
+98 query sites touch county-able tables, but **only `assignments` and `collection_log` can
+actually hold Broward rows today.** The derived tables are unreachable: `normalize.py`'s
+loan-transfer filter (`normalize.py:1002`) admits a non-AMO doc type only when the PDF is
+classified `LOAN_TRANSFER`, Broward's `AST` is non-AMO, and Broward has no extractions —
+while `entity_nodes`/`entity_relationships` are built from `aom_events_clean` and inherit the same
+barrier. So scoping went exactly where it can matter, not across all 98 sites.
+
+**That barrier disappears the moment Broward extractions land.** Noted in the code: the entity
+aggregates are pre-aggregated by `normalize.py` and cannot be filtered at query time — they would
+have to be rebuilt per-county, or deliberately left cross-county (which is what the user asked
+for).
+
+### Built
+- `server/routes.ts` — `DEFAULT_SCOPE` (currently `'MIAMI-DADE'`), `countyScope(req)` reading
+  `?county=` (`ALL` widens), `countyPredicate()`. Applied to `/api/stats`, `/api/collection-log`,
+  `/api/assignments`, `/api/search`, `/api/network-stats`.
+- `server/db.ts` — defensive county migration mirroring `migrate_add_county.py`, so the server
+  self-heals whichever side deploys first.
+- `collector/normalize.py` — `NORMALIZE_COUNTIES` + `county_filter()`, applied to the main rebuild
+  query and the raw-name signal sweep.
+
+### The subtle one — the raw-name sweep, which has no loan-transfer filter
+`normalize.py`'s suffix-signal pass reads names straight off `assignments`. A Broward name landing
+there can flip the signals of a canonical entity that also trades in Miami-Dade, silently changing
+`assignor_type`/`assignee_type` on existing rows. Measured: the sweep sees 41,097 names unscoped
+vs 37,470 scoped; the 3,627 excluded are Broward-only and **zero of them also exist in
+Miami-Dade**, so scoping provably cannot move an existing classification.
+
+### Verified against a two-county DB (70,355 MD + 13,674 Broward)
+- `/api/stats` — default `70,355 / 28,454 / 13,442`, exactly the Miami-Dade SQL baseline;
+  `?county=BROWARD` `13,674`; `?county=ALL` `84,029 / 30,963 / 14,861`. All three match SQL.
+- `/api/search` default returns **0** Broward-format CFNs; `?county=BROWARD` returns 100.
+- **Full `normalize.py` run with Broward present → zero drift.** `aom_events_clean` 51,093 →
+  51,093, zero Broward rows in it or `credit_facility_events`, and `entity_classifications`
+  (22,287 rows) plus `entity_nodes` (20,195 rows) came back **byte-identical**.
+- Swept all 37 GET endpoints × 3 scopes: all 200. (Two 400s are pre-existing
+  missing-required-param guards on `/family` and `/entity-report`.)
+- Guardrails green: canonicalize baseline, alias scope, county isolation.
+
+### The bug only running caught — again
+`/api/network-stats` **reuses `stmts.statsTotal`** and called `.get()` with no arguments → 500
+`Missing named parameters`. `tsc` passed clean. It only surfaced by loading the page and reading
+the console. Lesson repeated: **when a shared prepared statement gains a parameter, grep every
+call site of that statement, not just the endpoint being edited.** It also silently broke the
+Overview chart, which is what a 500 on one of four parallel calls looks like.
+
+### Open / next session
+1. **Not deployed.** Deploy order: `migrate_add_county.py` → `git pull` → `npm run build` →
+   `pm2 restart` (this one DOES need build+restart — server code changed). Then ingest the index.
+2. **Client sends no `county` param yet**, so it gets the Miami-Dade default — which is why
+   production is unaffected. The county selector is the next UI piece.
+3. **Branding says "Miami-Dade County"** in the sidebar, the login page and the Overview subtitle.
+   Needs to become county-aware before Broward is visible.
+4. Flip `DEFAULT_SCOPE` to `null` only once the UI has a selector AND Broward has extractions —
+   otherwise Broward rows appear with no details and no way to filter them out.
+
+---
+
 ## 2026-08-07 (later) — Broward image harvester DEPLOYED to production. Phase 1 live.
 
 Images only, no county migration, no Broward rows in any table the dashboard reads. The retention

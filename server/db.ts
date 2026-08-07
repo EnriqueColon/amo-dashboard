@@ -160,6 +160,33 @@ export function getDb(): Database.Database {
       } catch (_e) {}
     }
 
+    // Migration: multi-county support. Mirrors collector/migrate_add_county.py so
+    // the server self-heals whichever side is deployed first — the Python
+    // migration and this block are idempotent and agree on the same backfill.
+    //
+    // Every row that predates this column is Miami-Dade by definition, hence the
+    // unconditional UPDATE of NULLs. Queries still COALESCE onto 'MIAMI-DADE'
+    // rather than trusting the backfill, so a row inserted by an older collector
+    // build can never silently drop out of a county-scoped result.
+    for (const table of ['assignments', 'pdf_extractions', 'aom_events_clean',
+                          'credit_facility_events', 'collection_log']) {
+      try {
+        _db.exec(`ALTER TABLE ${table} ADD COLUMN county TEXT`);
+        console.log(`[db] migrated: added county column to ${table}`);
+      } catch (_e) {}
+      try {
+        _db.exec(`UPDATE ${table} SET county = 'MIAMI-DADE' WHERE county IS NULL`);
+      } catch (_e) {}
+    }
+    for (const [table, name, cols] of [
+      ['assignments',            'idx_assignments_county_cfn',  '(county, cfn)'],
+      ['assignments',            'idx_assignments_county_date', '(county, rec_date)'],
+      ['aom_events_clean',       'idx_aom_clean_county_date',   '(county, rec_date)'],
+      ['credit_facility_events', 'idx_cfe_county',              '(county)'],
+    ] as Array<[string, string, string]>) {
+      try { _db.exec(`CREATE INDEX IF NOT EXISTS ${name} ON ${table} ${cols}`); } catch (_e) {}
+    }
+
     // Watchlist of market participants the user wants to monitor (Targets tab)
     _db.exec(`
       CREATE TABLE IF NOT EXISTS target_entities (

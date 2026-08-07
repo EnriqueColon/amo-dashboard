@@ -19,6 +19,38 @@ import name_matching
 
 DB = os.environ.get('AMO_DB_PATH', '/opt/amo-dashboard/miami_dade_amo.db')
 
+# ── County scope ──────────────────────────────────────────────────────────────
+# Which counties are allowed to feed the derived tables. Broward is excluded
+# while its documents have no LLM extractions: the loan-transfer filter in
+# build_normalized_tables() already keeps them out of aom_events_clean, but the
+# raw-name signal sweep has no such filter and would let Broward names shift the
+# classification of entities that also trade in Miami-Dade.
+#
+# Set to None for all counties once Broward extraction lands and cross-county
+# entity resolution is wanted — which is the stated goal, just not yet.
+NORMALIZE_COUNTIES: tuple[str, ...] | None = ('MIAMI-DADE',)
+
+
+def county_filter(conn, alias: str = '') -> str:
+    """SQL fragment scoping a query to NORMALIZE_COUNTIES, or '' if not applicable.
+
+    Returns an empty string when the column does not exist yet, so this runs
+    unchanged against a database that predates the multi-county migration.
+    Values are inlined rather than parameterised because callers compose this
+    into UNIONed statements where positional placeholders would have to be
+    duplicated and kept in order — the inputs are module constants, not input.
+    """
+    if not NORMALIZE_COUNTIES:
+        return ''
+    cols = [r[1] for r in conn.execute('PRAGMA table_info(assignments)')]
+    if 'county' not in cols:
+        return ''
+    quoted = ', '.join("'" + c.replace("'", "''") + "'" for c in NORMALIZE_COUNTIES)
+    col = f'{alias}county'
+    # COALESCE: rows written before the migration are Miami-Dade by definition.
+    return f" AND COALESCE({col}, 'MIAMI-DADE') IN ({quoted})"
+
+
 # ── OCR sanity filter ─────────────────────────────────────────────────────────
 # Rejects extracted text fields that look like OCR garbage before they reach
 # aom_events_clean.  Returns the value if it passes, else None.
@@ -812,10 +844,18 @@ def build_normalized_tables():
         'has_gse_suffix': False,
     })
 
+    # Scoped by county on purpose. The loan-transfer filter further down keeps
+    # Broward documents out of aom_events_clean until they have extractions, but
+    # THIS sweep has no such filter: it reads raw names straight off
+    # `assignments`, and a Broward name landing here can flip the suffix signals
+    # of a canonical entity that also trades in Miami-Dade — silently changing
+    # assignor_type/assignee_type on existing rows. Widen this when Broward
+    # extraction lands and cross-county entity resolution is wanted.
+    scope = county_filter(conn)
     all_raw = conn.execute(
-        "SELECT DISTINCT grantor FROM assignments WHERE grantor IS NOT NULL "
+        f"SELECT DISTINCT grantor FROM assignments WHERE grantor IS NOT NULL{scope} "
         "UNION "
-        "SELECT DISTINCT grantee FROM assignments WHERE grantee IS NOT NULL"
+        f"SELECT DISTINCT grantee FROM assignments WHERE grantee IS NOT NULL{scope}"
     ).fetchall()
 
     for (raw_name,) in all_raw:
@@ -974,6 +1014,7 @@ def build_normalized_tables():
         FROM assignments a
         LEFT JOIN entity_classifications ec_g ON UPPER(a.grantor)=UPPER(ec_g.name)
         LEFT JOIN entity_classifications ec_a ON UPPER(a.grantee)=UPPER(ec_a.name)
+        WHERE 1=1""" + county_filter(conn, 'a.') + """
     """).fetchall()
 
     print(f"  Loaded {len(rows)} raw rows")
