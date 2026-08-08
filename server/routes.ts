@@ -46,6 +46,22 @@ function countyPredicate(alias = ''): string {
   return `(:county IS NULL OR COALESCE(${col}, '${DEFAULT_COUNTY}') = :county)`;
 }
 
+/**
+ * Positional variant, for the many queries assembled as strings with `?`
+ * placeholders — better-sqlite3 refuses to mix named and positional parameters
+ * in one statement, so those cannot use countyPredicate().
+ *
+ * Returns an empty clause for the all-counties scope so callers can splice it in
+ * unconditionally.
+ */
+function countyFilter(county: string | null, alias = ''): { sql: string; params: any[] } {
+  if (!county) return { sql: '', params: [] };
+  return {
+    sql: `AND COALESCE(${alias}county, '${DEFAULT_COUNTY}') = ?`,
+    params: [county],
+  };
+}
+
 export async function registerRoutes(httpServer: Server, app: Express) {
   const db = getDb();
 
@@ -639,12 +655,14 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const limitNum = Math.min(parseInt(limit) || 50, 500);
     const offset = (pageNum - 1) * limitNum;
 
-    const cacheKey = makeCacheKey('/api/clean-events', { assignor, assignee, start_date, end_date, txn_type, page, limit });
+    const county = countyScope(req as any);
+    const cacheKey = makeCacheKey('/api/clean-events', { assignor, assignee, start_date, end_date, txn_type, page, limit, county: county ?? 'ALL' });
     const cached = getCached(cacheKey);
     if (cached) return res.json(cached);
 
     const where: string[] = [];
     const params: any[] = [];
+    if (county)      { where.push(`COALESCE(county, '${DEFAULT_COUNTY}') = ?`); params.push(county); }
     if (assignor)    { where.push("UPPER(assignor_canon) LIKE UPPER(?)"); params.push(`%${assignor}%`); }
     if (assignee)    { where.push("UPPER(assignee_canon) LIKE UPPER(?)"); params.push(`%${assignee}%`); }
     if (start_date)  { where.push("rec_date >= ?"); params.push(start_date); }
@@ -678,12 +696,14 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const limitNum = Math.min(parseInt(limit) || 50, 500);
     const offset = (pageNum - 1) * limitNum;
 
-    const cacheKey = makeCacheKey('/api/credit-facility-events', { lender, borrower, facility_type, start_date, end_date, page, limit });
+    const county = countyScope(req as any);
+    const cacheKey = makeCacheKey('/api/credit-facility-events', { lender, borrower, facility_type, start_date, end_date, page, limit, county: county ?? 'ALL' });
     const cached = getCached(cacheKey);
     if (cached) return res.json(cached);
 
     const where: string[] = [];
     const params: any[] = [];
+    if (county)        { where.push(`COALESCE(county, '${DEFAULT_COUNTY}') = ?`); params.push(county); }
     if (lender)        { where.push("UPPER(facility_lender_name) LIKE UPPER(?)"); params.push(`%${lender}%`); }
     if (borrower)      { where.push("UPPER(facility_borrower_name) LIKE UPPER(?)"); params.push(`%${borrower}%`); }
     if (facility_type) { where.push("facility_type = ?"); params.push(facility_type); }
@@ -720,12 +740,14 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const limitNum = Math.min(parseInt(limit) || 50, 5000);
     const offset = (pageNum - 1) * limitNum;
 
-    const cacheKey = makeCacheKey('/api/credit-facility-events/facilities', { lender, borrower, facility_type, start_date, end_date, page, limit, sort, dir });
+    const county = countyScope(req as any);
+    const cacheKey = makeCacheKey('/api/credit-facility-events/facilities', { lender, borrower, facility_type, start_date, end_date, page, limit, sort, dir, county: county ?? 'ALL' });
     const cached = getCached(cacheKey);
     if (cached) return res.json(cached);
 
     const where: string[] = [];
     const params: any[] = [];
+    if (county)        { where.push(`COALESCE(county, '${DEFAULT_COUNTY}') = ?`); params.push(county); }
     if (lender)        { where.push("UPPER(facility_lender_name) LIKE UPPER(?)"); params.push(`%${lender}%`); }
     if (borrower)      { where.push("UPPER(facility_borrower_name) LIKE UPPER(?)"); params.push(`%${borrower}%`); }
     if (facility_type) { where.push("facility_type = ?"); params.push(facility_type); }
@@ -824,7 +846,9 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   // UPPER()'d keys returned by /facilities (empty string = extracted as null).
   app.get('/api/credit-facility-events/filings', (req, res) => {
     const { lender = '', borrower = '' } = req.query as Record<string, string>;
-    const cacheKey = makeCacheKey('/api/credit-facility-events/filings', { lender, borrower });
+    const county = countyScope(req as any);
+    const cf = countyFilter(county, 'e.');
+    const cacheKey = makeCacheKey('/api/credit-facility-events/filings', { lender, borrower, county: county ?? 'ALL' });
     const cached = getCached(cacheKey);
     if (cached) return res.json(cached);
 
@@ -852,8 +876,9 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       LEFT JOIN pdf_extractions px ON px.cfn = e.cfn
       WHERE COALESCE(e.lender_key, UPPER(COALESCE(e.facility_lender_name, '')))     = ?
         AND COALESCE(e.borrower_key, UPPER(COALESCE(e.facility_borrower_name, ''))) = ?
+        ${cf.sql}
       ORDER BY e.rec_date DESC
-    `).all(lender.toUpperCase(), borrower.toUpperCase()) as any[];
+    `).all(lender.toUpperCase(), borrower.toUpperCase(), ...cf.params) as any[];
 
     const enriched = rows.map(r => {
       if (r.loan_amount != null) return { ...r, loan_amount_source: 'structured' };
@@ -876,7 +901,9 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const parent = typeof req.query.parent === 'string' ? req.query.parent : '';
     if (!lender || !parent) return res.status(400).json({ error: 'lender and parent required' });
 
-    const cacheKey = `cfe:family:${lender}:${parent}`;
+    const county = countyScope(req as any);
+    const cf = countyFilter(county);
+    const cacheKey = `cfe:family:${lender}:${parent}:${county ?? 'ALL'}`;
     const hit = getCached(cacheKey);
     if (hit) return res.json(hit);
 
@@ -899,9 +926,10 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       FROM credit_facility_events
       WHERE COALESCE(lender_key, UPPER(COALESCE(facility_lender_name, ''))) = ?
         AND borrower_parent = ?
+        ${cf.sql}
       GROUP BY 1, 2
       ORDER BY filings DESC, facility_amount DESC
-    `).all(lender, parent);
+    `).all(lender, parent, ...cf.params);
 
     setCached(cacheKey, rows);
     res.json(rows);
@@ -913,8 +941,13 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const startDate = typeof req.query.start_date === 'string' ? req.query.start_date : '';
     const endDate   = typeof req.query.end_date === 'string' ? req.query.end_date : '';
 
+    // County joins the shared clause list rather than each branch: every chart
+    // type below composes from these, so adding it here scopes all of them at
+    // once and cannot be forgotten when a new chart type is added.
+    const county = countyScope(req as any);
     const dateClauses: string[] = [];
     const dateParams: any[] = [];
+    if (county)    { dateClauses.push(`COALESCE(county, '${DEFAULT_COUNTY}') = ?`); dateParams.push(county); }
     if (startDate) { dateClauses.push(`rec_date >= ?`); dateParams.push(startDate); }
     if (endDate)   { dateClauses.push(`rec_date <= ?`); dateParams.push(endDate); }
     const dwc = dateClauses.length ? `WHERE ${dateClauses.join(' AND ')}` : '';
@@ -1902,9 +1935,11 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const targetsOnly = req.query.targets === '1';
     const entities  = parseEntities(req.query);
 
+    const county    = countyScope(req as any);
     const clauses: string[] = [];
     const params: any[] = [];
 
+    if (county) { clauses.push(`COALESCE(county, '${DEFAULT_COUNTY}') = ?`); params.push(county); }
     if (search) {
       clauses.push(`(UPPER(assignor_canon) LIKE UPPER(?) OR UPPER(assignee_canon) LIKE UPPER(?) OR cfn LIKE ?)`);
       params.push(`%${search}%`, `%${search}%`, `%${search}%`);
