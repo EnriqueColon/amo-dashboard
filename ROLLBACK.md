@@ -17,6 +17,24 @@ entity-normalization section below is retained but that change is already deploy
 | `normalize.py` county scoping | **DEPLOYED 2026-08-07** | yes — live |
 | client county selector | **DEPLOYED 2026-08-08** | yes — live |
 | Broward index in `assignments` | **INGESTED 2026-08-08** — 42,509 rows | yes — live |
+| Broward extraction path | **DEPLOYED 2026-08-08** — 50 documents extracted | yes, but inert (see below) |
+
+## Broward extractions are currently inert
+
+50 `pdf_extractions` rows exist with `county='BROWARD'`, and they change nothing the dashboard
+shows: `normalize.py` excludes Broward via `NORMALIZE_COUNTIES`, so they cannot reach
+`aom_events_clean`. To remove them:
+
+    DELETE FROM pdf_extractions WHERE county = 'BROWARD';
+
+No rebuild or restart needed while `NORMALIZE_COUNTIES` still excludes Broward.
+
+**`NORMALIZE_COUNTIES` remains the one-way door.** Adding `'BROWARD'` to it is what makes all of
+this visible — and simultaneously lets Broward names into the entity-classification signal sweep,
+which can change `assignor_type`/`assignee_type` on existing Miami-Dade rows. That is a data
+change: reverting the constant afterwards needs a further `normalize.py` run to undo it. Rehearse
+on a two-county copy and diff `entity_classifications` + `entity_nodes` before doing it in
+production.
 
 ## Reverting the county-aware server
 

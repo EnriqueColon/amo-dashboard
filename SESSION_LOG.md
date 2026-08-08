@@ -4,6 +4,72 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-08-08 (later) — Broward extraction path BUILT + DEPLOYED. 50 documents extracted. Not surfaced yet.
+
+### What changed (`9493ff0`)
+Broward was invisible to `extract_pdfs.py`: `pending_documents()` required a non-empty
+`rec_book`/`rec_page` and Broward e-recorded documents have neither. The precondition is now
+per-county — Miami-Dade still needs book/page (it fetches from the clerk live), Broward needs a
+`broward_images` row meaning its pages are already harvested.
+
+- `fetch_document_text()` is the single seam that knows where a county's page images come from.
+  Broward skips both the download and the `pdftoppm` rasterize, running tesseract straight on the
+  county's ~300 DPI TIFFs. The politeness delay is skipped too — no remote endpoint involved.
+- `save()` writes `county` **explicitly**; without it the migrations relabel Broward extractions
+  as Miami-Dade — the same trap that already caught `log_collection()`.
+- **Both LLM prompts untouched, deliberately.** `FACILITY_SYSTEM_PROMPT` cannot change without
+  re-running `verify_integration.py` at 21/21, and Broward's folio comes from the index anyway.
+- `--county` flag added to scope a run.
+
+### Result: 50 documents, 0 errors, $0.025
+`{'OK': 50, 'DOWNLOAD_ERROR': 0, 'OCR_ERROR': 0, 'LLM_ERROR': 0}`. Categories on the first
+batch: 20 LOAN_TRANSFER, 4 COLLATERAL, 1 RENTS_LEASES. All rows tagged `county='BROWARD'`, none
+untagged.
+
+### Quality is ON PAR with Miami-Dade — an earlier reading of this was wrong
+Comparing Broward against Miami-Dade's *entire* extraction set showed 3× the OCR text and 0% vs
+70% null assignors. **That comparison was invalid** — Miami-Dade's full set includes `OTHER`,
+`RENTS_LEASES` and failed rows where names are never extracted. Like-for-like on `LOAN_TRANSFER`:
+
+| | Broward | Miami-Dade |
+|---|---|---|
+| documents | 35 | 13,842 |
+| avg OCR chars | 3,190 | 3,263 |
+| null assignor | 0.0% | 0.0% |
+| null address | 34.3% | 37.5% |
+
+The cleaner source images may still help, but **this sample does not demonstrate it** — do not
+repeat the "Broward OCR is much better" claim without a like-for-like measurement. (The earlier
+2026-08-07 entry's inference from a single clean sample was premature on the same point.)
+
+One extraction defect seen, same class as Miami-Dade's: a bank's own address
+(`901 Ponce De Leon Blvd, Coral Gables`) captured as `property_address`, which the prompt
+explicitly excludes.
+
+### Operational gotcha worth remembering
+**A rejected Bash tool call still ran on the droplet.** Two extraction runs are visible in the
+`extracted_at` timestamps, separated by a 68-second gap — the SSH command had been dispatched
+before the rejection took effect. Rejecting a call that drives a remote host stops the output,
+not the remote side effect.
+
+### Also learned
+Only **539 of 42,509** Broward documents are extractable — the rest have no harvested images. Also
+69 images harvested for 2026-07-21 are orphaned: that day aged off the feed before its index rows
+were ingested, so they have no `assignments` row and will never be picked up.
+
+### Open / next session
+1. **Decide: extract the remaining ~489 (~$0.12).** Cheap, and it is the whole harvested set.
+2. **Then the one-way door: `NORMALIZE_COUNTIES`.** Until Broward is added there, none of this
+   surfaces — `aom_events_clean` stays Miami-Dade-only and the UI keeps showing "—". Flipping it
+   lets Broward names into the entity-classification signal sweep, which can move existing
+   Miami-Dade classifications. **Measure drift on a two-county rehearsal copy first**
+   (`entity_classifications` + `entity_nodes` before/after), exactly as was done on 2026-08-07.
+3. Per-county document links become necessary the moment step 2 lands.
+4. The 2026 index gap and the history scraper — the latter is what takes Broward from 539
+   analysable documents to all 42,509.
+
+---
+
 ## 2026-08-08 — Selector DEPLOYED and Broward index INGESTED. Broward is live in the UI.
 
 ### Deploy + ingest
