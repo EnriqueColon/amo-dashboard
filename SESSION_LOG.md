@@ -4,6 +4,22 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-08-08 — Endpoint scoping DEPLOYED. All document endpoints county-aware in production.
+
+`git pull` → `npm run build` → `pm2 restart`. Verified byte-identical to the pre-deploy baseline
+(`70,834 / 51,425 / 20,320` Miami-Dade; Broward `42,509 / 0 / 0`; ALL `113,343`) and all 37
+endpoints healthy across all three scopes. No data change — code only.
+
+### Gotcha: the shell cwd drifts to the PARENT directory
+A backgrounded `cd collector && …` silently failed with `no such file or directory: collector`
+because the session cwd had reset to `/Users/enrique/Downloads/amo-dashboard-source`, one level
+above the repo. The task reported **exit 0 from the wrapper** and produced no log, so it looked
+like it had run. **Use absolute paths in backgrounded commands, and confirm the log file exists
+before trusting a "done".** The parent directory also holds a 0-byte `prod_snapshot.db` decoy that
+has bitten a `cp` earlier in this workstream.
+
+---
+
 ## 2026-08-08 — Endpoint scoping: document tables scoped; entity tables labelled (option 2).
 
 ### The split that decided the approach
