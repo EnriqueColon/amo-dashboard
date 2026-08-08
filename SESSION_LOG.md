@@ -4,7 +4,51 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
-## 2026-08-07 — Client county selector BUILT + verified. NOT deployed.
+## 2026-08-08 — Selector DEPLOYED and Broward index INGESTED. Broward is live in the UI.
+
+### Deploy + ingest
+Backup `/opt/amo-dashboard/backup_pre_broward_index.db` (103MB, integrity-checked) → `git pull` →
+`npm run build` → `pm2 restart` → verified Miami-Dade unchanged **before** ingesting → backfill.
+
+    broward_collect.py --year 2023 --year 2024 --year 2025 --daily --start 2023-01-01
+    → 42,509 rows in ~2 minutes
+
+### Live state
+| | Miami-Dade | Broward |
+|---|---|---|
+| assignments | 70,834 | **42,509** |
+| date range | 2023-01-03 → 2026-08-06 | **2023-01-03 → 2026-08-04** |
+| aom_events_clean | 51,425 | **0** (no extractions yet) |
+| collection_log | 1,315 | 13 |
+
+Broward starts on exactly the same day as Miami-Dade, so cross-county comparisons are
+apples-to-apples as intended. `/api/stats?county=ALL` → **113,343**. Derived tables hold **zero**
+Broward rows; county isolation guardrail green; all 37 endpoints × 3 scopes return 200.
+
+### Cache gotcha worth remembering
+Verifying `?county=BROWARD` *before* the ingest cached a payload of zeros — and the API cache is
+**7 days**. A `pm2 restart` after the ingest was required for the dashboard to show Broward at
+all. Same trap as the normalize-then-cache one, in a new place: **any pre-flight API check taken
+before a data change poisons the cache for a week.**
+
+### Daily cron now does the whole pipeline
+Crontab entry became `BROWARD_INGEST_INDEX=1 run_broward_daily.sh` — index, then images, then the
+retention report. Verified under `env -i`: exit 0, and it picked up the newly published
+2026-08-04 (55 documents) as the feed rolled and 07-21 aged out.
+
+### Open / next session
+1. **Broward extraction path** — the blocker is `pending_documents()` (`extract_pdfs.py:250`)
+   requiring non-empty `rec_book`/`rec_page`, which Broward e-recorded documents do not have, plus
+   an OCR path reading the harvested local TIFFs instead of `download_pdf()` + `pdftoppm`.
+   **Nothing derived exists for Broward until this lands** — it is what turns 42,509 indexed rows
+   into entity, facility and transaction analysis.
+2. Per-county document links become necessary the moment step 1 lands (see the 2026-08-06 entry).
+3. Remaining "Miami-Dade" copy in tooltips/report headers.
+4. The 2026-01-01 → 2026-07-21 index gap and the history scraper.
+
+---
+
+## 2026-08-07 — Client county selector BUILT + verified (superseded by the deploy above)
 
 Phase 3. A global county selector in the sidebar, defaulting to Miami-Dade.
 

@@ -15,7 +15,8 @@ entity-normalization section below is retained but that change is already deploy
 | `collector/run_broward_daily.sh` | built, not installed | no until cron is added |
 | county-aware server (`routes.ts`, `db.ts`) | **DEPLOYED 2026-08-07** | yes — live |
 | `normalize.py` county scoping | **DEPLOYED 2026-08-07** | yes — live |
-| client county selector | **not started** | no |
+| client county selector | **DEPLOYED 2026-08-08** | yes — live |
+| Broward index in `assignments` | **INGESTED 2026-08-08** — 42,509 rows | yes — live |
 
 ## Reverting the county-aware server
 
@@ -119,15 +120,23 @@ them from Miami-Dade rows. Delete the data first (below), then the column.
 
 ## Removing Broward data
 
-Broward rows are confined to `assignments` until the pipeline is wired further, so:
+As of the 2026-08-08 ingest, production holds **42,509 Broward rows in `assignments`** and nothing
+anywhere else. Pre-ingest backup: `/opt/amo-dashboard/backup_pre_broward_index.db` (103MB).
 
     DELETE FROM assignments    WHERE county = 'BROWARD';
-    DELETE FROM collection_log WHERE doc_type LIKE 'BROWARD:%';
+    DELETE FROM collection_log WHERE county = 'BROWARD';
+    -- then, because the API cache is 7 days:
+    pm2 restart amo-dashboard
 
-Nothing else references them. `normalize.py` is county-blind today, which means a Broward row
-with no `pdf_extractions` companion is simply never picked up — **that is why index ingestion is
-safe to land before the county filter exists.** It also means re-running `normalize.py` after a
-Broward ingest changes nothing, so no rebuild is needed either way.
+Nothing else references them. `normalize.py` excludes Broward via `NORMALIZE_COUNTIES`, and its
+loan-transfer filter would drop the rows regardless while they have no extractions — verified on a
+two-county rehearsal where a full run left `aom_events_clean`, `entity_classifications` and
+`entity_nodes` byte-identical. So no rebuild is needed after removing them.
+
+**Cache trap, hit for real during this deploy:** querying `?county=BROWARD` *before* the ingest
+cached a payload of zeros for seven days, and the dashboard kept showing an empty Broward until
+`pm2 restart`. Any pre-flight API check taken before a data change poisons the cache — restart
+after, or use `POST /api/cache/bust`.
 
 ## The invariant this work depends on
 
