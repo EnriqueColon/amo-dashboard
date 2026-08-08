@@ -4,6 +4,52 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-08-08 — Drift rehearsal WITH extractions. Result good, but found a BLOCKER.
+
+Ran `normalize.py` with `NORMALIZE_COUNTIES="MIAMI-DADE,BROWARD"` against a fresh production
+snapshot (70,834 MD + 42,509 Broward assignments, 539 Broward extractions of which 374
+LOAN_TRANSFER).
+
+### 🚨 BLOCKER — `normalize.py` DROPS the county column from `aom_events_clean`
+After the run, `PRAGMA table_info(aom_events_clean)` has **no county column**. normalize.py
+recreates the table and its CREATE does not include it.
+
+**Why this is dangerous rather than merely broken:** `server/db.ts`'s defensive migration re-adds
+the column on the next startup and backfills `WHERE county IS NULL` to `'MIAMI-DADE'`. So all 374
+Broward rows would be silently relabelled Miami-Dade, and every county-scoped endpoint would serve
+Broward data under a Miami-Dade filter — with no error anywhere. This is the third instance of the
+same trap (`log_collection`, `pdf_extractions.save`, now here).
+
+**Fix before flipping `NORMALIZE_COUNTIES`:** add `county` to the `aom_events_clean` CREATE and
+carry `a.county` through the INSERT. Same check needed for `credit_facility_events`.
+
+### The drift itself is small and sensible
+| | before | after | delta |
+|---|---|---|---|
+| `aom_events_clean` | 51,425 | 51,799 | **+374 — exactly the Broward LOAN_TRANSFER count** |
+| `entity_nodes` | 20,320 | 20,367 | +47 new entities |
+| `entity_classifications` | 22,408 | 22,455 | +47 new |
+| existing entities, volume changed | — | — | **110 of 20,320 (0.5%)** |
+| existing entities, type changed | — | — | **1** |
+
+Biggest movers are exactly the cross-county names expected: MERS +178, US BANK +86,
+NEWREZ/SHELLPOINT +30, LAKEVIEW +23, WILMINGTON SAVINGS +22. **This is the intended behaviour** —
+it is why those panels carry the "not filtered by county" label.
+
+The single reclassification is an improvement: `WILMINGTON TRUST NATIONAL ASSN` went
+`OTHER → TRUST`. Broward evidence gave the classifier enough signal to type it correctly.
+
+**Conclusion: widening is safe once the county-column bug is fixed.** 0.5% volume movement and one
+corrected classification is a far smaller blast radius than feared.
+
+### Method note — a wrong number I nearly reported
+The first cut of this diff claimed "20,320 existing entities changed". That was a bad `join`/`awk`
+field mapping: `join -t'|' -j1` emits `key|base2..base5|new2..new5`, so base `total_vol` is `$3`
+and new `total_vol` is `$7` — comparing `$3 != $6` compares a volume against a type and matches
+everything. Correct answer is 110.
+
+---
+
 ## 2026-08-08 — Endpoint scoping DEPLOYED. All document endpoints county-aware in production.
 
 `git pull` → `npm run build` → `pm2 restart`. Verified byte-identical to the pre-deploy baseline
