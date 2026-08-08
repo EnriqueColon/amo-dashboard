@@ -465,7 +465,9 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   // with transaction counts, date ranges, and top counterparties per variant.
   app.get('/api/entity/:name/sub-entities', (req, res) => {
     const name = decodeURIComponent(req.params.name);
-    const cacheKey = `/api/entity/${name}/sub-entities`;
+    const county = countyScope(req as any);
+    const cf = countyFilter(county);
+    const cacheKey = `/api/entity/${name}/sub-entities:${county ?? 'ALL'}`;
     const cached = getCached(cacheKey);
     if (cached) return res.json(cached);
 
@@ -477,21 +479,21 @@ export async function registerRoutes(httpServer: Server, app: Express) {
              MAX(rec_date)       AS last_seen,
              assignee_type       AS entity_type
       FROM aom_events_clean
-      WHERE assignee_canon = ?
+      WHERE assignee_canon = ? ${cf.sql}
       GROUP BY assignee
       ORDER BY txn_count DESC
       LIMIT 100
-    `).all(name) as any[];
+    `).all(name, ...cf.params) as any[];
 
     // Top sellers into each buyer sub-entity
     const buyerCounterparties = db.prepare(`
       SELECT assignee AS sub_name, assignor_canon AS counterparty,
              assignor_type AS counterparty_type, COUNT(*) AS n
       FROM aom_events_clean
-      WHERE assignee_canon = ?
+      WHERE assignee_canon = ? ${cf.sql}
       GROUP BY assignee, assignor_canon
       ORDER BY assignee, n DESC
-    `).all(name) as any[];
+    `).all(name, ...cf.params) as any[];
 
     // All raw names that appear as seller (assignor) under this canonical
     const sellerSubs = db.prepare(`
@@ -501,21 +503,21 @@ export async function registerRoutes(httpServer: Server, app: Express) {
              MAX(rec_date)   AS last_seen,
              assignor_type   AS entity_type
       FROM aom_events_clean
-      WHERE assignor_canon = ?
+      WHERE assignor_canon = ? ${cf.sql}
       GROUP BY assignor
       ORDER BY txn_count DESC
       LIMIT 100
-    `).all(name) as any[];
+    `).all(name, ...cf.params) as any[];
 
     // Top buyers from each seller sub-entity
     const sellerCounterparties = db.prepare(`
       SELECT assignor AS sub_name, assignee_canon AS counterparty,
              assignee_type AS counterparty_type, COUNT(*) AS n
       FROM aom_events_clean
-      WHERE assignor_canon = ?
+      WHERE assignor_canon = ? ${cf.sql}
       GROUP BY assignor, assignee_canon
       ORDER BY assignor, n DESC
-    `).all(name) as any[];
+    `).all(name, ...cf.params) as any[];
 
     // Attach top counterparties (max 5 per sub) to each sub-entity row
     const buyerCpMap = new Map<string, any[]>();
@@ -1288,13 +1290,22 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   // ─── GET /api/deal-intelligence/seller-pressure ───────────────────────────
   app.get('/api/deal-intelligence/seller-pressure', (req, res) => {
     const dr = parseDateRange(req.query as Record<string, string>);
-    const cacheKey = makeCacheKey('/api/deal-intelligence/seller-pressure', { start: dr.start, end: dr.end });
+    const county = countyScope(req as any);
+    const cacheKey = makeCacheKey('/api/deal-intelligence/seller-pressure', { start: dr.start, end: dr.end, county: county ?? 'ALL' });
     const cached = getCached(cacheKey);
     if (cached) return res.json(cached);
     let data: any[];
-    if (!dr.hasFilter) {
+    // The fast path reads entity_nodes, which carries no county — so it is only
+    // valid for the all-counties scope. Selecting a county falls through to the
+    // aom_events_clean query below, which can actually be filtered. Otherwise
+    // the same panel would answer county-scoped with a date filter and
+    // cross-county without one.
+    if (!dr.hasFilter && !county) {
       data = diStmts.sellerPressure.all();
     } else {
+      const dateClause = dr.hasFilter ? 'AND rec_date BETWEEN ? AND ?' : '';
+      const dateParams = dr.hasFilter ? [dr.start, dr.end] : [];
+      const cf = countyFilter(county);
       data = db.prepare(`
         SELECT entity, entity_type,
                SUM(CASE WHEN dir='out' THEN cnt ELSE 0 END) as outbound_vol,
@@ -1306,20 +1317,20 @@ export async function registerRoutes(httpServer: Server, app: Express) {
           SELECT assignor_canon as entity, assignor_type as entity_type, 'out' as dir, COUNT(*) as cnt
           FROM aom_events_clean
           WHERE assignor_type IN ('BANK','SERVICER','TRUST')
-            AND rec_date BETWEEN ? AND ?
+            ${dateClause} ${cf.sql}
           GROUP BY assignor_canon
           UNION ALL
           SELECT assignee_canon, assignee_type, 'in', COUNT(*)
           FROM aom_events_clean
           WHERE assignee_type IN ('BANK','SERVICER','TRUST')
-            AND rec_date BETWEEN ? AND ?
+            ${dateClause} ${cf.sql}
           GROUP BY assignee_canon
         )
         GROUP BY entity
         HAVING total_vol >= 3
         ORDER BY net_outbound DESC
         LIMIT 25
-      `).all(dr.start, dr.end, dr.start, dr.end) as any[];
+      `).all(...dateParams, ...cf.params, ...dateParams, ...cf.params) as any[];
     }
     setCached(cacheKey, data, 30 * 60 * 1000);
     res.json(data);
@@ -1328,13 +1339,19 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   // ─── GET /api/deal-intelligence/pe-competitive ────────────────────────────
   app.get('/api/deal-intelligence/pe-competitive', (req, res) => {
     const dr = parseDateRange(req.query as Record<string, string>);
-    const cacheKey = makeCacheKey('/api/deal-intelligence/pe-competitive', { start: dr.start, end: dr.end });
+    const county = countyScope(req as any);
+    const cacheKey = makeCacheKey('/api/deal-intelligence/pe-competitive', { start: dr.start, end: dr.end, county: county ?? 'ALL' });
     const cached = getCached(cacheKey);
     if (cached) return res.json(cached);
     let data: any[];
-    if (!dr.hasFilter) {
+    // Same reasoning as seller-pressure: the fast path reads entity_nodes and
+    // cannot be county-filtered, so a selected county falls through.
+    if (!dr.hasFilter && !county) {
       data = diStmts.peCompetitive.all();
     } else {
+      const dateClause = dr.hasFilter ? 'AND rec_date BETWEEN ? AND ?' : '';
+      const dateParams = dr.hasFilter ? [dr.start, dr.end] : [];
+      const cf = countyFilter(county);
       data = db.prepare(`
         SELECT entity, entity_type,
                SUM(CASE WHEN dir='in'  THEN cnt ELSE 0 END) as inbound_vol,
@@ -1345,19 +1362,19 @@ export async function registerRoutes(httpServer: Server, app: Express) {
           SELECT assignee_canon as entity, assignee_type as entity_type, 'in' as dir,
                  COUNT(*) as cnt, MIN(rec_date) as rec_date
           FROM aom_events_clean
-          WHERE assignee_type='PRIVATE_CREDIT' AND rec_date BETWEEN ? AND ?
+          WHERE assignee_type='PRIVATE_CREDIT' ${dateClause} ${cf.sql}
           GROUP BY assignee_canon
           UNION ALL
           SELECT assignor_canon, assignor_type, 'out', COUNT(*), MIN(rec_date)
           FROM aom_events_clean
-          WHERE assignor_type='PRIVATE_CREDIT' AND rec_date BETWEEN ? AND ?
+          WHERE assignor_type='PRIVATE_CREDIT' ${dateClause} ${cf.sql}
           GROUP BY assignor_canon
         )
         GROUP BY entity
         HAVING total_vol >= 1
         ORDER BY inbound_vol DESC
         LIMIT 20
-      `).all(dr.start, dr.end, dr.start, dr.end) as any[];
+      `).all(...dateParams, ...cf.params, ...dateParams, ...cf.params) as any[];
     }
     setCached(cacheKey, data, 30 * 60 * 1000);
     res.json(data);
@@ -1398,24 +1415,26 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const pageNum  = Math.max(1, parseInt(page));
     const limitNum = Math.min(parseInt(limit) || 25, 200);
     const offset   = (pageNum - 1) * limitNum;
-    const cacheKey = makeCacheKey('/api/deal-intelligence/bank-to-pe', { page, limit, start: dr.start, end: dr.end });
+    const county = countyScope(req as any);
+    const cf = countyFilter(county, 'c.');
+    const cacheKey = makeCacheKey('/api/deal-intelligence/bank-to-pe', { page, limit, start: dr.start, end: dr.end, county: county ?? 'ALL' });
     const cached = getCached(cacheKey);
     if (cached) return res.json(cached);
     const dateWhere = dr.hasFilter ? `AND c.rec_date BETWEEN '${dr.start}' AND '${dr.end}'` : '';
     const total = (db.prepare(`
       SELECT COUNT(*) as n FROM aom_events_clean c
       WHERE c.assignor_type='BANK' AND c.assignee_type='PRIVATE_CREDIT'
-        AND c.txn_type='MARKET_TRANSFER' ${dateWhere}
-    `).get() as any).n;
+        AND c.txn_type='MARKET_TRANSFER' ${dateWhere} ${cf.sql}
+    `).get(...cf.params) as any).n;
     const rows = db.prepare(`
       SELECT c.cfn, c.rec_date,
              c.assignor_canon AS seller, c.assignee_canon AS buyer,
              c.assignor, c.assignee, c.rec_book, c.rec_page, c.county
       FROM aom_events_clean c
       WHERE c.assignor_type='BANK' AND c.assignee_type='PRIVATE_CREDIT'
-        AND c.txn_type='MARKET_TRANSFER' ${dateWhere}
+        AND c.txn_type='MARKET_TRANSFER' ${dateWhere} ${cf.sql}
       ORDER BY c.rec_date DESC LIMIT ? OFFSET ?
-    `).all(limitNum, offset);
+    `).all(...cf.params, limitNum, offset);
     const payload = { total, page: pageNum, limit: limitNum, pages: Math.ceil(total / limitNum), rows };
     setCached(cacheKey, payload, 30 * 60 * 1000);
     res.json(payload);
@@ -1434,7 +1453,9 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   // ─── GET /api/deal-intelligence/recent-bank-to-pe ────────────────────────
   app.get('/api/deal-intelligence/recent-bank-to-pe', (req, res) => {
     const dr = parseDateRange(req.query as Record<string, string>);
-    const cacheKey = makeCacheKey('/api/deal-intelligence/recent-bank-to-pe', { start: dr.start, end: dr.end });
+    const county = countyScope(req as any);
+    const cf = countyFilter(county, 'c.');
+    const cacheKey = makeCacheKey('/api/deal-intelligence/recent-bank-to-pe', { start: dr.start, end: dr.end, county: county ?? 'ALL' });
     const cached = getCached(cacheKey);
     if (cached) return res.json(cached);
     const dateWhere = dr.hasFilter
@@ -1444,10 +1465,10 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       SELECT c.rec_date, c.assignor_canon AS seller, c.assignee_canon AS buyer, COUNT(*) AS n
       FROM aom_events_clean c
       WHERE c.assignor_type='BANK' AND c.assignee_type='PRIVATE_CREDIT'
-        AND c.txn_type='MARKET_TRANSFER' ${dateWhere}
+        AND c.txn_type='MARKET_TRANSFER' ${dateWhere} ${cf.sql}
       GROUP BY c.assignor_canon, c.assignee_canon
       ORDER BY n DESC LIMIT 10
-    `).all();
+    `).all(...cf.params);
     setCached(cacheKey, data, 30 * 60 * 1000);
     res.json(data);
   });
@@ -2025,9 +2046,11 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const reviewed  = typeof req.query.reviewed === 'string' ? req.query.reviewed : '';
     const targetsOnly = req.query.targets === '1';
     const entities  = parseEntities(req.query);
+    const county    = countyScope(req as any);
 
     const clauses: string[] = [];
     const params: any[] = [];
+    if (county) { clauses.push(`COALESCE(county, '${DEFAULT_COUNTY}') = ?`); params.push(county); }
     if (search) {
       clauses.push(`(UPPER(assignor_canon) LIKE UPPER(?) OR UPPER(assignee_canon) LIKE UPPER(?) OR cfn LIKE ?)`);
       params.push(`%${search}%`, `%${search}%`, `%${search}%`);
@@ -2156,9 +2179,12 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const startDate = typeof req.query.start_date === 'string' ? req.query.start_date : '';
     const endDate   = typeof req.query.end_date === 'string' ? req.query.end_date : '';
     const targetsOnly = req.query.targets === '1';
+    const county    = countyScope(req as any);
 
+    // County joins the shared clause list, so every chart type below inherits it.
     const dateClauses: string[] = [];
     const dateParams: any[] = [];
+    if (county)    { dateClauses.push(`COALESCE(county, '${DEFAULT_COUNTY}') = ?`); dateParams.push(county); }
     if (startDate) { dateClauses.push(`rec_date >= ?`); dateParams.push(startDate); }
     if (endDate)   { dateClauses.push(`rec_date <= ?`); dateParams.push(endDate); }
     if (targetsOnly) { dateClauses.push(TARGETS_MATCH); }

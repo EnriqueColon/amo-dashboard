@@ -45,10 +45,30 @@ inherits it and a new one cannot forget it.
 Verified: `/api/clean-events?county=BROWARD` returned **5** rows against a single Broward row
 before, **1** after. All key endpoints 200 across all three scopes; tsc clean.
 
-### Still unscoped (document-level, safe today, must be done before NORMALIZE_COUNTIES flips)
-`/api/entity/:name/sub-entities`, `/api/deal-intelligence/{seller-pressure,pe-competitive,
-bank-to-pe,recent-bank-to-pe}` dynamic paths, `/api/reporting/{export,chart}`, `/api/top-assignees`
-(reads entity_nodes via a shared statement — belongs to the labelled group).
+### All document-level endpoints are now scoped (final seven done)
+`/api/entity/:name/sub-entities`, `/api/deal-intelligence/{bank-to-pe,recent-bank-to-pe,
+seller-pressure,pe-competitive}`, `/api/reporting/{export,chart}`.
+
+**A trap in two of them:** `seller-pressure` and `pe-competitive` each had a fast path reading
+`entity_nodes` (used when no date filter) and a dynamic path reading `aom_events_clean`. Scoping
+only the dynamic path would have made the same panel answer county-scoped WITH a date filter and
+cross-county WITHOUT one. Both now fall through to the dynamic path whenever a county is selected,
+so behaviour no longer depends on an unrelated filter.
+
+Verified per scope (Miami-Dade / Broward, with one synthetic Broward row):
+bank-to-pe 738/1, recent-bank-to-pe 10/1, pe-competitive 20/1, reporting/chart 43/1,
+reporting/export 714/1, sub-entities 100 buyer_subs/0. seller-pressure returns 25/0 — the 0 is its
+own `HAVING total_vol >= 3` threshold, not a scoping failure. All 37 endpoints healthy × 3 scopes.
+
+### Broward extraction complete
+`{'OK': 489, 'DOWNLOAD_ERROR': 0, 'OCR_ERROR': 0, 'LLM_ERROR': 0}` for **$0.2554** (2.0M in /
+134k out tokens). Categories: 339 LOAN_TRANSFER, 89 COLLATERAL, 39 RENTS_LEASES, 22 OTHER. With
+the earlier 50, **539 Broward documents are extracted — every harvested one.**
+
+**So `NORMALIZE_COUNTIES` is now the only remaining gate.** Roughly 339 Broward loan transfers
+will enter `aom_events_clean` when it flips. Re-run the drift rehearsal first: this time
+extractions exist, so `entity_nodes` volumes WILL change for entities trading in both counties —
+which is intended, and is why those panels are labelled "not filtered by county".
 
 ---
 
