@@ -57,6 +57,15 @@ OPENAI_URL  = 'https://api.openai.com/v1/chat/completions'
 DOC_IMAGE_URL = ('https://onlineservices.miamidadeclerk.gov/officialrecords/'
                  'api/DocumentImage/getdocumentimage')
 
+# Broward document images are harvested from the county's SFTP feed by
+# broward_images.py and land as <instrument>/<page>.tif. There is nothing to
+# download at extraction time — see fetch_document_text().
+BROWARD_IMAGE_DIR = os.environ.get(
+    'BROWARD_IMAGE_DIR',
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), 'broward_images'))
+
+DEFAULT_COUNTY = 'MIAMI-DADE'
+
 MAX_OCR_PAGES = 3        # first pages carry the operative language
 OCR_DPI       = 200
 MAX_LLM_CHARS = 14000    # ~3.5k tokens of OCR text per request
@@ -212,7 +221,10 @@ def ensure_schema(conn: sqlite3.Connection):
                 'facility_type TEXT', 'facility_agreement_name TEXT', 'facility_agreement_date TEXT',
                 'facility_lender_name TEXT', 'facility_agent_name TEXT', 'facility_borrower_name TEXT',
                 'facility_amount REAL', 'facility_amount_type TEXT',
-                'facility_evidence_quote TEXT', 'facility_confidence TEXT'):
+                'facility_evidence_quote TEXT', 'facility_confidence TEXT',
+                # Multi-county. save() always writes this explicitly; the column
+                # has to exist even on a database created fresh by this script.
+                'county TEXT'):
         try:
             conn.execute(f'ALTER TABLE pdf_extractions ADD COLUMN {col}')
         except Exception:
@@ -220,8 +232,13 @@ def ensure_schema(conn: sqlite3.Connection):
     conn.commit()
 
 
+def has_county_column(conn: sqlite3.Connection) -> bool:
+    return any(r[1] == 'county' for r in conn.execute('PRAGMA table_info(assignments)'))
+
+
 def pending_documents(conn: sqlite3.Connection, limit: int, retry_errors: bool,
-                      since: str | None = None, redo: bool = False) -> list:
+                      since: str | None = None, redo: bool = False,
+                      county: str | None = None) -> list:
     """CFNs from assignments that need (re-)extraction, newest first.
 
     --redo targets already-extracted OK rows that are missing the new fields
@@ -242,18 +259,64 @@ def pending_documents(conn: sqlite3.Connection, limit: int, retry_errors: bool,
     date_clause = f"AND a.rec_date >= '{since}'" if since else ""
     join_type   = "INNER" if redo else "LEFT"
 
+    if not has_county_column(conn):
+        # Database predates multi-county support — original behaviour verbatim.
+        return [(*row, DEFAULT_COUNTY) for row in conn.execute(f"""
+            SELECT a.cfn, a.rec_book, a.rec_page, a.rec_date
+            FROM assignments a
+            {join_type} JOIN pdf_extractions px ON px.cfn = a.cfn
+            WHERE {status_clause}
+              AND a.rec_book IS NOT NULL AND a.rec_book != ''
+              AND a.rec_page IS NOT NULL AND a.rec_page != ''
+              {date_clause}
+            GROUP BY a.cfn
+            ORDER BY a.rec_date DESC
+            LIMIT ?
+        """, (limit,)).fetchall()]
+
+    # Each county has its own precondition for being extractable:
+    #
+    #   Miami-Dade — the document is fetched live from the clerk by book/page,
+    #                so both must be present.
+    #   Broward    — nothing is fetched at extraction time; the images must
+    #                already have been harvested from the SFTP feed, which is
+    #                what a broward_images row records. Broward e-recorded
+    #                documents have NO book/page at all, so the Miami-Dade
+    #                condition would exclude every one of them — that is exactly
+    #                why Broward was invisible to this script until now.
+    miami_dade_available = """
+          (COALESCE(a.county, 'MIAMI-DADE') = 'MIAMI-DADE'
+             AND a.rec_book IS NOT NULL AND a.rec_book != ''
+             AND a.rec_page IS NOT NULL AND a.rec_page != '')
+    """
+    has_images_table = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='broward_images'"
+    ).fetchone() is not None
+    broward_available = """
+          OR (COALESCE(a.county, 'MIAMI-DADE') = 'BROWARD'
+             AND EXISTS (SELECT 1 FROM broward_images bi WHERE bi.cfn = a.cfn))
+    """ if has_images_table else ""
+    availability = f"AND ({miami_dade_available} {broward_available})"
+    params: list = []
+    county_clause = ""
+    if county:
+        county_clause = "AND COALESCE(a.county, 'MIAMI-DADE') = ?"
+        params.append(county)
+
+    params.append(limit)
     return conn.execute(f"""
-        SELECT a.cfn, a.rec_book, a.rec_page, a.rec_date
+        SELECT a.cfn, a.rec_book, a.rec_page, a.rec_date,
+               COALESCE(a.county, 'MIAMI-DADE') AS county
         FROM assignments a
         {join_type} JOIN pdf_extractions px ON px.cfn = a.cfn
         WHERE {status_clause}
-          AND a.rec_book IS NOT NULL AND a.rec_book != ''
-          AND a.rec_page IS NOT NULL AND a.rec_page != ''
+          {availability}
+          {county_clause}
           {date_clause}
         GROUP BY a.cfn
         ORDER BY a.rec_date DESC
         LIMIT ?
-    """, (limit,)).fetchall()
+    """, params).fetchall()
 
 
 # ── Download + OCR ────────────────────────────────────────────────────────────
@@ -269,6 +332,59 @@ def download_pdf(rec_book: str, rec_page: str, dest: str) -> bool:
     with open(dest, 'wb') as f:
         f.write(resp.content)
     return True
+
+
+def ocr_images(paths: list[str]) -> str:
+    """OCR page images directly.
+
+    Broward ships the county's own quality-assured G4 TIFFs at ~300 DPI, so
+    there is nothing to rasterize — the pdftoppm step the Miami-Dade path needs
+    is skipped entirely, and the input is higher resolution than the 200 DPI
+    that path re-renders at.
+    """
+    text_parts = []
+    for path in paths:
+        out = subprocess.run(
+            ['tesseract', path, '-'],
+            capture_output=True, timeout=120,
+            # Same OpenMP guard as ocr_pdf below — see that comment.
+            env={**os.environ, 'OMP_THREAD_LIMIT': '1'},
+        )
+        text_parts.append(out.stdout.decode('utf-8', errors='replace'))
+    return '\n'.join(text_parts).strip()
+
+
+def broward_page_images(cfn: str) -> list[str]:
+    """Harvested page images for one Broward instrument, in page order."""
+    doc_dir = os.path.join(BROWARD_IMAGE_DIR, cfn)
+    if not os.path.isdir(doc_dir):
+        return []
+    pages = sorted(f for f in os.listdir(doc_dir)
+                   if f.lower().endswith(('.tif', '.tiff', '.png', '.jpg')))
+    # Match the Miami-Dade path: the operative language is on the first pages,
+    # and OCR cost scales with page count.
+    return [os.path.join(doc_dir, f) for f in pages[:MAX_OCR_PAGES]]
+
+
+def fetch_document_text(county: str, cfn: str, rec_book: str, rec_page: str,
+                        workdir: str) -> str:
+    """Get OCR text for one document, however that county supplies its images.
+
+    Raises FileNotFoundError when a Broward document has no harvested images —
+    the caller records that as DOWNLOAD_ERROR, since it is the same class of
+    problem as a failed clerk fetch: the source material is not available.
+    """
+    if county == 'BROWARD':
+        paths = broward_page_images(cfn)
+        if not paths:
+            raise FileNotFoundError(
+                f'no harvested images for {cfn} under {BROWARD_IMAGE_DIR}')
+        return ocr_images(paths)
+
+    pdf_path = os.path.join(workdir, 'doc.pdf')
+    if not download_pdf(rec_book, rec_page, pdf_path):
+        raise FileNotFoundError(f'clerk returned no PDF for book {rec_book}/{rec_page}')
+    return ocr_pdf(pdf_path, workdir)
 
 
 def ocr_pdf(pdf_path: str, workdir: str) -> str:
@@ -438,11 +554,19 @@ def llm_extract_facility(ocr_text: str) -> dict | None:
     return postprocess_facility(data)
 
 
-def save(conn, cfn, rec_book, rec_page, status, data=None, ocr_chars=0):
+def save(conn, cfn, rec_book, rec_page, status, data=None, ocr_chars=0,
+         county=DEFAULT_COUNTY):
+    """Write one extraction.
+
+    `county` is written explicitly and must be. Both migrate_add_county.py and
+    server/db.ts backfill NULL counties to MIAMI-DADE on sight, so an untagged
+    Broward extraction would be silently relabelled — the same trap that already
+    caught log_collection().
+    """
     d = data or {}
     conn.execute("""
         INSERT INTO pdf_extractions
-            (cfn, rec_book, rec_page, status, doc_category, doc_title,
+            (cfn, county, rec_book, rec_page, status, doc_category, doc_title,
              assignor_name, assignor_parent, assignee_name, assignee_parent,
              property_address, loan_amount, consideration_amount,
              folio_parcel, sponsor_address, signatory_officer,
@@ -451,8 +575,9 @@ def save(conn, cfn, rec_book, rec_page, status, data=None, ocr_chars=0):
              facility_amount, facility_amount_type, facility_evidence_quote,
              facility_confidence,
              ocr_chars, model, extracted_at, raw_json)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'),?)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'),?)
         ON CONFLICT(cfn) DO UPDATE SET
+            county=excluded.county,
             status=excluded.status, doc_category=excluded.doc_category,
             doc_title=excluded.doc_title,
             assignor_name=excluded.assignor_name, assignor_parent=excluded.assignor_parent,
@@ -476,7 +601,7 @@ def save(conn, cfn, rec_book, rec_page, status, data=None, ocr_chars=0):
             ocr_chars=excluded.ocr_chars, model=excluded.model,
             extracted_at=excluded.extracted_at, raw_json=excluded.raw_json
     """, (
-        cfn, rec_book, rec_page, status,
+        cfn, county, rec_book, rec_page, status,
         d.get('doc_category'), d.get('doc_title'),
         d.get('assignor_name'), d.get('assignor_parent'),
         d.get('assignee_name'), d.get('assignee_parent'),
@@ -533,52 +658,62 @@ def save_facility(conn, cfn, rec_book, rec_page, status, data=None, ocr_chars=0)
 
 # ── Main loop ─────────────────────────────────────────────────────────────────
 
-def run(limit: int, retry_errors: bool, since: str | None = None, redo: bool = False):
+def run(limit: int, retry_errors: bool, since: str | None = None, redo: bool = False,
+        county: str | None = None):
     if not OPENAI_KEY:
         raise SystemExit('OPENAI_API_KEY is not set')
 
     conn = get_conn()
     ensure_schema(conn)
-    docs = pending_documents(conn, limit, retry_errors, since=since, redo=redo)
-    print(f'Pending documents: {len(docs)} (limit {limit})')
+    docs = pending_documents(conn, limit, retry_errors, since=since, redo=redo,
+                             county=county)
+    by_county: dict = {}
+    for d in docs:
+        by_county[d[4]] = by_county.get(d[4], 0) + 1
+    scope = f' [{county}]' if county else ''
+    breakdown = ', '.join(f'{c}={n}' for c, n in sorted(by_county.items()))
+    print(f'Pending documents{scope}: {len(docs)} (limit {limit})'
+          + (f' — {breakdown}' if breakdown else ''))
 
     counts = {'OK': 0, 'DOWNLOAD_ERROR': 0, 'OCR_ERROR': 0, 'LLM_ERROR': 0}
     categories: dict = {}
 
-    for i, (cfn, rec_book, rec_page, rec_date) in enumerate(docs, 1):
+    for i, (cfn, rec_book, rec_page, rec_date, doc_county) in enumerate(docs, 1):
         with tempfile.TemporaryDirectory() as workdir:
-            pdf_path = os.path.join(workdir, 'doc.pdf')
+            # Fetch + OCR are one step now: where the page images come from is a
+            # per-county detail (clerk download vs harvested TIFFs), and only
+            # fetch_document_text() needs to know which.
             try:
-                if not download_pdf(rec_book, rec_page, pdf_path):
-                    save(conn, cfn, rec_book, rec_page, 'DOWNLOAD_ERROR')
-                    counts['DOWNLOAD_ERROR'] += 1
-                    continue
-            except Exception as e:
-                print(f'  [{i}] {cfn} download failed: {e}')
-                save(conn, cfn, rec_book, rec_page, 'DOWNLOAD_ERROR')
+                text = fetch_document_text(doc_county, cfn, rec_book, rec_page, workdir)
+            except FileNotFoundError as e:
+                print(f'  [{i}] {cfn} ({doc_county}) source unavailable: {e}')
+                save(conn, cfn, rec_book, rec_page, 'DOWNLOAD_ERROR', county=doc_county)
                 counts['DOWNLOAD_ERROR'] += 1
                 continue
-
-            try:
-                text = ocr_pdf(pdf_path, workdir)
-                if len(text) < 80:
-                    raise ValueError(f'OCR produced only {len(text)} chars')
             except Exception as e:
-                print(f'  [{i}] {cfn} OCR failed: {e}')
-                save(conn, cfn, rec_book, rec_page, 'OCR_ERROR')
+                print(f'  [{i}] {cfn} ({doc_county}) fetch/OCR failed: {e}')
+                save(conn, cfn, rec_book, rec_page, 'OCR_ERROR', county=doc_county)
+                counts['OCR_ERROR'] += 1
+                continue
+
+            if len(text) < 80:
+                print(f'  [{i}] {cfn} ({doc_county}) OCR produced only {len(text)} chars')
+                save(conn, cfn, rec_book, rec_page, 'OCR_ERROR', county=doc_county)
                 counts['OCR_ERROR'] += 1
                 continue
 
             try:
                 data = llm_extract(text)
                 data.update(llm_extract_facility(text))
-                save(conn, cfn, rec_book, rec_page, 'OK', data, len(text))
+                save(conn, cfn, rec_book, rec_page, 'OK', data, len(text),
+                     county=doc_county)
                 counts['OK'] += 1
                 cat = data.get('doc_category')
                 categories[cat] = categories.get(cat, 0) + 1
             except Exception as e:
                 print(f'  [{i}] {cfn} LLM failed: {e}')
-                save(conn, cfn, rec_book, rec_page, 'LLM_ERROR', ocr_chars=len(text))
+                save(conn, cfn, rec_book, rec_page, 'LLM_ERROR', ocr_chars=len(text),
+                     county=doc_county)
                 counts['LLM_ERROR'] += 1
 
         if i % 25 == 0 or i == len(docs):
@@ -594,7 +729,10 @@ def run(limit: int, retry_errors: bool, since: str | None = None, redo: bool = F
                   'with a fresh budget.')
             break
 
-        time.sleep(REQUEST_DELAY)
+        # The delay is politeness toward the clerk's download endpoint. Broward
+        # images are already on local disk, so there is nothing to be polite to.
+        if doc_county != 'BROWARD':
+            time.sleep(REQUEST_DELAY)
 
     print(f'\nDone. {counts}')
     print(f'LLM spend: ${_spend["cost_usd"]:.4f} '
@@ -618,7 +756,11 @@ if __name__ == '__main__':
     p.add_argument('--budget', type=float, default=None,
                    help=f'max LLM spend in USD for this run (default {BUDGET_USD}, '
                         'or OPENAI_BUDGET_USD env var)')
+    p.add_argument('--county', type=str, default=None,
+                   help="restrict to one county, e.g. 'BROWARD' or 'MIAMI-DADE' "
+                        '(default: all counties, newest documents first)')
     args = p.parse_args()
     if args.budget is not None:
         BUDGET_USD = args.budget
-    run(args.limit, args.retry_errors, since=args.since, redo=args.redo)
+    run(args.limit, args.retry_errors, since=args.since, redo=args.redo,
+        county=args.county.upper() if args.county else None)
