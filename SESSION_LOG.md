@@ -4,6 +4,65 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-08-08 (later still) — Per-county document links DONE. And a scope gap found: 25 endpoints.
+
+### Broward has no document deep link — confirmed, not assumed
+Four GET patterns against `SearchTypeInstrumentNumber` were tested; **none prefill**. Broward
+images are addressed by an internal AcclaimWeb `docId` that appears only as a checkbox value in
+search results, the image endpoint needs session state, and the site is Cloudflare-fronted. So
+there is nothing honest to link to.
+
+**Why this matters more than it sounds:** a Miami-Dade book/page URL built from a Broward row
+does not 404 — it resolves to a real but UNRELATED Miami-Dade document. In the UI and especially
+in an exported CSV that is indistinguishable from working evidence.
+
+### Built
+- `client/src/lib/doc-url.ts` — `documentUrl()` returns a URL or **null**; `noDocumentUrlReason()`
+  explains why not.
+- `client/src/components/DocLink.tsx` — renders an anchor when a URL exists, otherwise plain text
+  with the reason as a title. Keeps `onClick` in both branches (several call sites rely on
+  `stopPropagation` to avoid toggling an expandable row).
+- All **7 client sites** converted (`EntityDetailPanel`, `Reporting` ×2, `PrivateCredit`,
+  `CreditFacilities` ×2, `CleanEvents` ×2, `DealIntelligence`); the two local helpers
+  (`Reporting.docUrl`, `CreditFacilities.portalUrl`) are gone. `grep getdocumentimage` over
+  `client/` now returns nothing.
+- `server/routes.ts` CSV export `docLink()` is county-aware — Broward rows export blank.
+- `county` added to **10 row-returning SELECTs** so the client can decide per row.
+- `Reporting.tsx` had a hardcoded `County: Miami-Dade` line — now reflects the row.
+
+Verified: 50 Miami-Dade links still render with correct book/page URLs; a synthetic Broward row
+produced **zero** links and zero malformed URLs.
+
+### THE FINDING — the county filter does not reach the analysis pages
+Injecting one Broward row and requesting `/api/clean-events?county=BROWARD` returned **5 rows**.
+Audit of every route touching the derived tables:
+
+    read aom_events_clean / credit_facility_events : 28
+    county-scoped                                  : 3
+    UNSCOPED                                       : 25
+
+Including `/api/clean-events`, all five `/api/credit-facility-events/*`, all six
+`/api/deal-intelligence/*`, all five `/api/reporting/*`, `/api/entity/:name`, `/api/entity-nodes`,
+`/api/targets`, `/api/aliases`.
+
+This is harmless **today** only because Broward cannot reach those tables. **It stops being
+harmless the moment `NORMALIZE_COUNTIES` includes Broward** — every analysis page would then
+silently mix counties regardless of what the selector says.
+
+**Sequencing consequence: scope those 25 endpoints BEFORE flipping `NORMALIZE_COUNTIES`.** Doing
+it the other way round ships a dashboard that quietly lies about what it is showing.
+
+### Also this session
+- `NORMALIZE_COUNTIES` is now env-overridable (`NORMALIZE_COUNTIES="MIAMI-DADE,BROWARD"` or
+  `"ALL"`), so the widening can be rehearsed and rolled out without a code edit. Default unchanged.
+- **Drift rehearsal passed**: with all 42,509 Broward assignments in scope, a full `normalize.py`
+  run left `entity_classifications` (22,287) and `entity_nodes` (20,195) **byte-identical**, and
+  `aom_events_clean` at 51,093. Proves Broward names in the signal sweep do not move Miami-Dade
+  classifications. **Does not** prove what happens once Broward extractions exist — that changes
+  `entity_nodes` volumes for entities trading in both counties, and needs re-running then.
+
+---
+
 ## 2026-08-08 (later) — Broward extraction path BUILT + DEPLOYED. 50 documents extracted. Not surfaced yet.
 
 ### What changed (`9493ff0`)

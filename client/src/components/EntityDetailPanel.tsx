@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import CategoryBadge from './CategoryBadge';
 import ColHeader from './ColHeader';
+import DocLink from './DocLink';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   X, ArrowRight, TrendingUp, TrendingDown, Network,
@@ -54,12 +55,7 @@ function TxnRow({ r, direction }: { r: any; direction: 'in' | 'out' }) {
   return (
     <tr className="border-b border-border/40 hover:bg-muted/20 transition-colors">
       <td className="px-3 py-2 font-mono text-primary text-[11px] whitespace-nowrap">
-        <a
-          href={`https://onlineservices.miamidadeclerk.gov/officialrecords/api/DocumentImage/getdocumentimage?redact=false&sBook=${r.rec_book}&sBookType=O+&sPage=${r.rec_page}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="hover:underline"
-        >{r.cfn}</a>
+        <DocLink row={r} className="hover:underline">{r.cfn}</DocLink>
       </td>
       <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">{r.rec_date}</td>
       <td className="px-3 py-2 max-w-[180px]">

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
+import DocLink from '@/components/DocLink';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { Shield, ChevronLeft, ChevronRight, ArrowRight, ExternalLink } from 'lucide-react';
@@ -134,14 +135,12 @@ export default function PrivateCredit() {
                           <span className={`text-xs font-medium ${roleColor}`}>{pcRole}</span>
                         </td>
                         <td className="px-3 py-2 text-center">
-                          <a
-                            href={`https://onlineservices.miamidadeclerk.gov/officialrecords/api/DocumentImage/getdocumentimage?redact=false&sBook=${r.rec_book}&sBookType=O+&sPage=${r.rec_page}`}
-                            target="_blank" rel="noopener noreferrer"
+                          <DocLink
+                            row={r}
                             className="text-muted-foreground/30 hover:text-primary transition-colors"
-                            title="View on county portal"
                           >
                             <ExternalLink size={11} />
-                          </a>
+                          </DocLink>
                         </td>
                       </tr>
                     );

@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
+import DocLink from '@/components/DocLink';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import CategoryBadge from '@/components/CategoryBadge';
@@ -439,13 +440,12 @@ function DealDetailPanel({ cfn, onClose }: { cfn: string; onClose: () => void })
                   </div>
                 )}
                 <div className="pt-1">
-                  <a
-                    href={`https://onlineservices.miamidadeclerk.gov/officialrecords/api/DocumentImage/getdocumentimage?redact=false&sBook=${tx.rec_book}&sBookType=O+&sPage=${tx.rec_page}`}
-                    target="_blank" rel="noopener noreferrer"
+                  <DocLink
+                    row={tx}
                     className="inline-flex items-center gap-1 text-[10px] text-primary hover:underline"
                   >
                     <ExternalLink size={9} />View county filing
-                  </a>
+                  </DocLink>
                 </div>
               </div>
             </div>

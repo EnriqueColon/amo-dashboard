@@ -1,6 +1,7 @@
 import { useState, Fragment } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
+import DocLink from '@/components/DocLink';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer } from 'recharts';
 import { Landmark, ChevronLeft, ChevronRight, ExternalLink, ChevronDown, ChevronUp, Info, Download } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -36,8 +37,7 @@ function fmtMoneyCompact(v: number | null) {
   return `$${v}`;
 }
 
-const portalUrl = (book: string, page: string) =>
-  `https://onlineservices.miamidadeclerk.gov/officialrecords/api/DocumentImage/getdocumentimage?redact=false&sBook=${book}&sBookType=O+&sPage=${page}`;
+// Document links are per-county — see client/src/lib/doc-url.ts. Use <DocLink>.
 
 // A facility is "active" when its most recent filing is within the last 90
 // days — a live line being drawn on / released, not an archived relationship.
@@ -233,15 +233,14 @@ function FilingHistory({ row }: { row: any }) {
                 >
                   <td className="py-1.5 pr-3 whitespace-nowrap text-muted-foreground">{f.rec_date}</td>
                   <td className="py-1.5 pr-3 font-mono whitespace-nowrap">
-                    <a
-                      href={portalUrl(f.rec_book, f.rec_page)}
-                      target="_blank" rel="noopener noreferrer"
+                    <DocLink
+                      row={f}
                       onClick={e => e.stopPropagation()}
                       className="text-primary hover:underline"
                       title="Open the recorded document on the county Clerk portal"
                     >
                       {f.cfn}
-                    </a>
+                    </DocLink>
                   </td>
                   <td className="py-1.5 pr-3 max-w-[160px] truncate" title={f.doc_type}>{f.doc_type || '—'}</td>
                   <td className="py-1.5 pr-3">
@@ -275,15 +274,13 @@ function FilingHistory({ row }: { row: any }) {
                         {quoteCfn === f.cfn ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
                       </span>
                     )}
-                    <a
-                      href={portalUrl(f.rec_book, f.rec_page)}
-                      target="_blank" rel="noopener noreferrer"
+                    <DocLink
+                      row={f}
                       onClick={e => e.stopPropagation()}
                       className="text-muted-foreground/40 hover:text-primary transition-colors inline-block align-middle"
-                      title="View on county portal"
                     >
                       <ExternalLink size={11} />
-                    </a>
+                    </DocLink>
                   </td>
                 </tr>
                 {quoteCfn === f.cfn && f.facility_evidence_quote && (

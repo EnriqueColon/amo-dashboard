@@ -343,7 +343,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     // Clean inbound transactions (assigned TO this entity)
     const as_grantee = db.prepare(`
       SELECT cfn, rec_date, assignor_canon AS counterparty, assignor_type AS counterparty_type,
-             assignor, rec_book, rec_page, total_parties
+             assignor, rec_book, rec_page, county, total_parties
       FROM aom_events_clean
       WHERE assignee_canon=?
       ORDER BY rec_date DESC LIMIT 500
@@ -352,7 +352,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     // Clean outbound transactions (assigned FROM this entity)
     const as_grantor = db.prepare(`
       SELECT cfn, rec_date, assignee_canon AS counterparty, assignee_type AS counterparty_type,
-             assignee, rec_book, rec_page, total_parties
+             assignee, rec_book, rec_page, county, total_parties
       FROM aom_events_clean
       WHERE assignor_canon=?
       ORDER BY rec_date DESC LIMIT 500
@@ -655,7 +655,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const total = (db.prepare(`SELECT COUNT(*) as n FROM aom_events_clean ${wc}`).get(...params) as any).n;
     const rows = db.prepare(`
       SELECT cfn, rec_date, assignor, assignee, assignor_canon, assignee_canon,
-             assignor_type, assignee_type, txn_type, rec_book, rec_page, total_parties,
+             assignor_type, assignee_type, txn_type, rec_book, rec_page, county, total_parties,
              doc_type, doc_category, doc_title, pdf_assignor, pdf_assignee,
              assignor_parent, assignee_parent, property_address,
              loan_amount, consideration_amount
@@ -697,7 +697,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
              facility_type, facility_agreement_name, facility_agreement_date,
              facility_lender_name, facility_agent_name, facility_borrower_name,
              facility_amount, facility_amount_type, facility_evidence_quote, facility_confidence,
-             rec_book, rec_page
+             rec_book, rec_page, county
       FROM credit_facility_events ${wc}
       ORDER BY rec_date DESC LIMIT ? OFFSET ?
     `).all(...params, limitNum, offset);
@@ -842,7 +842,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
              e.facility_amount, e.facility_amount_type,
              e.facility_agreement_name, e.facility_agreement_date,
              e.facility_evidence_quote, e.facility_confidence,
-             e.rec_book, e.rec_page,
+             e.rec_book, e.rec_page, e.county,
              e.direction, e.grantor_role, e.grantee_role,
              CASE WHEN px.loan_amount = e.facility_amount
                    AND e.facility_amount_type = 'credit_limit'
@@ -1106,7 +1106,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       SELECT c.cfn, c.rec_date,
              c.assignor_canon AS seller, c.assignee_canon AS buyer,
              c.assignor, c.assignee,
-             c.rec_book, c.rec_page
+             c.rec_book, c.rec_page, c.county
       FROM aom_events_clean c
       WHERE c.assignor_type='BANK' AND c.assignee_type='PRIVATE_CREDIT'
         AND c.txn_type='MARKET_TRANSFER'
@@ -1357,7 +1357,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const rows = db.prepare(`
       SELECT c.cfn, c.rec_date,
              c.assignor_canon AS seller, c.assignee_canon AS buyer,
-             c.assignor, c.assignee, c.rec_book, c.rec_page
+             c.assignor, c.assignee, c.rec_book, c.rec_page, c.county
       FROM aom_events_clean c
       WHERE c.assignor_type='BANK' AND c.assignee_type='PRIVATE_CREDIT'
         AND c.txn_type='MARKET_TRANSFER' ${dateWhere}
@@ -1411,7 +1411,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       SELECT c.cfn, c.rec_date, c.assignor, c.assignee,
              c.assignor_canon, c.assignee_canon,
              c.assignor_type, c.assignee_type,
-             c.rec_book, c.rec_page, c.txn_type,
+             c.rec_book, c.rec_page, c.county, c.txn_type,
              a.address, a.legal_desc, a.misc_ref
       FROM aom_events_clean c
       LEFT JOIN assignments a ON c.cfn = a.cfn
@@ -1933,7 +1933,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
              property_address, loan_amount, consideration_amount,
              doc_title, doc_category,
              folio_parcel, sponsor_address, signatory_officer,
-             rec_book, rec_page, total_parties,
+             rec_book, rec_page, county, total_parties,
              classification, reviewed_by, reviewed_at
       FROM aom_events_clean ${wc}
       ORDER BY rec_date DESC LIMIT ? OFFSET ?
@@ -1997,7 +1997,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
              pdf_assignor, pdf_assignee, assignor_parent, assignee_parent,
              property_address, folio_parcel, loan_amount, consideration_amount,
              sponsor_address, signatory_officer,
-             rec_book, rec_page,
+             rec_book, rec_page, county,
              classification, reviewed_by, reviewed_at
       FROM aom_events_clean ${wc}
       ORDER BY rec_date DESC
@@ -2010,10 +2010,17 @@ export async function registerRoutes(httpServer: Server, app: Express) {
         ? `"${s.replace(/"/g, '""')}"` : s;
     };
 
-    const docLink = (r: any) =>
-      r.rec_book && r.rec_page
-        ? `https://onlineservices.miamidadeclerk.gov/officialrecords/api/DocumentImage/getdocumentimage?redact=false&sBook=${encodeURIComponent(r.rec_book)}&sBookType=O+&sPage=${encodeURIComponent(r.rec_page)}`
-        : '';
+    // Per-county. A Miami-Dade book/page URL built from a Broward row resolves
+    // to a real but unrelated Miami-Dade document — worse than an empty cell,
+    // because in an exported CSV it looks like working evidence. Broward
+    // publishes no deep link, so its rows export blank.
+    const docLink = (r: any) => {
+      const county = String(r.county || 'MIAMI-DADE').toUpperCase();
+      if (county !== 'MIAMI-DADE' || !r.rec_book || !r.rec_page) return '';
+      return 'https://onlineservices.miamidadeclerk.gov/officialrecords/api/DocumentImage/getdocumentimage'
+           + `?redact=false&sBook=${encodeURIComponent(r.rec_book)}`
+           + `&sBookType=O+&sPage=${encodeURIComponent(r.rec_page)}`;
+    };
 
     const headers = [
       'CFN','Document Link','Date','Doc Type','Category','Title',

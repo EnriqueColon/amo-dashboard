@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
+import DocLink from '@/components/DocLink';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -259,14 +260,12 @@ function TransactionDetail({ row }: { row: any }) {
               {row.total_parties > 2 && (
                 <span className="text-amber-400">{row.total_parties} parties on original filing</span>
               )}
-              <a
-                href={`https://onlineservices.miamidadeclerk.gov/officialrecords/api/DocumentImage/getdocumentimage?redact=false&sBook=${row.rec_book}&sBookType=O+&sPage=${row.rec_page}`}
-                target="_blank"
-                rel="noopener noreferrer"
+              <DocLink
+                row={row}
                 className="ml-auto flex items-center gap-1 hover:text-foreground transition-colors"
               >
                 View on county portal <ArrowUpRight size={9} />
-              </a>
+              </DocLink>
             </div>
           </div>
         </div>
@@ -561,14 +560,9 @@ export default function CleanEvents() {
                               {isExpanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
                             </span>
                             <span className="hover:underline" onClick={e => e.stopPropagation()}>
-                              <a
-                                href={`https://onlineservices.miamidadeclerk.gov/officialrecords/api/DocumentImage/getdocumentimage?redact=false&sBook=${r.rec_book}&sBookType=O+&sPage=${r.rec_page}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                title="View on Miami-Dade Clerk portal"
-                              >
+                              <DocLink row={r}>
                                 {r.cfn}
-                              </a>
+                              </DocLink>
                             </span>
                           </div>
                         </td>

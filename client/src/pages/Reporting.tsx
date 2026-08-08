@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
+import DocLink from '@/components/DocLink';
+import { countyLabel, type CountyScope } from '@/lib/county';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -22,9 +24,7 @@ function fmtAmt(v: number | null | undefined): string | null {
   return v.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
 }
 
-function docUrl(book: string, page: string) {
-  return `https://onlineservices.miamidadeclerk.gov/officialrecords/api/DocumentImage/getdocumentimage?redact=false&sBook=${book}&sBookType=O+&sPage=${page}`;
-}
+// Document links are per-county — see client/src/lib/doc-url.ts. Use <DocLink>.
 
 const GARBAGE_RE = /[¢£€§©®™°±×÷\u0080-\uFFFF]/;
 const ADDRESS_RE = /^\d+\s.*(ST|AVE|BLVD|DR|RD|LN|CT|PL|WAY|HWY|CIR|TER|STREET|AVENUE|BOULEVARD|DRIVE|ROAD|LANE|COURT|PLACE|HIGHWAY|CIRCLE|TERRACE)\b/i;
@@ -214,12 +214,11 @@ function RowDetail({ row, onClose }: { row: any; onClose: () => void }) {
             {cleanField(row.doc_title) && <p className="font-medium uppercase">"{cleanField(row.doc_title)}"</p>}
             <p><span className="text-muted-foreground">Type:</span> {row.doc_type || '—'}</p>
             <p><span className="text-muted-foreground">Category:</span> {row.doc_category || '—'}</p>
-            <p><span className="text-muted-foreground">County:</span> Miami-Dade</p>
+            <p><span className="text-muted-foreground">County:</span> {countyLabel((row.county || 'MIAMI-DADE') as CountyScope)}</p>
             <p><span className="text-muted-foreground">Book/Page:</span> <span className="font-mono">{row.rec_book}/{row.rec_page}</span></p>
-            <a href={docUrl(row.rec_book, row.rec_page)} target="_blank" rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-primary hover:underline mt-1">
+            <DocLink row={row} className="inline-flex items-center gap-1 text-primary hover:underline mt-1">
               <ArrowUpRight size={10} />View on Clerk portal
-            </a>
+            </DocLink>
           </div>
           <div className="space-y-1">
             <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Parties (as written in PDF)</p>
@@ -343,11 +342,11 @@ function TransactionsTable({ title, filterQs, exportQs }: {
                       <td className="px-2 py-1.5 border-r border-border/20 whitespace-nowrap">
                         <div className="flex items-center gap-1">
                           {isExp ? <ChevronUp size={9} className="text-primary shrink-0" /> : <ChevronDown size={9} className="text-muted-foreground/40 shrink-0" />}
-                          <a href={docUrl(r.rec_book, r.rec_page)} target="_blank" rel="noopener noreferrer"
+                          <DocLink row={r}
                             onClick={e => e.stopPropagation()}
                             className="font-mono text-primary/80 hover:underline flex items-center gap-0.5">
                             {r.cfn}<ExternalLink size={8} className="opacity-40" />
-                          </a>
+                          </DocLink>
                         </div>
                       </td>
                       {/* Date */}

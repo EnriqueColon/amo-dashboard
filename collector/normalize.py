@@ -28,7 +28,14 @@ DB = os.environ.get('AMO_DB_PATH', '/opt/amo-dashboard/miami_dade_amo.db')
 #
 # Set to None for all counties once Broward extraction lands and cross-county
 # entity resolution is wanted — which is the stated goal, just not yet.
-NORMALIZE_COUNTIES: tuple[str, ...] | None = ('MIAMI-DADE',)
+# Overridable so the widening can be rehearsed and rolled out without a code
+# edit: NORMALIZE_COUNTIES="MIAMI-DADE,BROWARD" or "ALL".
+_COUNTIES_ENV = os.environ.get('NORMALIZE_COUNTIES', '').strip()
+NORMALIZE_COUNTIES: tuple[str, ...] | None = (
+    None if _COUNTIES_ENV.upper() == 'ALL'
+    else tuple(c.strip().upper() for c in _COUNTIES_ENV.split(',') if c.strip())
+    or ('MIAMI-DADE',)
+)
 
 
 def county_filter(conn, alias: str = '') -> str:
