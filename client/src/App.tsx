@@ -2,6 +2,7 @@ import { Switch, Route, Router } from 'wouter';
 import { useHashLocation } from 'wouter/use-hash-location';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from '@/lib/queryClient';
+import { CountyProvider } from '@/lib/county';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import Sidebar from '@/components/Sidebar';
@@ -20,7 +21,8 @@ import NotFound from '@/pages/not-found';
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
+      <CountyProvider>
+       <TooltipProvider>
         <Router hook={useHashLocation}>
           <div className="flex h-screen overflow-hidden bg-background print:h-auto print:overflow-visible">
             <Sidebar />
@@ -42,7 +44,8 @@ export default function App() {
           </div>
         </Router>
         <Toaster />
-      </TooltipProvider>
+       </TooltipProvider>
+      </CountyProvider>
     </QueryClientProvider>
   );
 }

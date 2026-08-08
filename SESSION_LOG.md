@@ -4,6 +4,64 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-08-07 — Client county selector BUILT + verified. NOT deployed.
+
+Phase 3. A global county selector in the sidebar, defaulting to Miami-Dade.
+
+### Wiring: two chokepoints, not twelve pages
+Every page reaches the API through either `apiRequest()` or the default
+`getQueryFn()` in `client/src/lib/queryClient.ts` — verified, the only raw `fetch` in the
+client is `/api/fdic/financials`, which is institution-level call-report data and correctly
+unscoped. So the county is appended at those two points and no page needed touching.
+
+- `client/src/lib/county-scope.ts` — state, `withCounty()`, localStorage. **Deliberately
+  import-free**: the React provider needs `queryClient`, and `queryClient` needs `withCounty`, so
+  the shared state lives in a third module to break the cycle.
+- `client/src/lib/county.tsx` — `CountyProvider` / `useCounty`.
+- County is NOT in any queryKey (it rides on the URL), so **`queryClient.clear()` runs on every
+  scope change**. `invalidateQueries()` is not enough — unmounted pages would keep the previous
+  county's rows and show them again on navigation.
+
+### Three real bugs the browser caught that the API tests did not
+1. **Derived stat cards showed Miami-Dade numbers under a Broward heading.** Unique Entities,
+   Market Transfers and Private Credit all read tables Broward cannot reach. The visible tell was
+   Market Transfers reporting **"177% of all filings"** — Miami-Dade's 24,215 over Broward's 13,674.
+2. **Monthly volume chart** did the same, drawing Miami-Dade bars under Broward.
+3. **Broward collection runs were logged as Miami-Dade.** `log_collection()` never set `county`,
+   and both migrations backfill NULL→MIAMI-DADE on sight, so untagged Broward runs were being
+   permanently relabelled. Fixed with an explicit `county=` argument.
+
+### How the "indexed but not extracted" state is now presented
+A county with raw filings but nothing in `aom_events_clean` shows **"—"** on every derived card
+plus an amber banner explaining that filings/parties/dates are complete while anything requiring
+document reading is pending. A literal 0 was rejected as it reads as "no activity" — the opposite
+of the truth. `/api/stats` gained `clean_total` to drive this.
+
+`statsUniqueEntities` moved off `entity_nodes` (which has no county column, being keyed by entity)
+onto the same UNION over `aom_events_clean` that `normalize.py:1275` builds it from — **verified
+identical at 20,195 for Miami-Dade**, but scopeable. `/api/network-stats` returns empty rankings
+rather than Miami-Dade's when the scope has no processed rows.
+
+### Verified
+- Miami-Dade unchanged end to end: `70,355 / 20,195 / 24,215 / 4,036`, chart 43 months, rankings
+  populated. Broward: `13,674` filings, 0 derived, banner shown, chart empty, rankings empty.
+- Raw Assignments under Broward: 13,674 records, real instrument numbers and party names.
+- Collection Log scopes correctly (1,301 Miami-Dade / 10 Broward).
+- **No wrong document links exist today** — the CFN on Raw Assignments is styled text, not an
+  anchor (0 anchors in the table), and every page that *does* build a Miami-Dade book/page URL
+  reads a derived table with no Broward rows. The per-county link builder is still required, but
+  only once Broward extractions land.
+- tsc clean; canonicalize baseline, alias scope and county isolation all green.
+
+### Open / next session
+1. Not deployed. Needs `npm run build` + `pm2 restart`.
+2. Remaining "Miami-Dade" copy is in tooltips and report headers (`Assignments.tsx`,
+   `CleanEvents.tsx`, `EntityReport.tsx`, the login page). Cosmetic, but wrong under Broward.
+3. Ingesting the Broward index into production is now safe — the UI can express it.
+4. Then: Broward extraction path, then the history scraper.
+
+---
+
 ## 2026-08-07 (later still) — County-aware server DEPLOYED. Phase 2 live.
 
 Default scope is Miami-Dade, so production output is unchanged until the UI opts in.

@@ -1,4 +1,5 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
+import { withCounty } from "./county-scope";
 
 const API_BASE = "__PORT_5000__".startsWith("__") ? "" : "__PORT_5000__";
 
@@ -14,7 +15,12 @@ export async function apiRequest(
   url: string,
   data?: unknown | undefined,
 ): Promise<Response> {
-  const res = await fetch(`${API_BASE}${url}`, {
+  // County rides on the URL rather than in every queryKey — this and getQueryFn
+  // below are the only two paths any page uses to reach the API, so scoping here
+  // covers all of them without touching a dozen pages. Reads only: a mutation's
+  // target is identified by its own body/params, not by the viewing scope.
+  const target = method.toUpperCase() === 'GET' ? withCounty(url) : url;
+  const res = await fetch(`${API_BASE}${target}`, {
     method,
     headers: data ? { "Content-Type": "application/json" } : {},
     body: data ? JSON.stringify(data) : undefined,
@@ -30,7 +36,7 @@ export const getQueryFn: <T>(options: {
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
-    const res = await fetch(`${API_BASE}${queryKey.join("/")}`);
+    const res = await fetch(`${API_BASE}${withCounty(queryKey.join("/"))}`);
 
     if (unauthorizedBehavior === "returnNull" && res.status === 401) {
       return null;

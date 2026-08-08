@@ -332,7 +332,8 @@ def collect_file(sftp, doc_path: str, name_path: str, label: str,
     docs = parse_doc_records(read_remote_text(sftp, doc_path), doc_types, start, end)
     log.info(f'  {len(docs):,} matching document(s) after doc-type/date filter')
     if not docs:
-        log_collection(start or '', end or '', 0, 'OK', f'{COUNTY}:{label}')
+        log_collection(start or '', end or '', 0, 'OK', f'{COUNTY}:{label}',
+                       county=COUNTY)
         return 0
 
     log.info(f'  reading {name_path}')
@@ -345,7 +346,8 @@ def collect_file(sftp, doc_path: str, name_path: str, label: str,
              + (f' — {collisions} COLLISION(S)' if collisions else ''))
 
     log_collection(start or '', end or '', len(rows),
-                   'ERROR' if collisions else 'OK', f'{COUNTY}:{label}')
+                   'ERROR' if collisions else 'OK', f'{COUNTY}:{label}',
+                   county=COUNTY)
     return inserted
 
 

@@ -1,6 +1,7 @@
 import { Link, useLocation } from 'wouter';
 import { BarChart2, FileText, CheckCircle, Shield, Building2, ClipboardList, Menu, X, LineChart, LayoutList, LogOut, Crosshair, Landmark } from 'lucide-react';
 import { useState } from 'react';
+import { useCounty, COUNTY_OPTIONS, type CountyScope } from '@/lib/county';
 
 const NAV = [
   { href: '/',                 icon: BarChart2,    label: 'Overview',           group: 'main' },
@@ -24,6 +25,7 @@ const GROUPS: Record<string, string> = {
 export default function Sidebar() {
   const [location] = useLocation();
   const [collapsed, setCollapsed] = useState(false);
+  const { county, setCounty } = useCounty();
 
   let lastGroup = '';
 
@@ -50,11 +52,34 @@ export default function Sidebar() {
             </svg>
             <div className="min-w-0">
               <div className="font-semibold text-sm text-foreground truncate">AMO Tracker</div>
-              <div className="text-[9px] text-muted-foreground truncate">Miami-Dade County</div>
+              <div className="text-[9px] text-muted-foreground truncate">Official Records</div>
             </div>
           </div>
         )}
       </div>
+
+      {/* County scope — global, applies to every page */}
+      {!collapsed && (
+        <div className="px-3 py-2.5 border-b border-border">
+          <label
+            htmlFor="county-scope"
+            className="block text-[9px] font-semibold text-muted-foreground uppercase tracking-widest mb-1"
+          >
+            County
+          </label>
+          <select
+            id="county-scope"
+            data-testid="county-scope"
+            value={county}
+            onChange={e => setCounty(e.target.value as CountyScope)}
+            className="w-full text-xs rounded border border-border bg-background px-2 py-1.5 text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          >
+            {COUNTY_OPTIONS.map(o => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {/* Nav */}
       <nav className="flex-1 py-2 px-1.5 overflow-y-auto">

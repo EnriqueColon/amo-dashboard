@@ -82,12 +82,28 @@ def insert_records(records: list) -> int:
 
 
 def log_collection(date_from: str, date_to: str, records_found: int,
-                   status: str, doc_type: str):
+                   status: str, doc_type: str, county: str = 'MIAMI-DADE'):
+    """Record one collection window.
+
+    `county` must be passed explicitly by non-Miami-Dade collectors. Leaving it
+    NULL is not a neutral default: both migrate_add_county.py and server/db.ts
+    backfill NULL counties to MIAMI-DADE on sight, so an untagged Broward run
+    would be permanently relabelled as a Miami-Dade one.
+    """
     conn = get_conn()
-    conn.execute("""
-        INSERT INTO collection_log (date_from, date_to, records_found, status, doc_type)
-        VALUES (?, ?, ?, ?, ?)
-    """, (date_from, date_to, records_found, status, doc_type))
+    try:
+        conn.execute("""
+            INSERT INTO collection_log
+                (date_from, date_to, records_found, status, doc_type, county)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (date_from, date_to, records_found, status, doc_type, county))
+    except sqlite3.OperationalError:
+        # Database predates the county column (collector running against an old
+        # copy) — fall back rather than failing the whole collection run.
+        conn.execute("""
+            INSERT INTO collection_log (date_from, date_to, records_found, status, doc_type)
+            VALUES (?, ?, ?, ?, ?)
+        """, (date_from, date_to, records_found, status, doc_type))
     conn.commit()
     conn.close()
 

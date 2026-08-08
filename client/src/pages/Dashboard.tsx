@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
+import { useCounty, countyLabel } from '@/lib/county';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer } from 'recharts';
 import { TrendingUp, TrendingDown, Network, FileText, Database, RefreshCw, Star, ChevronRight, Info } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -76,8 +77,14 @@ function EntityRow({ rank, entity, volume, degree, type, label, onClick }: any) 
 }
 
 // ── Main Component ─────────────────────────────────────────────────────────
+// Shown in place of a derived figure when the selected county has documents in
+// the raw index but none through PDF extraction yet. A literal 0 would read as
+// "no activity here", which is the opposite of the truth.
+const UNPROCESSED_NOTE = 'awaiting document extraction';
+
 export default function Dashboard() {
   const [selectedEntity, setSelectedEntity] = useState<string | null>(null);
+  const { county } = useCounty();
   const { data: raw, isLoading: rawLoading } = useQuery({
     queryKey: ['/api/stats'],
     queryFn: () => apiRequest('GET', '/api/stats').then(r => r.json()),
@@ -93,6 +100,10 @@ export default function Dashboard() {
 
   const isLoading = rawLoading || netLoading;
 
+  // Indexed but not extracted: the raw filings are collected, yet nothing has
+  // reached aom_events_clean, so every derived figure on this page is 0.
+  const unprocessed = !!raw && raw.total > 0 && raw.clean_total === 0;
+
   return (
     <div className="p-6 space-y-6 max-w-screen-xl mx-auto">
 
@@ -101,7 +112,7 @@ export default function Dashboard() {
         <div>
           <h1 className="text-xl font-semibold">Overview</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Miami-Dade County · Assignment of Mortgages — public county records tracking every transfer of mortgage debt
+            {countyLabel(county)} · Assignment of Mortgages — public county records tracking every transfer of mortgage debt
             {raw && <span> · {raw.min_date} → {raw.max_date}</span>}
           </p>
         </div>
@@ -111,6 +122,22 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {unprocessed && (
+        <div
+          data-testid="unprocessed-banner"
+          className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs text-foreground"
+        >
+          <Info size={14} className="mt-0.5 shrink-0 text-amber-500" />
+          <span>
+            <span className="font-medium">{countyLabel(county)} is indexed but not yet extracted.</span>{' '}
+            Filings, parties and dates below come from the county index and are complete.
+            Everything derived from reading the documents themselves — entity classification,
+            transaction types, private-credit detection, lending relationships — is not available
+            yet and shows as “—”.
+          </span>
+        </div>
+      )}
+
       {/* Top KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {isLoading ? Array(4).fill(0).map((_,i) => <Skeleton key={i} className="h-24 rounded-lg" />) : (<>
@@ -119,29 +146,35 @@ export default function Dashboard() {
             value={raw?.total?.toLocaleString()}
             icon={Database}
             sub={`${raw?.min_date} → ${raw?.max_date}`}
-            tooltip={`Every recorded assignment of mortgage in Miami-Dade County for this period. An assignment filing is the public document created each time a mortgage note (the debt instrument) changes hands — not when the property sells. This count includes all transaction types: market transfers between institutions, new loan originations, MERS registry moves, and private transfers. It is the raw pulse of debt-market activity in this county.`}
+            tooltip={`Every recorded assignment of mortgage in ${countyLabel(county)} for this period. An assignment filing is the public document created each time a mortgage note (the debt instrument) changes hands — not when the property sells. This count includes all transaction types: market transfers between institutions, new loan originations, MERS registry moves, and private transfers. It is the raw pulse of debt-market activity in this county.`}
           />
           <StatCard
             label="Unique Entities"
-            value={raw?.unique_entities?.toLocaleString()}
+            value={unprocessed ? '—' : raw?.unique_entities?.toLocaleString()}
             icon={FileText}
-            sub={`${raw?.unique_grantors ?? 0} grantors · ${raw?.unique_grantees ?? 0} grantees (raw), merged by canonicalization`}
+            sub={unprocessed
+              ? `${raw?.unique_grantors ?? 0} grantors · ${raw?.unique_grantees ?? 0} grantees in the raw index — ${UNPROCESSED_NOTE}`
+              : `${raw?.unique_grantors ?? 0} grantors · ${raw?.unique_grantees ?? 0} grantees (raw), merged by canonicalization`}
             color="text-green-500"
             tooltip={`Raw county filings contain hundreds of name variants for the same institution — "BANK OF AMERICA N.A.", "BANK OF AMERICA NATIONAL ASSOC", "BK OF AMERICA" all refer to the same entity. Canonicalization merges these into one name. This figure is the count of distinct market participants after that deduplication. A higher number indicates a more fragmented market with more potential counterparties; a lower number signals market concentration among a few dominant players.`}
           />
           <StatCard
             label="Market Transfers"
-            value={raw?.market_transfers?.toLocaleString()}
+            value={unprocessed ? '—' : raw?.market_transfers?.toLocaleString()}
             icon={TrendingUp}
-            sub={`${raw?.total ? Math.round((raw.market_transfers / raw.total) * 100) : 0}% of all filings — institution-to-institution only`}
+            sub={unprocessed
+              ? UNPROCESSED_NOTE
+              : `${raw?.total ? Math.round((raw.market_transfers / raw.total) * 100) : 0}% of all filings — institution-to-institution only`}
             color="text-emerald-500"
             tooltip={`A Market Transfer is an assignment where BOTH the seller and buyer are recognized institutional entities — banks, servicers, GSEs (Fannie/Freddie/HUD), private credit funds, or securitization trusts. This filters out originations (borrower → lender) and MERS registry moves (which are not real sales). Market Transfers represent genuine secondary-market activity: one professional participant selling a debt position to another. Rising Market Transfer volume signals an active trading environment; a shift in which entity types are buying vs. selling reveals capital flows and distress.`}
           />
           <StatCard
             label="Private Credit Txns"
-            value={raw?.private_credit_txns?.toLocaleString()}
+            value={unprocessed ? '—' : raw?.private_credit_txns?.toLocaleString()}
             icon={TrendingUp}
-            sub={`${raw?.self_assigns?.toLocaleString() ?? '—'} self-assigns excluded from count`}
+            sub={unprocessed
+              ? UNPROCESSED_NOTE
+              : `${raw?.self_assigns?.toLocaleString() ?? '—'} self-assigns excluded from count`}
             color="text-purple-500"
             tooltip={`Any transaction where the buyer OR seller is classified as a private credit / PE fund. This includes: PE acquiring from a bank (the most actionable deal signal), PE acquiring from a servicer or GSE, PE selling to another institution, and PE disposing to a private party. Self-assignments — where an entity transfers a loan to its own subsidiary or affiliated LLC (e.g., "FUND LLC" → "FUND MASTER LLC") — are excluded because they carry no economic meaning; no debt actually changed hands.`}
           />

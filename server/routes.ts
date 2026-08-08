@@ -55,11 +55,27 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     statsRange:          db.prepare(`SELECT MIN(rec_date) as min_date, MAX(rec_date) as max_date FROM assignments WHERE ${countyPredicate()}`),
     statsGrantors:       db.prepare(`SELECT COUNT(DISTINCT grantor) as n FROM assignments WHERE ${countyPredicate()}`),
     statsGrantees:       db.prepare(`SELECT COUNT(DISTINCT grantee) as n FROM assignments WHERE ${countyPredicate()}`),
-    statsUniqueEntities: db.prepare('SELECT COUNT(DISTINCT entity) as n FROM entity_nodes'),
-    statsSelfAssigns:    db.prepare(`SELECT COUNT(*) as n FROM aom_events_clean WHERE txn_type='SELF_ASSIGN'`),
-    statsPrivCredit:     db.prepare(`SELECT COUNT(*) as n FROM aom_events_clean WHERE (assignor_type='PRIVATE_CREDIT' OR assignee_type='PRIVATE_CREDIT') AND txn_type != 'SELF_ASSIGN'`),
-    statsMarketTransfers:db.prepare(`SELECT COUNT(*) as n FROM aom_events_clean WHERE txn_type='MARKET_TRANSFER'`),
-    statsTxnBreakdown:   db.prepare(`SELECT txn_type, COUNT(*) as n FROM aom_events_clean GROUP BY txn_type ORDER BY n DESC`),
+    // entity_nodes has no county column — it is keyed by entity, not by
+    // document. normalize.py builds it as exactly this UNION over
+    // aom_events_clean (normalize.py:1275), so counting the union directly
+    // yields the identical number for Miami-Dade (verified: 20,195 both ways)
+    // while also being scopeable, which entity_nodes is not.
+    statsUniqueEntities: db.prepare(`
+      SELECT COUNT(*) as n FROM (
+        SELECT assignor_canon AS e FROM aom_events_clean WHERE ${countyPredicate()}
+        UNION
+        SELECT assignee_canon    FROM aom_events_clean WHERE ${countyPredicate()}
+      )
+    `),
+    statsSelfAssigns:    db.prepare(`SELECT COUNT(*) as n FROM aom_events_clean WHERE txn_type='SELF_ASSIGN' AND ${countyPredicate()}`),
+    statsPrivCredit:     db.prepare(`SELECT COUNT(*) as n FROM aom_events_clean WHERE (assignor_type='PRIVATE_CREDIT' OR assignee_type='PRIVATE_CREDIT') AND txn_type != 'SELF_ASSIGN' AND ${countyPredicate()}`),
+    statsMarketTransfers:db.prepare(`SELECT COUNT(*) as n FROM aom_events_clean WHERE txn_type='MARKET_TRANSFER' AND ${countyPredicate()}`),
+    statsTxnBreakdown:   db.prepare(`SELECT txn_type, COUNT(*) as n FROM aom_events_clean WHERE ${countyPredicate()} GROUP BY txn_type ORDER BY n DESC`),
+    // Rows in the derived table for this scope. Zero means "this county has no
+    // PROCESSED documents yet", which is not the same as "this county had no
+    // activity" — the client renders the derived stats as "—" rather than 0 so
+    // the two can never be confused.
+    statsCleanTotal:     db.prepare(`SELECT COUNT(*) as n FROM aom_events_clean WHERE ${countyPredicate()}`),
     statsLogCount:       db.prepare(`SELECT COUNT(*) as n FROM collection_log WHERE ${countyPredicate()}`),
     statsLastCollected:  db.prepare(`SELECT MAX(date_to) as dt FROM collection_log WHERE status='OK' AND ${countyPredicate()}`),
     monthlyVolume:       db.prepare(`
@@ -69,7 +85,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
         SUM(CASE WHEN txn_type='ORIGINATION'     THEN 1 ELSE 0 END) as originations,
         COUNT(DISTINCT assignor_canon) as unique_assignors,
         COUNT(DISTINCT assignee_canon) as unique_assignees
-      FROM aom_events_clean GROUP BY month ORDER BY month
+      FROM aom_events_clean WHERE ${countyPredicate()} GROUP BY month ORDER BY month
     `),
     topAssignors:        db.prepare(`
       SELECT entity as name, entity_type as category, outbound_vol as total, first_seen as first_date, last_seen as last_date
@@ -87,7 +103,6 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       WHERE txn_type != 'SELF_ASSIGN'
       GROUP BY from_cat, to_cat ORDER BY count DESC
     `),
-    networkStats:        db.prepare('SELECT COUNT(*) as n FROM aom_events_clean'),
     nodeCount:           db.prepare('SELECT COUNT(*) as n FROM entity_nodes'),
     edgeCount:           db.prepare('SELECT COUNT(*) as n FROM entity_relationships'),
     topAcquirers:        db.prepare('SELECT entity, inbound_vol, outbound_vol, degree, entity_type FROM entity_nodes ORDER BY inbound_vol DESC LIMIT 10'),
@@ -150,25 +165,31 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const { min_date, max_date } = stmts.statsRange.get({ county }) as any;
     const unique_grantors     = (stmts.statsGrantors.get({ county }) as any).n;
     const unique_grantees     = (stmts.statsGrantees.get({ county }) as any).n;
-    const unique_entities     = (stmts.statsUniqueEntities.get() as any).n;
-    const self_assigns        = (stmts.statsSelfAssigns.get() as any).n;
-    const private_credit_txns = (stmts.statsPrivCredit.get() as any).n;
-    const market_transfers    = (stmts.statsMarketTransfers.get() as any).n;
-    const txn_breakdown       = stmts.statsTxnBreakdown.all();
+    const unique_entities     = (stmts.statsUniqueEntities.get({ county }) as any).n;
+    const self_assigns        = (stmts.statsSelfAssigns.get({ county }) as any).n;
+    const private_credit_txns = (stmts.statsPrivCredit.get({ county }) as any).n;
+    const market_transfers    = (stmts.statsMarketTransfers.get({ county }) as any).n;
+    const txn_breakdown       = stmts.statsTxnBreakdown.all({ county });
     const collection_log_count = (stmts.statsLogCount.get({ county }) as any).n;
     const last_collected      = (stmts.statsLastCollected.get({ county }) as any)?.dt;
+    // Documents collected but not yet run through PDF extraction have no rows in
+    // aom_events_clean, so every derived figure above is 0 for them. Broward is
+    // in exactly that state today: fully indexed, not yet extracted. The client
+    // uses this to show "—" instead of a 0 that would read as "no activity".
+    const clean_total         = (stmts.statsCleanTotal.get({ county }) as any).n;
     const unique_cfns = total;
-    const payload = { total, unique_cfns, unique_entities, self_assigns, min_date, max_date, unique_grantors, unique_grantees, private_credit_txns, market_transfers, txn_breakdown, collection_log_count, last_collected };
+    const payload = { total, unique_cfns, unique_entities, self_assigns, min_date, max_date, unique_grantors, unique_grantees, private_credit_txns, market_transfers, txn_breakdown, collection_log_count, last_collected, clean_total };
     setCached(KEY, payload, STATS_TTL_MS);
     res.json(payload);
   });
 
   // ─── GET /api/monthly-volume ──────────────────────────────────────────────
-  app.get('/api/monthly-volume', (_req, res) => {
-    const KEY = '/api/monthly-volume';
+  app.get('/api/monthly-volume', (req, res) => {
+    const county = countyScope(req as any);
+    const KEY = makeCacheKey('/api/monthly-volume', { county: county ?? 'ALL' });
     const cached = getCached(KEY);
     if (cached) return res.json(cached);
-    const data = stmts.monthlyVolume.all();
+    const data = stmts.monthlyVolume.all({ county });
     setCached(KEY, data);
     res.json(data);
   });
@@ -534,13 +555,19 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const KEY = makeCacheKey('/api/network-stats', { county: county ?? 'ALL' });
     const cached = getCached(KEY);
     if (cached) return res.json(cached);
-    const clean_total    = (stmts.networkStats.get() as any)?.n ?? 0;
-    const node_count     = (stmts.nodeCount.get() as any)?.n ?? 0;
-    const edge_count     = (stmts.edgeCount.get() as any)?.n ?? 0;
     const raw_total      = (stmts.statsTotal.get({ county }) as any).n;
-    const top_acquirers  = stmts.topAcquirers.all();
-    const top_sellers    = stmts.topSellers.all();
-    const most_connected = stmts.mostConnected.all();
+    // entity_nodes / entity_relationships are keyed by entity, not document, so
+    // they carry no county and cannot be filtered. They are built exclusively
+    // from aom_events_clean, so when the selected scope has nothing there the
+    // honest answer is "no rankings", not Miami-Dade's rankings under another
+    // county's heading.
+    const clean_total    = (stmts.statsCleanTotal.get({ county }) as any).n;
+    const hasProcessed   = clean_total > 0;
+    const node_count     = hasProcessed ? ((stmts.nodeCount.get() as any)?.n ?? 0) : 0;
+    const edge_count     = hasProcessed ? ((stmts.edgeCount.get() as any)?.n ?? 0) : 0;
+    const top_acquirers  = hasProcessed ? stmts.topAcquirers.all()  : [];
+    const top_sellers    = hasProcessed ? stmts.topSellers.all()    : [];
+    const most_connected = hasProcessed ? stmts.mostConnected.all() : [];
     const payload = { clean_total, raw_total, node_count, edge_count, top_acquirers, top_sellers, most_connected };
     setCached(KEY, payload);
     res.json(payload);
