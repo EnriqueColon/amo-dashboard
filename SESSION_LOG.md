@@ -4,6 +4,54 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-08-08 — Endpoint scoping: document tables scoped; entity tables labelled (option 2).
+
+### The split that decided the approach
+Auditing the 25 unscoped endpoints showed they are **not one problem but two**:
+
+- **Document-level** (`aom_events_clean`, `credit_facility_events`) — scopeable with a query change.
+- **Entity-level** (`entity_nodes`, `entity_relationships`) — **NOT scopeable at all.** They are
+  keyed by entity, not document: `normalize.py` collapses every filing for a company into one row,
+  leaving no county to filter on. Making them county-aware is a pipeline change.
+
+13 endpoints fall in the second group, including `/api/entity/:name`, `/api/entity-nodes`,
+`/api/network-graph`, `/api/reporting/entity-report`, `/api/reporting/participants`,
+`/api/targets`, `/api/aliases` and four deal-intelligence routes.
+
+### User decision: option 2 — keep entity tables cross-county, and say so
+Rebuilding them per county was rejected because it would undercut the cross-county entity
+resolution that motivated the whole expansion (the same lenders trade in both counties, and seeing
+them as one entity is the point).
+
+- `ENTITY_SCOPE_ALL` marks such payloads; `/api/network-stats` returns `entity_scope`.
+- `client/src/components/CrossCountyNote.tsx` renders "not filtered by county" beside the affected
+  panel headings — **only when a specific county is selected**; on All Counties it would be noise.
+  Verified: 0 notes on ALL, 3 on Miami-Dade, 3 on Broward.
+- Applied to Dashboard's three ranking panels, Entities, Deal Intelligence (Seller Pressure,
+  Special Servicer Watch, PE Competitive Map) and Reporting's Participant Activity.
+
+**Reversed an earlier decision:** `/api/network-stats` had been blanking rankings when the scope
+had no processed rows. With an explicit label that is worse — it hides real data and implies the
+county has no entity activity, when the truth is the table does not model counties at all. The
+rankings now always return, labelled.
+
+### Document-table endpoints scoped
+`clean-events`, all five `credit-facility-events/*`, `reporting`. `countyFilter()` added as the
+positional counterpart to `countyPredicate()` — better-sqlite3 refuses to mix named and positional
+parameters, and most of these queries are assembled as strings with `?`. The credit-facility chart
+takes county into its **shared date-clause list** rather than per branch, so every chart type
+inherits it and a new one cannot forget it.
+
+Verified: `/api/clean-events?county=BROWARD` returned **5** rows against a single Broward row
+before, **1** after. All key endpoints 200 across all three scopes; tsc clean.
+
+### Still unscoped (document-level, safe today, must be done before NORMALIZE_COUNTIES flips)
+`/api/entity/:name/sub-entities`, `/api/deal-intelligence/{seller-pressure,pe-competitive,
+bank-to-pe,recent-bank-to-pe}` dynamic paths, `/api/reporting/{export,chart}`, `/api/top-assignees`
+(reads entity_nodes via a shared statement — belongs to the labelled group).
+
+---
+
 ## 2026-08-08 (later still) — Per-county document links DONE. And a scope gap found: 25 endpoints.
 
 ### Broward has no document deep link — confirmed, not assumed

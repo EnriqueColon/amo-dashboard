@@ -8,6 +8,7 @@ import EntityDetailPanel from '@/components/EntityDetailPanel';
 import DuplicateManager from '@/components/DuplicateManager';
 import ColHeader from '@/components/ColHeader';
 import { Search, ChevronRight, Info, Network } from 'lucide-react';
+import CrossCountyNote from '@/components/CrossCountyNote';
 
 const TYPE_FILTERS = ['', 'BANK', 'PRIVATE_CREDIT', 'TRUST', 'GSE', 'SERVICER', 'MERS', 'OTHER'];
 
@@ -37,6 +38,7 @@ export default function Entities() {
           <div className="flex items-center gap-2">
             <Network size={16} className="text-purple-400" />
             <h1 className="text-xl font-semibold">Entities</h1>
+            <CrossCountyNote className="ml-2" />
           </div>
           <p className="text-sm text-muted-foreground mt-0.5">
             {isLoading ? 'Loading…' : `${filtered.length.toLocaleString()} of ${(nodes || []).length.toLocaleString()} canonical entities`}

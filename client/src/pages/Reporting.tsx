@@ -17,6 +17,7 @@ import {
   CartesianGrid, Cell, PieChart as RechartsPie, Pie, Legend,
 } from 'recharts';
 import { EntityPicker, EntityReport } from '@/components/EntityReport';
+import CrossCountyNote from '@/components/CrossCountyNote';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function fmtAmt(v: number | null | undefined): string | null {
@@ -158,6 +159,7 @@ function ParticipantStats({ startDate, endDate, targetsOnly }: { startDate: stri
     <div className="bg-card border border-border rounded-lg p-4 space-y-3">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <h2 className="text-sm font-semibold">Participant Activity</h2>
+            <CrossCountyNote className="ml-2" />
         <div className="flex gap-1">
           {([['active', 'Most Active'], ['sellers', 'Top Senders'], ['buyers', 'Top Receivers']] as const).map(([key, label]) => (
             <button key={key} onClick={() => setTab(key)}

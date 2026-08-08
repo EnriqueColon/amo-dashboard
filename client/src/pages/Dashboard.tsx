@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import { useCounty, countyLabel } from '@/lib/county';
+import CrossCountyNote from '@/components/CrossCountyNote';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer } from 'recharts';
 import { TrendingUp, TrendingDown, Network, FileText, Database, RefreshCw, Star, ChevronRight, Info } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -229,6 +230,7 @@ export default function Dashboard() {
           <div className="flex items-center gap-2 mb-1">
             <TrendingUp size={14} className="text-green-400" />
             <h2 className="text-sm font-semibold text-foreground">Top Acquirers</h2>
+            <CrossCountyNote className="ml-auto" />
           </div>
           <p className="text-[10px] text-muted-foreground mb-3">
             Entities with the most inbound assignments — i.e., they are the buyer on the most mortgage transfers.
@@ -248,6 +250,7 @@ export default function Dashboard() {
           <div className="flex items-center gap-2 mb-1">
             <TrendingDown size={14} className="text-red-400" />
             <h2 className="text-sm font-semibold text-foreground">Top Sellers</h2>
+            <CrossCountyNote className="ml-auto" />
           </div>
           <p className="text-[10px] text-muted-foreground mb-3">
             Entities assigning the most mortgages outward — i.e., the seller on the most transfers.
@@ -267,6 +270,7 @@ export default function Dashboard() {
           <div className="flex items-center gap-2 mb-1">
             <Network size={14} className="text-blue-400" />
             <h2 className="text-sm font-semibold text-foreground">Most Connected</h2>
+            <CrossCountyNote className="ml-auto" />
           </div>
           <p className="text-[10px] text-muted-foreground mb-3">
             Hub entities ranked by unique counterparty relationships. An entity with high degree has transacted with many distinct buyers/sellers — a sign of market breadth. <Star size={9} className="inline text-primary" /> marks hub entities (degree ≥ 50).

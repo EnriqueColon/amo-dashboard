@@ -47,6 +47,21 @@ function countyPredicate(alias = ''): string {
 }
 
 /**
+ * Marks a payload whose entity-level figures ignore the county selector.
+ *
+ * `entity_nodes` and `entity_relationships` are keyed by entity, not document —
+ * normalize.py collapses every filing for a company into one row, leaving no
+ * county to filter on. Making them county-aware means rebuilding them per
+ * county in the pipeline, which would also undercut the cross-county entity
+ * resolution this project exists to provide (the same lenders trade in both
+ * counties, and seeing them as one entity is the point).
+ *
+ * So these figures stay unfiltered and say so, rather than being silently
+ * presented as if they respected the selector.
+ */
+const ENTITY_SCOPE_ALL = 'ALL_COUNTIES';
+
+/**
  * Positional variant, for the many queries assembled as strings with `?`
  * placeholders — better-sqlite3 refuses to mix named and positional parameters
  * in one statement, so those cannot use countyPredicate().
@@ -572,19 +587,24 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const cached = getCached(KEY);
     if (cached) return res.json(cached);
     const raw_total      = (stmts.statsTotal.get({ county }) as any).n;
-    // entity_nodes / entity_relationships are keyed by entity, not document, so
-    // they carry no county and cannot be filtered. They are built exclusively
-    // from aom_events_clean, so when the selected scope has nothing there the
-    // honest answer is "no rankings", not Miami-Dade's rankings under another
-    // county's heading.
     const clean_total    = (stmts.statsCleanTotal.get({ county }) as any).n;
-    const hasProcessed   = clean_total > 0;
-    const node_count     = hasProcessed ? ((stmts.nodeCount.get() as any)?.n ?? 0) : 0;
-    const edge_count     = hasProcessed ? ((stmts.edgeCount.get() as any)?.n ?? 0) : 0;
-    const top_acquirers  = hasProcessed ? stmts.topAcquirers.all()  : [];
-    const top_sellers    = hasProcessed ? stmts.topSellers.all()    : [];
-    const most_connected = hasProcessed ? stmts.mostConnected.all() : [];
-    const payload = { clean_total, raw_total, node_count, edge_count, top_acquirers, top_sellers, most_connected };
+    // entity_nodes / entity_relationships are keyed by ENTITY, not by document,
+    // so they carry no county and cannot be filtered here — making them
+    // county-aware is a normalize.py change, not a query change.
+    //
+    // They are returned unfiltered rather than blanked, and flagged with
+    // entity_scope so the client can label them. Blanking them was tried and is
+    // worse: it hides real data, and it implies the county has no entity
+    // activity when the truth is that this table does not model counties at all.
+    const node_count     = (stmts.nodeCount.get() as any)?.n ?? 0;
+    const edge_count     = (stmts.edgeCount.get() as any)?.n ?? 0;
+    const top_acquirers  = stmts.topAcquirers.all();
+    const top_sellers    = stmts.topSellers.all();
+    const most_connected = stmts.mostConnected.all();
+    // entity_scope tells the client these figures ignore the county selector.
+    const payload = { clean_total, raw_total, node_count, edge_count,
+                      top_acquirers, top_sellers, most_connected,
+                      entity_scope: ENTITY_SCOPE_ALL };
     setCached(KEY, payload);
     res.json(payload);
   });

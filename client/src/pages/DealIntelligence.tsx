@@ -10,6 +10,7 @@ import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip, Legend,
   ResponsiveContainer, CartesianGrid, Cell, ReferenceArea,
 } from 'recharts';
+import CrossCountyNote from '@/components/CrossCountyNote';
 import {
   TrendingDown, TrendingUp, AlertTriangle, Target, Users,
   ArrowRight, ChevronLeft, ChevronRight, ExternalLink,
@@ -905,6 +906,7 @@ export default function DealIntelligence() {
             <TrendingDown size={14} className="text-red-400 mt-0.5 shrink-0" />
             <div>
               <h2 className="text-sm font-semibold text-foreground">Seller Pressure Monitor</h2>
+            <CrossCountyNote className="ml-2" />
               <p className="text-[10px] text-muted-foreground mt-0.5">
                 Banks and servicers ranked by net outbound volume. Heavy net sellers are likely sources for portfolio acquisitions.
               </p>
@@ -950,6 +952,7 @@ export default function DealIntelligence() {
             <AlertTriangle size={14} className="text-amber-400 mt-0.5 shrink-0" />
             <div>
               <h2 className="text-sm font-semibold text-foreground">Special Servicer Watch</h2>
+            <CrossCountyNote className="ml-2" />
               <p className="text-[10px] text-muted-foreground mt-0.5">
                 Entities that manage distressed and non-performing loans. Rising inbound = growing distressed pipeline.
               </p>
@@ -1004,6 +1007,7 @@ export default function DealIntelligence() {
             <Shield size={14} className="text-purple-400 mt-0.5 shrink-0" />
             <div>
               <h2 className="text-sm font-semibold text-foreground">Private Credit Competitive Map</h2>
+            <CrossCountyNote className="ml-2" />
               <p className="text-[10px] text-muted-foreground mt-0.5">
                 Active PE / private credit funds in Miami-Dade ranked by total acquisition volume. These are your competitors and potential co-investors.
               </p>
