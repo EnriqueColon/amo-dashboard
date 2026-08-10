@@ -4,6 +4,50 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-08-10 — county-column bug FIXED; NORMALIZE_COUNTIES flipped to include Broward.
+
+### The fix
+`aom_events_clean` and `credit_facility_events` now DECLARE `county` in their CREATE and populate
+it. In `aom_events_clean`'s source query the column is appended **LAST** on purpose — those rows
+are unpacked by positional index (`entries[0][8]` etc.), so inserting it earlier would silently
+shift every one. `credit_facility_events` also picked up the county scope filter its sibling
+already had.
+
+`check_county_isolation.py` now **fails** when either rebuilt table lacks the column instead of
+skipping. This trap has caught three separate writers (`log_collection`, `save()` in
+`extract_pdfs`, both rebuild statements), so it is asserted rather than trusted.
+
+### Rehearsal on a fresh production snapshot — the fix works
+- `county` present on both rebuilt tables
+- `aom_events_clean`: **374 BROWARD + 51,425 MIAMI-DADE** — Miami-Dade unchanged, and 374 exactly
+  matches the Broward LOAN_TRANSFER extraction count
+- **0** rows mislabelled; county isolation guardrail green
+
+### The flip
+`NORMALIZE_COUNTIES` default is now `('MIAMI-DADE', 'BROWARD')`, still env-overridable so a future
+county can be rehearsed the same way. Deployed with a pre-flip backup at
+`/opt/amo-dashboard/backup_pre_broward_normalize.db` (131MB, integrity-checked). Pre-flip baseline:
+`51,425 clean / 20,320 nodes / 445 facility`. Ran manually rather than waiting for the 08:30 UTC
+cron, so it landed under supervision.
+
+### Two traps hit again this session — both already documented, both still caught me
+1. **`pgrep -f "normalize.py"` matches the watcher's own command line.** SESSION_LOG has warned
+   about this since 2026-08-06. Use `ps -eo pid,cmd | grep "[n]ormalize.py" | grep -v "bash -c"`.
+   (The bracket form *does* work with pgrep; the failure was reading its result as authoritative.)
+2. **`ps -eo cmd` is not valid on macOS** — it errors with "keyword not found", and a
+   `|| echo "not running"` fallback then reports the process as dead. It was very much alive at
+   98% CPU. On macOS use `ps aux | grep`. I asserted normalize had finished when it had not.
+
+Also: a long silent stretch during `Building aom_events_clean...` is **normal**, not a hang — all
+inserts are built in Python memory and committed once at the end.
+
+### Feed status
+Broward publishes ~3 business days behind. `2026-08-05` (50 documents) appeared after the 12:30 UTC
+cron and was harvested manually; the next cron would have caught it well inside the 10-day window.
+Index now **42,559**, images **658**.
+
+---
+
 ## 2026-08-08 — Drift rehearsal WITH extractions. Result good, but found a BLOCKER.
 
 Ran `normalize.py` with `NORMALIZE_COUNTIES="MIAMI-DADE,BROWARD"` against a fresh production
