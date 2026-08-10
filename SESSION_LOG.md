@@ -4,6 +4,37 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-08-10 — 🎉 BROWARD IS LIVE. Flip deployed, normalize run, cache cleared, verified.
+
+The expansion is functionally complete: Broward now flows index → images → extraction →
+normalization → dashboard, county-scoped end to end.
+
+### Live production, after `pm2 restart`
+| scope | filings | clean | entities | market transfers | range |
+|---|---|---|---|---|---|
+| Miami-Dade | 70,834 | 51,425 | 20,320 | 24,360 | 2023-01-03 → 2026-08-06 |
+| **Broward** | **42,559** | **374** | **157** | **280** | 2023-01-03 → 2026-08-05 |
+| All | 113,393 | 51,799 | 20,367 | 24,640 | 2023-01-03 → 2026-08-06 |
+
+**Miami-Dade `clean` is 51,425 — identical to the pre-flip baseline.** Every figure matched the
+rehearsal exactly. County isolation guardrail green; all 37 endpoints healthy × 3 scopes. Real
+Broward rows render, e.g. `121023599  2026-08-04  MERS → PLANET HOME LENDING`.
+
+### Timing — correcting a stale figure
+The log has long claimed "~15 minutes" for a full `normalize.py` run. **The real figure at current
+scale is ~80 minutes on the droplet** (113,396 raw rows). Local, same code and data, took 19m46s —
+the droplet runs roughly 2.3× slower on this single-threaded Python loop. Plan maintenance windows
+against 80 minutes, not 15.
+
+### Do NOT restart PM2 mid-run
+`aom_events_clean` reads **0 rows** for the entire build — the table is dropped up front and every
+insert is committed once at the end. Restarting during that window would clear the 7-day cache and
+immediately re-cache the empty state, leaving Clean Transactions, Reporting and Deal Intelligence
+showing zeros for up to a week. This is why `run_nightly_normalize.sh` restarts *after* normalize
+and skips the restart entirely if it fails.
+
+---
+
 ## 2026-08-10 — county-column bug FIXED; NORMALIZE_COUNTIES flipped to include Broward.
 
 ### The fix

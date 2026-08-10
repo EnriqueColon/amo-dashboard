@@ -19,7 +19,29 @@ entity-normalization section below is retained but that change is already deploy
 | Broward index in `assignments` | **INGESTED 2026-08-08** — 42,509 rows | yes — live |
 | Broward extraction path | **DEPLOYED 2026-08-08** — 50 documents extracted | yes, but inert (see below) |
 
-## Broward extractions are currently inert
+## Broward is LIVE as of 2026-08-10
+
+`NORMALIZE_COUNTIES` includes Broward, and 374 Broward loan transfers are in `aom_events_clean`.
+Pre-flip backup: `/opt/amo-dashboard/backup_pre_broward_normalize.db` (131MB, integrity-checked),
+taken at `51,425 clean / 20,320 nodes / 445 facility`.
+
+**To back the flip out:** set `NORMALIZE_COUNTIES="MIAMI-DADE"` (env var or the constant in
+`collector/normalize.py`), re-run `normalize.py`, then `pm2 restart amo-dashboard`. The rebuild
+drops Broward rows from the derived tables on its own — no manual DELETE. Budget **~80 minutes**
+for the run, and do not restart PM2 mid-run (see below).
+
+Reverting also undoes the one classification change the widening produced
+(`WILMINGTON TRUST NATIONAL ASSN` moved `OTHER → TRUST`, a correction) and the cross-county volume
+on ~110 entities.
+
+## Never restart PM2 while normalize.py is running
+
+`aom_events_clean` is dropped at the start and reads 0 rows until a single commit at the end. A
+restart during that window clears the 7-day API cache and re-caches the EMPTY state, so Clean
+Transactions, Reporting and Deal Intelligence would show zeros for up to a week. Restart only
+after the run completes.
+
+## Broward extractions
 
 50 `pdf_extractions` rows exist with `county='BROWARD'`, and they change nothing the dashboard
 shows: `normalize.py` excludes Broward via `NORMALIZE_COUNTIES`, so they cannot reach
