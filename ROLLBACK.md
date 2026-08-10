@@ -1,8 +1,11 @@
 # Rollback — Broward County expansion (ACTIVE workstream)
 
-**Nothing here has touched production.** All of it was rehearsed against a copy of
-`prod_snapshot.db`. This section is the live tracking doc for the Broward work; the
-entity-normalization section below is retained but that change is already deployed.
+**Broward is FULLY DEPLOYED as of 2026-08-10** — index, images, extraction, normalization and the
+county-aware UI are all live. This is the live tracking doc for that work; the
+entity-normalization section further down is retained but long since shipped.
+
+Every piece was rehearsed against a production snapshot before deploying, and each has its own
+revert path below. Pre-flip backup: `/opt/amo-dashboard/backup_pre_broward_normalize.db`.
 
 ## Current state
 
@@ -11,13 +14,16 @@ entity-normalization section below is retained but that change is already deploy
 | `collector/broward_collect.py` | built, rehearsed | no — new file |
 | `collector/migrate_add_county.py` | built, rehearsed | **yes when run** — schema change |
 | `collector/tests/check_county_isolation.py` | built, green | no — new file |
-| `collector/broward_images.py` | built, rehearsed (553 docs) | no — new file + new table |
-| `collector/run_broward_daily.sh` | built, not installed | no until cron is added |
+| `collector/broward_images.py` | **DEPLOYED 2026-08-07** — 658 documents harvested | yes — live |
+| `collector/run_broward_daily.sh` | **CRON LIVE** `30 12 * * *` (with `BROWARD_INGEST_INDEX=1`) | yes — live |
 | county-aware server (`routes.ts`, `db.ts`) | **DEPLOYED 2026-08-07** | yes — live |
 | `normalize.py` county scoping | **DEPLOYED 2026-08-07** | yes — live |
 | client county selector | **DEPLOYED 2026-08-08** | yes — live |
-| Broward index in `assignments` | **INGESTED 2026-08-08** — 42,509 rows | yes — live |
-| Broward extraction path | **DEPLOYED 2026-08-08** — 50 documents extracted | yes, but inert (see below) |
+| Broward index in `assignments` | **LIVE** — 42,559 rows | yes — live |
+| Broward extraction path | **LIVE** — 539 documents extracted | yes — live |
+| per-county document links | **DEPLOYED 2026-08-08** | yes — live |
+| endpoint county scoping | **DEPLOYED 2026-08-10** | yes — live |
+| `NORMALIZE_COUNTIES` includes Broward | **FLIPPED 2026-08-10** — 374 rows in `aom_events_clean` | yes — live |
 
 ## Broward is LIVE as of 2026-08-10
 
@@ -43,20 +49,13 @@ after the run completes.
 
 ## Broward extractions
 
-50 `pdf_extractions` rows exist with `county='BROWARD'`, and they change nothing the dashboard
-shows: `normalize.py` excludes Broward via `NORMALIZE_COUNTIES`, so they cannot reach
-`aom_events_clean`. To remove them:
+539 `pdf_extractions` rows with `county='BROWARD'`, of which 374 are LOAN_TRANSFER and now feed
+`aom_events_clean`. To remove them, delete the rows and re-run `normalize.py`:
 
     DELETE FROM pdf_extractions WHERE county = 'BROWARD';
 
-No rebuild or restart needed while `NORMALIZE_COUNTIES` still excludes Broward.
-
-**`NORMALIZE_COUNTIES` remains the one-way door.** Adding `'BROWARD'` to it is what makes all of
-this visible — and simultaneously lets Broward names into the entity-classification signal sweep,
-which can change `assignor_type`/`assignee_type` on existing Miami-Dade rows. That is a data
-change: reverting the constant afterwards needs a further `normalize.py` run to undo it. Rehearse
-on a two-county copy and diff `entity_classifications` + `entity_nodes` before doing it in
-production.
+Only 539 of 42,559 Broward documents are extracted — the rest have no harvested images, which is
+what the history scraper is for.
 
 ## Reverting the county-aware server
 
