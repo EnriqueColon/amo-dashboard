@@ -51,6 +51,29 @@ def has_county(conn, table: str) -> bool:
     return any(r[1] == 'county' for r in conn.execute(f'PRAGMA table_info({table})'))
 
 
+def check_derived_tables_keep_county(conn) -> None:
+    """The rebuilt tables must DECLARE county themselves.
+
+    `normalize.py` drops and recreates `aom_events_clean` and
+    `credit_facility_events` on every run, so a county column added by a
+    migration does not survive. That is not a benign loss: `server/db.ts`
+    re-adds the column on the next startup and backfills NULL to 'MIAMI-DADE',
+    silently relabelling every Broward row and serving it under a Miami-Dade
+    filter with no error anywhere.
+
+    This has now bitten three separate writers (log_collection, save() in
+    extract_pdfs, and both rebuild statements), so it is asserted rather than
+    trusted.
+    """
+    for table in ('aom_events_clean', 'credit_facility_events'):
+        if not table_exists(conn, table):
+            continue
+        if not has_county(conn, table):
+            fail(f'{table}: county column MISSING — normalize.py recreated the '
+                 f'table without it; Broward rows will be relabelled MIAMI-DADE '
+                 f'by the next server start')
+
+
 def check_no_nulls(conn) -> None:
     for table in COUNTY_TABLES:
         if not table_exists(conn, table) or not has_county(conn, table):
@@ -129,6 +152,7 @@ def main() -> int:
         for county, n in counts:
             print(f'  {county:<14} {n:,} assignment(s)')
 
+        check_derived_tables_keep_county(conn)
         check_no_nulls(conn)
         check_no_cross_county_cfn(conn)
         check_key_formats(conn)

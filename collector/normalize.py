@@ -920,7 +920,14 @@ def build_normalized_tables():
             signatory_officer    TEXT,
             classification       TEXT,
             reviewed_by          TEXT,
-            reviewed_at          TEXT
+            reviewed_at          TEXT,
+            -- MUST be declared here and populated below. This table is dropped
+            -- and recreated on every run, so a column added by a migration does
+            -- not survive. Worse than losing it: server/db.ts re-adds it on the
+            -- next startup and backfills NULL -> 'MIAMI-DADE', which would
+            -- silently relabel every Broward row and serve it under a
+            -- Miami-Dade filter with no error anywhere.
+            county               TEXT
         );
     """)
 
@@ -1017,7 +1024,11 @@ def build_normalized_tables():
                ) as rn,
                COUNT(*) OVER (PARTITION BY a.cfn, a.grantee) as grantee_count,
                a.doc_type,
-               a.address
+               a.address,
+               -- Appended at the END on purpose: the rows below are unpacked by
+               -- positional index (entries[0][8] etc.), so inserting a column
+               -- anywhere earlier would silently shift every one of them.
+               COALESCE(a.county, 'MIAMI-DADE') AS county
         FROM assignments a
         LEFT JOIN entity_classifications ec_g ON UPPER(a.grantor)=UPPER(ec_g.name)
         LEFT JOIN entity_classifications ec_a ON UPPER(a.grantee)=UPPER(ec_a.name)
@@ -1111,6 +1122,8 @@ def build_normalized_tables():
             ext['folio_parcel']          if ext else None,
             ext['sponsor_address']       if ext else None,
             ext['signatory_officer']     if ext else None,
+            # index 13 of the source row — see the SELECT comment above
+            entries[0][13],
         ))
 
     conn.executemany("""
@@ -1120,8 +1133,8 @@ def build_normalized_tables():
          doc_type, doc_category, doc_title, pdf_assignor, pdf_assignee,
          assignor_parent, assignee_parent, property_address,
          loan_amount, consideration_amount,
-         folio_parcel, sponsor_address, signatory_officer)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+         folio_parcel, sponsor_address, signatory_officer, county)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     """, inserts)
 
     # Restore preserved review marks
@@ -1217,7 +1230,11 @@ def build_normalized_tables():
             -- against the same keys the pipeline groups on.
             direction                TEXT,
             grantor_role             TEXT,
-            grantee_role             TEXT
+            grantee_role             TEXT,
+            -- Same reasoning as aom_events_clean: this table is dropped and
+            -- recreated each run, so the column must live here rather than in a
+            -- migration, or Broward rows get relabelled Miami-Dade on restart.
+            county                   TEXT
         );
     """)
     # facility_amount <= 1000 is the standard deed recital ("for $10.00 and
@@ -1249,11 +1266,13 @@ def build_normalized_tables():
                fac_role(a.grantor, px.facility_borrower_name, a.grantor, a.grantee,
                         px.facility_lender_name),
                fac_role(a.grantee, px.facility_borrower_name, a.grantor, a.grantee,
-                        px.facility_lender_name)
+                        px.facility_lender_name),
+               COALESCE(a.county, 'MIAMI-DADE')
         FROM pdf_extractions px
         JOIN assignments a ON a.cfn = px.cfn
         WHERE px.status = 'OK'
           AND px.facility_type IS NOT NULL AND px.facility_type != 'none'
+          """ + county_filter(conn, 'a.') + """
         GROUP BY a.cfn
     """)
     conn.commit()
