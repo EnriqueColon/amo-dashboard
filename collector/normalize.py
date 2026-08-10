@@ -20,21 +20,30 @@ import name_matching
 DB = os.environ.get('AMO_DB_PATH', '/opt/amo-dashboard/miami_dade_amo.db')
 
 # ── County scope ──────────────────────────────────────────────────────────────
-# Which counties are allowed to feed the derived tables. Broward is excluded
-# while its documents have no LLM extractions: the loan-transfer filter in
-# build_normalized_tables() already keeps them out of aom_events_clean, but the
-# raw-name signal sweep has no such filter and would let Broward names shift the
-# classification of entities that also trade in Miami-Dade.
+# Which counties feed the derived tables.
 #
-# Set to None for all counties once Broward extraction lands and cross-county
-# entity resolution is wanted — which is the stated goal, just not yet.
-# Overridable so the widening can be rehearsed and rolled out without a code
-# edit: NORMALIZE_COUNTIES="MIAMI-DADE,BROWARD" or "ALL".
+# Broward was added 2026-08-10, after its documents had been extracted. The gate
+# existed because the raw-name signal sweep has no loan-transfer filter, so
+# Broward names could shift the classification of entities trading in both
+# counties. Rehearsed twice against production snapshots before widening:
+#
+#   without Broward extractions → zero drift at all
+#   with 539 extractions (374 LOAN_TRANSFER) → +374 rows in aom_events_clean,
+#     47 new entities, 110 of 20,320 existing entities changed volume (0.5%),
+#     and exactly ONE reclassification — WILMINGTON TRUST NATIONAL ASSN moved
+#     OTHER → TRUST, which is a correction, not a regression.
+#
+# The volume movement is the intended cross-county entity resolution: MERS +178,
+# US BANK +86. entity_nodes carries no county, so panels built on it are labelled
+# "not filtered by county" in the UI rather than pretending to respect the filter.
+#
+# Still overridable, so a future county can be rehearsed the same way:
+# NORMALIZE_COUNTIES="MIAMI-DADE" to narrow, or "ALL" for every county.
 _COUNTIES_ENV = os.environ.get('NORMALIZE_COUNTIES', '').strip()
 NORMALIZE_COUNTIES: tuple[str, ...] | None = (
     None if _COUNTIES_ENV.upper() == 'ALL'
     else tuple(c.strip().upper() for c in _COUNTIES_ENV.split(',') if c.strip())
-    or ('MIAMI-DADE',)
+    or ('MIAMI-DADE', 'BROWARD')
 )
 
 
