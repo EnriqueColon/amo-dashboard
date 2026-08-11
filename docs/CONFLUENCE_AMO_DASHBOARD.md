@@ -672,9 +672,9 @@ endpoints healthy across all three county scopes.
 | Component | Status |
 |---|---|
 | Miami-Dade collection (weekly cron) | 🟢 Live |
-| Broward index + images (daily cron) | 🟢 Live — 42,559 index rows, 658 images harvested |
+| Broward index + images + extraction (daily cron) | 🟢 Live — 42,559 index rows, 658 images, 589 extracted |
 | PDF extraction — Miami-Dade | 🟢 Live |
-| PDF extraction — Broward | 🟡 Live but **thin** — 539 of 42,559 documents |
+| PDF extraction — Broward | 🟡 Live **daily**, but coverage thin — 589 of 42,559 documents |
 | Facility batch backfill (20-min tick) | 🟢 Live |
 | Nightly normalize + cache bust | 🟢 Live |
 | County-aware server + client selector | 🟢 Deployed |
@@ -686,14 +686,26 @@ endpoints healthy across all three county scopes.
 
 ### 7.4 Known gaps and open items
 
-**1. Broward analytical coverage is thin — 539 of 42,559 documents (~1.3%).**
+**1. Broward analytical coverage is thin — 589 of 42,559 documents (~1.4%). Largest gap in the product.**
 The index is complete; the *documents* are not. Only harvested images can be extracted, and the
-harvester has only been running since 7 Aug 2026. Broward's entity, facility and transaction figures
-are therefore directionally real but nowhere near complete. Closing this requires a **history
-scraper** against the AcclaimWeb portal, which is non-trivial: a disclaimer gate, an internal
-document id that only appears as a checkbox value in the results grid (so every document needs a
-search round-trip), mandatory session state, and Cloudflare bot management. **Not built. This is the
-single largest gap in the product.**
+harvester has only run since 7 Aug 2026, so 2023–2025 is **index-only**: filings, parties, dates and
+instrument numbers are all searchable, but nothing derived from reading the documents (entity
+classification, transaction types, facilities, loan amounts) exists for that period.
+
+**A history scraper was investigated on 11 Aug 2026 and rejected.** The portal returns **403 to
+every non-browser client** — plain `curl`, `curl` with a browser user agent, `curl` with full
+browser headers, and from the droplet's datacenter IP — all served Cloudflare's block page. Only a
+real browser executing the JS challenge gets through. Images are keyed by an internal `docId`
+obtainable from the results grid, but the viewer reads
+`window.opener.$('#RsltsGrid').data('tGrid')`, so direct navigation to `/Details/` is inert and each
+document needs a full browser with the opener chain. Scraping 13,674 documents that way means
+sustained automated traffic from a datacenter IP against active bot protection — i.e. deliberately
+defeating it. **Not built, by decision.**
+
+**Agreed path:** stay forward-only for now, and place a **bulk historical image order with Broward
+RTT (954-831-4000)** when convenient — the sanctioned channel for exactly this. Meanwhile Broward's
+analysed window grows ~55 documents/day on its own, and extraction now runs **daily** rather than
+waiting for the Friday weekly job.
 
 **2. The 2026 Broward index gap: 1 Jan 2026 → ~20 Jul 2026 (~8,000 assignments).**
 Unreachable from the SFTP feed — yearly exports stop at the last completed year (CY2025 published

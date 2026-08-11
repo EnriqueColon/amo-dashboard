@@ -4,6 +4,59 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-08-11 — History scraper INVESTIGATED and REJECTED. Forward-only, with daily extraction.
+
+### The portal is Cloudflare-gated — a scraper is not viable
+Measured, not assumed:
+
+| client | result |
+|---|---|
+| bare `curl` | 403 |
+| `curl` + browser user agent | 403 |
+| `curl` + full browser headers | 403, Cloudflare block page |
+| from the droplet (datacenter IP) | 403, Cloudflare block page |
+
+Only a real browser that executes the JS challenge gets through. **An earlier estimate of ~20
+hours for a 2025-only scrape was wrong** — it assumed a scriptable request loop, which does not
+exist here. The only route would be a full browser passing the challenge from a datacenter IP,
+issuing sustained automated traffic for 13,674 documents, i.e. actively defeating the bot
+protection. Not built, deliberately.
+
+Also mapped, for the record: images ARE keyed by an internal `docId` obtainable from the results
+grid (instrument `120246627` → docId `55949519`), but the viewer reads
+`window.opener.$('#RsltsGrid').data('tGrid')`, so direct navigation to `/Details/` is inert. Every
+document needs a real browser with the opener chain: search → grid → popup → image.
+
+### Decision — forward-only enrichment, bulk order later
+User's call: accept forward-only for now, and phone 954-831-4000 for a historical bulk image order
+at a later date. **History is not missing, only unenriched** — all 42,559 Broward filings from
+2023-01-03 are indexed and live (parties, dates, doc types, instruments). What 2023–2025 lacks is
+what comes from reading documents: entity classification, transaction types, facilities, amounts.
+
+### Gap found and closed while confirming this
+The daily script harvested images but **never extracted them** — extraction only ran in
+`run_weekly.sh` (Friday 06:00), so a Monday document waited up to six days, plus a night for
+normalize. Tolerable when history was the plan; not when the forward path IS the enrichment story.
+
+`run_broward_daily.sh` now runs `extract_pdfs.py --county BROWARD --limit 300 --budget 1.00` after
+harvesting, and **sources `/opt/amo-dashboard/.env`** — cron starts with a bare environment, so
+without that `OPENAI_API_KEY` is absent and extraction would silently skip. Scoped to BROWARD so it
+can never consume the Miami-Dade budget. ~$0.03/day.
+
+Verified under `env -i`: index → images → extraction → retention report, exit 0. Broward
+extractions **589 of 658 images**; the 69-image gap is exactly the orphaned 2026-07-21 batch,
+harvested before its index rows were ingested, so those have no `assignments` row to extract
+against.
+
+### Steady state
+    daily 12:30 UTC  index + images + extraction   (run_broward_daily.sh)
+    nightly 08:30    normalize + cache bust        (~80 min at current scale)
+    weekly Fri 06:00 Miami-Dade extraction         (run_weekly.sh)
+
+Broward's analysed window grows ~55 documents/day on its own.
+
+---
+
 ## 2026-08-10 — 🎉 BROWARD IS LIVE. Flip deployed, normalize run, cache cleared, verified.
 
 The expansion is functionally complete: Broward now flows index → images → extraction →
