@@ -4,7 +4,13 @@ build/
 .env
 .env.local
 collector/config.py
-collector/collector.log
+# All collector run logs. Generalised from individual entries: a noisy
+# `git status` on the droplet is how a real problem hides — the untracked WAL
+# files blocked a deploy for hours behind exactly that kind of noise.
+collector/*.log
+
+# PM2 config lives on the droplet and holds secrets; it must not be committed.
+ecosystem.config.cjs
 __pycache__/
 *.db
 *.db-shm
