@@ -18,29 +18,31 @@
 # because the harvester reads the zip's central directory and then pulls only
 # the assignment byte ranges (~2% of a ~450MB zip).
 #
-# ── PHASE 1 (current): images only, zero production surface area ─────────────
-# `--from-feed` reads the work list from the feed's own index file rather than
-# the assignments table, so this runs WITHOUT the county migration and WITHOUT
-# putting Broward rows into tables the dashboard reads. Verified against a
-# pristine copy of production: the only schema change is the new broward_images
-# table, and every dashboard statistic is byte-identical.
+# ── What this does now ───────────────────────────────────────────────────────
+# index → images → extraction → (nightly normalize surfaces it). Broward is
+# fully live, so this is the whole forward pipeline in one script.
 #
-# This exists because `assignments` is read directly by the Dashboard stat cards
-# and the Assignments page (server/routes.ts:15-18, 193, 234). Ingesting the
-# Broward index before the server is county-aware would jump the document count
-# from 70,355 to ~112,878 and mix Broward rows into the Assignments table with
-# no way to tell them apart. The retention clock should not be held hostage to
-# that work, hence the split.
+# BROWARD_INGEST_INDEX=1 in the crontab makes it ingest the index too and take
+# the work list from the database; without it the script falls back to
+# --from-feed, reading the day's own index file and touching nothing else.
 #
-# ── PHASE 2: once the server is county-aware ─────────────────────────────────
-# Set BROWARD_INGEST_INDEX=1 to also ingest the index, and drop --from-feed so
-# the work list comes from the database (which by then is the source of truth).
+# HISTORY IS DELIBERATELY NOT COVERED HERE. 2023–2025 is index-only: the county
+# portal is Cloudflare-gated (403 to every non-browser client, including from
+# the droplet) and the sanctioned route for historical images is a bulk order by
+# phone, 954-831-4000. So this forward path IS the enrichment story — which is
+# why extraction runs here daily rather than waiting for the Friday weekly job.
 
 set -u
 export AMO_DB_PATH="${AMO_DB_PATH:-/opt/amo-dashboard/miami_dade_amo.db}"
 BROWARD_INGEST_INDEX="${BROWARD_INGEST_INDEX:-0}"
 COLLECTOR_DIR="/opt/amo-dashboard/collector"
 VENV="$COLLECTOR_DIR/.venv"
+
+# OPENAI_API_KEY for the extraction step below. Sourced rather than assumed:
+# cron starts with a bare environment, so without this the key is absent and
+# extraction silently skips.
+# shellcheck disable=SC1091
+[ -f /opt/amo-dashboard/.env ] && . /opt/amo-dashboard/.env
 
 cd "$COLLECTOR_DIR" || exit 1
 
@@ -65,6 +67,27 @@ fi
 image_status=$?
 [ $image_status -ne 0 ] && echo "broward_images.py FAILED (exit $image_status)"
 
+# Extract what was just harvested.
+#
+# Without this the forward path is only as fast as run_weekly.sh (Friday 06:00),
+# so a document harvested on Monday waits up to six days before it is readable
+# and another night before normalize surfaces it. Since Broward history is
+# index-only by decision (the portal is Cloudflare-gated and the bulk-image
+# route is a phone call), the forward path IS the enrichment story — it should
+# not lag by most of a week.
+#
+# Scoped to BROWARD so it can never eat the Miami-Dade budget, and capped well
+# above a normal day (~55 documents) so a catch-up after a failed run still
+# clears in one go. Typical cost is ~$0.03/day.
+extract_status=0
+if [ -n "${OPENAI_API_KEY:-}" ]; then
+    "$VENV/bin/python3" -u extract_pdfs.py --county BROWARD --limit 300 --budget 1.00
+    extract_status=$?
+    [ $extract_status -ne 0 ] && echo "extract_pdfs.py FAILED (exit $extract_status)"
+else
+    echo "OPENAI_API_KEY not set — skipping extraction (images are still harvested)"
+fi
+
 # Always print the retention report. This is the thing to eyeball in the log:
 # any day showing PENDING is on a clock, and any day that scrolls off the top
 # without reaching 'complete' has been permanently lost to the free feed.
@@ -72,5 +95,5 @@ image_status=$?
 
 echo "=== broward daily done: $(date -u +%FT%TZ) ==="
 
-# Non-zero if either step failed, so cron mail / monitoring notices.
-[ $index_status -eq 0 ] && [ $image_status -eq 0 ]
+# Non-zero if any step failed, so cron mail / monitoring notices.
+[ $index_status -eq 0 ] && [ $image_status -eq 0 ] && [ $extract_status -eq 0 ]
