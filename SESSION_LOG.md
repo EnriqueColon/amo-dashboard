@@ -4,6 +4,56 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-08-11 — Deal Intelligence RETIRED (page + endpoints). Plus a deploy that silently failed.
+
+User decision: not in use, retire it. Removed **both sides together** — deleting the page alone
+would have left 8 orphaned endpoints still needing county-correctness forever.
+
+### Removed
+- `client/src/pages/DealIntelligence.tsx` (1,211 lines)
+- A contiguous **461-line block** in `routes.ts`: `SPECIAL_SERVICERS`, `specialSvcPlaceholders`,
+  `diStmts`, `shiftOneYearBack`, `parseDateRange`, `diCountsForPeriod`, and all 8 endpoints.
+- Two stale `clearCacheByPrefix('/api/deal-intelligence')` calls in the merge cache-busting helpers.
+
+**Checked before deleting:** none of those symbols were referenced outside the block.
+`TARGETS_MATCH` sits right after it and looks similar but is **shared with the reporting
+endpoints** — it stays. 40 endpoints → 32.
+
+Verified: tsc clean, 30 endpoints healthy × 3 scopes, every page still renders, retired endpoints
+now fall through to the SPA catch-all and serve no data.
+
+### 🚨 The deploy silently failed the first time — read this before trusting a deploy again
+`git pull --ff-only` on the droplet printed `Updating d31d02a..9a2932d` and **aborted**:
+
+    error: Your local changes to the following files would be overwritten by merge:
+        miami_dade_amo.db-shm
+        miami_dade_amo.db-wal
+
+**Cause, and it was mine:** `git add -u` in the retirement commit swept in the deletion of those
+two tracked WAL files. SESSION_LOG has flagged them since 2026-07-16 as deliberately untouched
+*precisely because they interact with `git pull` against the live production DB.* The droplet's
+copies are live and constantly modified, so an incoming deletion makes the pull abort.
+
+**Why I did not notice:** the deploy command ended with `git pull ... | tail -2`, and git prints
+the reassuring `Updating <old>..<new>` line AFTER the error. The last two lines looked like
+success. Production kept serving Deal Intelligence data from the old bundle while every subsequent
+check appeared fine.
+
+**Two lasting lessons:**
+1. **Never `git add -u` in this repo** — stage files explicitly. The tracked WAL files will be
+   swept in and will break the next droplet pull.
+2. **Verify a deploy by its effect, not its output.** `git log --oneline -1` on the droplet, or
+   grepping `dist/index.cjs`, is the check. The commit that finally proved it: bundle
+   occurrences of `deal-intelligence` went 8 → 0.
+
+Fixed by restoring both files in `302b808`, after which the pull fast-forwarded normally.
+
+**Still open (pre-existing):** those WAL files remain tracked. Untracking them properly
+(`git rm --cached` + gitignore) has to handle the droplet side too, or it reproduces this exact
+failure. Deliberate, separate change.
+
+---
+
 ## 2026-08-11 — DealIntelligence: facts gathered, DECISION STILL OPEN (do not act without the user)
 
 User asked to discuss before retiring. Nothing changed in code. Facts, so the next session does not
