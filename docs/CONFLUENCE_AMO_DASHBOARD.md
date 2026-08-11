@@ -749,8 +749,21 @@ selector's own option.
 evidence quote reads like a routine SBA note renewal, possibly a false positive) and `2026R277453`
 (grantor extracted as the literal string `"Lender"`, likely an OCR gap).
 
-**8. `DealIntelligence.tsx` is unrouted** while its endpoints remain live and maintained — decide
-whether to wire it back in or retire both sides.
+**8. `DealIntelligence.tsx` is unrouted — decision open, do not act unilaterally.**
+1,211 lines, absent from `App.tsx` and the sidebar, so unreachable by users and tree-shaken out of
+the bundle (zero user cost). But its **8 server endpoints are live**, consumed by nothing else, and
+it has been dragged through every cross-cutting change of the Broward work — three of the last six
+commits touched it.
+
+**The sharp problem: those county fixes are unverified**, because the page cannot be opened and so
+was never checked in a browser like every other page. It currently pays full maintenance cost,
+delivers no user value, and offers no way to notice if a change broke it.
+
+History shows it was **deliberately replaced** — added in `197e947`, un-routed by `3b1674a` when
+Reporting arrived. The decision is a product question: **does distressed-CRE-PE sourcing still
+matter?** If yes, route it (two lines) and verify it like any other page. If no, retire the page
+**and its 8 endpoints together** — deleting the page alone leaves orphaned endpoints that still
+need county-correctness forever. The current half-state is the failure mode.
 
 ### 7.5 Risk register
 

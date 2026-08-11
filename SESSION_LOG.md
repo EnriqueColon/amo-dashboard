@@ -4,6 +4,48 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-08-11 — DealIntelligence: facts gathered, DECISION STILL OPEN (do not act without the user)
+
+User asked to discuss before retiring. Nothing changed in code. Facts, so the next session does not
+re-derive them:
+
+### Current state
+- **Not routed** — absent from `client/src/App.tsx` and from the `Sidebar.tsx` nav. A user cannot
+  reach it; `#/deal-intelligence` falls through to NotFound.
+- **Not shipped** — `App.tsx` never imports it, so Vite tree-shakes all 1,211 lines out of the
+  bundle. Zero cost to end users, zero page weight.
+- **8 live server endpoints** it alone consumes: `summary`, `seller-pressure`, `pe-competitive`,
+  `special-servicers`, `bank-to-pe`, `monthly`, `recent-bank-to-pe`, `deal-detail/:cfn`. Nothing
+  else in the client references them.
+- **History:** added in `197e947` ("Deal Intelligence tab for distressed CRE PE sourcing"), then
+  un-routed by `3b1674a` ("add Reporting tab, remove Market Relationships"). It was **deliberately
+  replaced**, not abandoned by accident.
+
+### The real cost — maintenance drag on an unverifiable page
+It has been dragged through **every** cross-cutting change of the Broward work: per-county document
+links (`715c003`), cross-county entity labelling (`c6868dc`), county scoping of four of its
+endpoints, and the copy sweep (`d31d02a`). Three of the last six commits touched it.
+
+**The sharp version of the problem: those fixes are UNVERIFIED.** Because the page cannot be
+opened, none of its county behaviour was checked in a browser — unlike every other page, which was.
+It is currently the worst of both worlds: paying full maintenance cost, delivering no user value,
+and with no way to notice if a change broke it.
+
+### The decision is a product question, not a technical one
+**Does distressed-CRE-PE sourcing still matter as a use case?** Its analysis (seller pressure,
+PE competitive map, bank→PE deal log) overlaps Private Credit and Reporting but is not identical —
+it is framed around sourcing rather than reporting.
+
+- **If yes → ROUTE IT** (two lines: an `App.tsx` route and a `Sidebar.tsx` nav entry), then verify
+  its county behaviour in the browser like every other page. Keeping it unrouted is the one option
+  with no upside.
+- **If no → retire both sides** — delete the page and its 8 endpoints together. Deleting the page
+  alone would leave 8 orphaned endpoints that still need county-correctness forever.
+
+**Do not half-do it.** The current state is the failure mode.
+
+---
+
 ## 2026-08-11 (last) — Full county audit across the tool. Found and fixed a real leak.
 
 Swept **every endpoint × all three scopes** and compared counts. Most were correct. One was not.
