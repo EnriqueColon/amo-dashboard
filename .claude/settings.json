@@ -1,0 +1,27 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /Users/enrique/Downloads/amo-dashboard-source/amo-dashboard/.claude/hooks/session-doc-reminder.sh SessionStart",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /Users/enrique/Downloads/amo-dashboard-source/amo-dashboard/.claude/hooks/session-doc-reminder.sh Stop",
+            "timeout": 15,
+            "statusMessage": "Checking the Confluence doc is current…"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -608,7 +608,38 @@ uses `--budget 5.0`.
 
 The only other recurring cost is the droplet.
 
-### 6.10 Git workflow
+### 6.10 Keeping this page current
+
+This page is maintained **as part of closing every working session**, not on an ad-hoc basis. The
+routine is two files:
+
+1. Append a dated entry to `SESSION_LOG.md`.
+2. Update this page — whichever sections the work affected, **always** re-checking §7 *Current
+   status* (production numbers, component table, known gaps, risk register), and bumping the
+   *Last reviewed* date in the header.
+3. Commit and push both.
+
+The convention is written into `CLAUDE.md` and `.cursor/rules/amo-session-handoff.mdc`, so any
+assistant working on the repo picks it up. Claude Code additionally enforces it with a hook:
+
+| File | Role |
+|---|---|
+| `.claude/hooks/session-doc-reminder.sh` | `SessionStart` records the starting HEAD; `Stop` blocks the end of a session that changed repo files without touching this page |
+| `.claude/settings.json` | Wires both events to that script |
+
+The hook fires **at most once per session** (marker file under `$TMPDIR/amo-doc-reminder/`), stays
+silent when nothing substantive changed, and ignores SQLite artifacts and the session log. It is a
+backstop, not the mechanism — the page is a deliverable in its own right.
+
+Test it by hand:
+
+```bash
+echo '{"session_id":"test"}' | amo-dashboard/.claude/hooks/session-doc-reminder.sh Stop
+```
+
+To disable it, remove the `hooks` block from `.claude/settings.json`.
+
+### 6.11 Git workflow
 
 Single `main` branch, pushed to `origin/main`. Every agreed change is committed and pushed once
 confirmed. Commit messages are written as statements of what changed and why
