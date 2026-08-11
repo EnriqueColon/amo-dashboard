@@ -4,6 +4,47 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-08-11 (last) — Full county audit across the tool. Found and fixed a real leak.
+
+Swept **every endpoint × all three scopes** and compared counts. Most were correct. One was not.
+
+### 🚨 `/api/private-credit` was not scoped — Broward showed Miami-Dade's data
+It returned an identical **4,081 for Miami-Dade, Broward AND All**. It reads `aom_events_clean`,
+so it is document-level and should scope. Broward was displaying 4,081 Miami-Dade transactions
+under its own heading. Now: **4,067 / 14 / 4,081**.
+
+**Why the earlier audit missed it:** that audit classified routes by scanning each route *body* for
+table names. `privateCreditTotal` / `privateCreditRows` / `privateCreditTopGrantees` are defined in
+the shared `stmts` block at the top of the file, so the route body mentions neither table. **Any
+future audit of this kind has to follow the prepared statements, not just the route bodies.**
+
+Pagination there moved from positional `?` to named `:limit`/`:offset` — better-sqlite3 refuses to
+mix the two styles and the county predicate is named.
+
+### Legitimately unscoped, confirmed not bugs
+`/api/entity-nodes`, `/api/entities`, `/api/targets`, `/api/top-assignors`,
+`/api/reporting/participants` — all read the entity tables, which carry no county by design. They
+are labelled "not filtered by county" in the UI (option 2, 2026-08-08).
+
+### Hardcoded county copy removed — 0 remaining
+Two kinds, treated differently:
+- **Headers that ASSERT a county** → dynamic: the Reporting subtitle and **both printed
+  `EntityReport` titles**. A printed report asserting the wrong county is the worst version of this
+  bug, because it leaves the building.
+- **Descriptive tooltip copy** → county-neutral ("Miami-Dade Clerk" → "county Clerk"), since it
+  describes concepts true of both counties.
+
+19 replacements across `EntityDetailPanel`, `Entities`, `Assignments`, `CleanEvents`,
+`MarketRelationships`, plus 8 in `CleanEvents`/`DealIntelligence`. Verified 0 stray mentions on
+every page under Broward — the only remaining "Miami-Dade" in the DOM is the county selector's own
+`<option>`, which is correct.
+
+### Verified
+All 37 endpoints healthy × 3 scopes; tsc clean; Private Credit under Broward renders 14 real
+Broward rows with Broward instrument numbers and Broward-specific acquirers.
+
+---
+
 ## 2026-08-11 (later still) — Forward-path hardening. Silent cron failure was the real risk.
 
 User's direction: stop trying to recover Broward history, make the forward path as good as

@@ -682,6 +682,7 @@ endpoints healthy across all three county scopes.
 | Endpoint county scoping | 🟢 Deployed — all document endpoints |
 | Coverage-gap detection + banner | 🟢 Deployed 11 Aug 2026 |
 | Collection-health warning (Broward) | 🟢 Deployed 11 Aug 2026 |
+| County audit — all pages/endpoints | 🟢 Complete 11 Aug 2026 |
 | Entity normalization / duplicate manager | 🟢 Deployed 6 Aug 2026 |
 | FDIC analytics | 🟢 Live |
 | Deal Intelligence page | ⚪ Dormant — endpoints live, page not routed |
@@ -739,8 +740,10 @@ worth re-checking once Broward's extracted count grows.
 **5. 69 orphaned Broward images** from 21 Jul 2026 — that day aged off the feed before its index rows
 were ingested, so the images have no `assignments` row and will never be picked up.
 
-**6. Residual Miami-Dade-specific copy** in some tooltips and report headers, now that the tool is
-multi-county.
+**6. ~~Residual Miami-Dade-specific copy~~ — RESOLVED 11 Aug 2026.** All hardcoded county copy is
+gone: assertive headers (Reporting subtitle, both printed EntityReport titles) are now dynamic, and
+descriptive tooltips are county-neutral. The only "Miami-Dade" left in the DOM is the county
+selector's own option.
 
 **7. Two facility rows flagged for manual sanity check:** `2026R268269` (JPMorgan/KB7 Holdings — the
 evidence quote reads like a routine SBA note renewal, possibly a false positive) and `2026R277453`
