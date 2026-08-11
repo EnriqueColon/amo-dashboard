@@ -680,6 +680,7 @@ endpoints healthy across all three county scopes.
 | County-aware server + client selector | 🟢 Deployed |
 | Per-county document links | 🟢 Deployed |
 | Endpoint county scoping | 🟢 Deployed — all document endpoints |
+| Coverage-gap detection + banner | 🟢 Deployed 11 Aug 2026 |
 | Entity normalization / duplicate manager | 🟢 Deployed 6 Aug 2026 |
 | FDIC analytics | 🟢 Live |
 | Deal Intelligence page | ⚪ Dormant — endpoints live, page not routed |
@@ -707,7 +708,16 @@ RTT (954-831-4000)** when convenient — the sanctioned channel for exactly this
 analysed window grows ~55 documents/day on its own, and extraction now runs **daily** rather than
 waiting for the Friday weekly job.
 
-**2. The 2026 Broward index gap: 1 Jan 2026 → ~20 Jul 2026 (~8,000 assignments).**
+**2. The 2026 Broward index gap: Jan–Jun 2026 entirely missing (~7,000–8,000 assignments).**
+🔴 **Now surfaced in the UI.** As of 11 Aug 2026 `/api/stats` returns `coverage_gaps` and the
+Overview shows a red banner naming the missing period whenever the selected scope has one. This was
+added because Broward's range reads `2023-01-03 → 2026-08-05`, which looks continuous — on a
+monthly chart the hole is indistinguishable from the market going quiet, which is how a silent gap
+becomes a confident wrong conclusion. Miami-Dade correctly reports no gap; All Counties reports
+Broward's, labelled, rather than hiding it in the aggregate. Detection counts only whole empty
+months, so weekends and holidays never trigger it.
+
+The underlying gap is still open:
 Unreachable from the SFTP feed — yearly exports stop at the last completed year (CY2025 published
 17 Feb 2026), and the daily feed retains only ~10 days. Three options, **undecided**:
 scrape AcclaimWeb for that window · request a one-off bulk export from Broward RTT (they invite this,

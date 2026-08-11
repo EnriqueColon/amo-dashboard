@@ -4,6 +4,38 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-08-11 (later) — Coverage gaps now surfaced. Broward's 6-month hole is visible.
+
+### The finding
+Broward's reported range is `2023-01-03 → 2026-08-05`, which reads as continuous. It is not —
+**Jan–Jun 2026 is entirely absent** (~7,000–8,000 filings):
+
+    2025-11    984
+    2025-12  1,080
+    2026-07    416   ← nothing in between
+    2026-08    173
+
+This is not unenriched data; those filings are not in the database at all. On the monthly chart it
+renders as a flat zero, indistinguishable from the market stopping. That is the failure mode worth
+preventing: a silent hole produces a confident wrong answer.
+
+### Built
+- `/api/stats` returns `coverage_gaps` — runs of whole months with no filings between a county's
+  first and last. **Whole months only**, so weekends, holidays and quiet days never trigger it.
+- Computed per county, filtered to the selected scope. On ALL every gap is reported and labelled,
+  because an aggregate range can be continuous while one county has a hole in the middle.
+- Dashboard banner in **red, not amber** — deliberately distinct from the "indexed but not
+  extracted" notice, because missing data and pending data are different problems.
+- `findCoverageGaps()` uses `Map.forEach` rather than `for..of`: the build targets a TS lib without
+  `downlevelIteration`, so iterating a Map directly does not compile.
+
+### Verified live
+    MIAMI-DADE   gaps=none
+    BROWARD      gaps=2026-01..2026-06 (6mo)
+    ALL          gaps=BROWARD 2026-01..2026-06 (6mo)
+
+---
+
 ## 2026-08-11 — History scraper INVESTIGATED and REJECTED. Forward-only, with daily extraction.
 
 ### The portal is Cloudflare-gated — a scraper is not viable
