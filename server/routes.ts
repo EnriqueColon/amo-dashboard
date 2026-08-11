@@ -61,6 +61,59 @@ function countyPredicate(alias = ''): string {
  */
 const ENTITY_SCOPE_ALL = 'ALL_COUNTIES';
 
+/** `2026-01` → `2026-02`, wrapping the year. */
+function nextMonth(m: string): string {
+  const [y, mo] = m.split('-').map(Number);
+  return mo === 12 ? `${y + 1}-01` : `${y}-${String(mo + 1).padStart(2, '0')}`;
+}
+
+/**
+ * Runs of consecutive months with NO filings, between a county's first and last.
+ *
+ * Broward is the reason this exists: its range reads 2023-01-03 → 2026-08-05,
+ * which looks continuous, but Jan–Jun 2026 is entirely absent — the yearly SFTP
+ * export stops at the last completed year and the daily feed keeps only ~10
+ * days. On a monthly chart that hole is indistinguishable from the market
+ * stopping, which is exactly the kind of silent gap that produces a confident
+ * wrong answer.
+ *
+ * Only whole missing months count. Weekends, holidays and quiet days are normal
+ * and must not be reported as gaps.
+ */
+function findCoverageGaps(
+  rows: Array<{ county: string; month: string; n: number }>,
+): Array<{ county: string; start: string; end: string; months: number }> {
+  const byCounty = new Map<string, Set<string>>();
+  for (const r of rows) {
+    if (!byCounty.has(r.county)) byCounty.set(r.county, new Set());
+    byCounty.get(r.county)!.add(r.month);
+  }
+
+  const gaps: Array<{ county: string; start: string; end: string; months: number }> = [];
+  // forEach rather than for..of: the build targets a TS lib without
+  // downlevelIteration, so iterating a Map directly does not compile.
+  byCounty.forEach((monthSet, county) => {
+    const months = Array.from(monthSet).sort();
+    if (months.length < 2) return;
+
+    let run: string[] = [];
+    for (let m = nextMonth(months[0]); m < months[months.length - 1]; m = nextMonth(m)) {
+      if (monthSet.has(m)) {
+        if (run.length) {
+          gaps.push({ county, start: run[0], end: run[run.length - 1], months: run.length });
+          run = [];
+        }
+      } else {
+        run.push(m);
+      }
+    }
+    if (run.length) {
+      gaps.push({ county, start: run[0], end: run[run.length - 1], months: run.length });
+    }
+  });
+  return gaps;
+}
+
 /**
  * Positional variant, for the many queries assembled as strings with `?`
  * placeholders — better-sqlite3 refuses to mix named and positional parameters
@@ -107,6 +160,19 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     // activity" — the client renders the derived stats as "—" rather than 0 so
     // the two can never be confused.
     statsCleanTotal:     db.prepare(`SELECT COUNT(*) as n FROM aom_events_clean WHERE ${countyPredicate()}`),
+    // Months that actually have filings, per county. Feeds the coverage-gap
+    // detection below: a county's date range can look continuous while hiding
+    // months with no data at all, which reads as a market collapse rather than
+    // as data we never collected.
+    monthsByCounty:      db.prepare(`
+      SELECT COALESCE(county, '${DEFAULT_COUNTY}') AS county,
+             substr(rec_date, 1, 7)               AS month,
+             COUNT(*)                             AS n
+      FROM assignments
+      WHERE rec_date IS NOT NULL AND rec_date <> ''
+      GROUP BY county, month
+      ORDER BY county, month
+    `),
     statsLogCount:       db.prepare(`SELECT COUNT(*) as n FROM collection_log WHERE ${countyPredicate()}`),
     statsLastCollected:  db.prepare(`SELECT MAX(date_to) as dt FROM collection_log WHERE status='OK' AND ${countyPredicate()}`),
     monthlyVolume:       db.prepare(`
@@ -208,8 +274,15 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     // in exactly that state today: fully indexed, not yet extracted. The client
     // uses this to show "—" instead of a 0 that would read as "no activity".
     const clean_total         = (stmts.statsCleanTotal.get({ county }) as any).n;
+
+    // Gaps are computed per county and then filtered to the selected scope. On
+    // ALL they are all reported, labelled — an aggregate range can be
+    // continuous while an individual county has a hole in the middle.
+    const all_gaps = findCoverageGaps(stmts.monthsByCounty.all() as any[]);
+    const coverage_gaps = county ? all_gaps.filter(g => g.county === county) : all_gaps;
+
     const unique_cfns = total;
-    const payload = { total, unique_cfns, unique_entities, self_assigns, min_date, max_date, unique_grantors, unique_grantees, private_credit_txns, market_transfers, txn_breakdown, collection_log_count, last_collected, clean_total };
+    const payload = { total, unique_cfns, unique_entities, self_assigns, min_date, max_date, unique_grantors, unique_grantees, private_credit_txns, market_transfers, txn_breakdown, collection_log_count, last_collected, clean_total, coverage_gaps };
     setCached(KEY, payload, STATS_TTL_MS);
     res.json(payload);
   });

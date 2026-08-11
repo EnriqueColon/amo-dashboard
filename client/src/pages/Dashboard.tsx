@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
-import { useCounty, countyLabel } from '@/lib/county';
+import { useCounty, countyLabel, type CountyScope } from '@/lib/county';
 import CrossCountyNote from '@/components/CrossCountyNote';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer } from 'recharts';
-import { TrendingUp, TrendingDown, Network, FileText, Database, RefreshCw, Star, ChevronRight, Info } from 'lucide-react';
+import { TrendingUp, TrendingDown, Network, FileText, Database, RefreshCw, Star, ChevronRight, Info, AlertCircle } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import CategoryBadge from '@/components/CategoryBadge';
 import EntityDetailPanel from '@/components/EntityDetailPanel';
@@ -105,6 +105,9 @@ export default function Dashboard() {
   // reached aom_events_clean, so every derived figure on this page is 0.
   const unprocessed = !!raw && raw.total > 0 && raw.clean_total === 0;
 
+  // Whole months with no filings at all, inside the reported date range.
+  const gaps: any[] = raw?.coverage_gaps ?? [];
+
   return (
     <div className="p-6 space-y-6 max-w-screen-xl mx-auto">
 
@@ -135,6 +138,35 @@ export default function Dashboard() {
             Everything derived from reading the documents themselves — entity classification,
             transaction types, private-credit detection, lending relationships — is not available
             yet and shows as “—”.
+          </span>
+        </div>
+      )}
+
+      {/* Coverage gaps. Deliberately red rather than amber: this is missing
+          data, not merely pending data, and on a monthly chart it is
+          indistinguishable from the market going quiet. */}
+      {gaps.length > 0 && (
+        <div
+          data-testid="coverage-gap-banner"
+          className="flex items-start gap-2 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2.5 text-xs text-foreground"
+        >
+          <AlertCircle size={14} className="mt-0.5 shrink-0 text-red-500" />
+          <span>
+            <span className="font-medium">
+              Coverage gap — {gaps.length === 1 ? 'a period is' : 'periods are'} missing from the data.
+            </span>{' '}
+            {gaps.map((g: any, i: number) => (
+              <span key={`${g.county}-${g.start}`}>
+                {i > 0 && '; '}
+                <span className="font-medium">{countyLabel(g.county as CountyScope)}</span>{' '}
+                {fmtMonth(g.start)}
+                {g.start !== g.end && <> → {fmtMonth(g.end)}</>}
+                {' '}({g.months} {g.months === 1 ? 'month' : 'months'})
+              </span>
+            ))}
+            . These filings were never collected, so charts show zero for that period —
+            that is missing data, not an absence of market activity. Treat any trend
+            spanning it with care.
           </span>
         </div>
       )}
