@@ -4,6 +4,66 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## ▶ CURRENT STATE — as of 2026-08-11 (read this first)
+
+**Both counties are live end to end.** Broward went from nothing to fully integrated between
+6 and 11 Aug 2026: index → images → extraction → normalization → county-scoped UI.
+
+| Scope | Filings | Clean | Entities | Market transfers | Range |
+|---|---|---|---|---|---|
+| Miami-Dade | 70,834 | 51,425 | 20,320 | 24,360 | 2023-01-03 → 2026-08-06 |
+| Broward | 42,559 | 374 | 157 | 280 | 2023-01-03 → 2026-08-05 |
+| All | 113,393 | 51,799 | 20,367 | 24,640 | 2023-01-03 → 2026-08-06 |
+
+Broward images harvested **658**, extracted **589**. Everything deployed; droplet `git status` is
+**clean**; `origin/main` is current.
+
+### Crons (all live)
+    daily 12:30 UTC   run_broward_daily.sh   index + images + extraction  (BROWARD_INGEST_INDEX=1)
+    nightly 08:30     run_nightly_normalize  normalize + PM2 cache bust   (~80 min at current scale)
+    weekly Fri 06:00  run_weekly.sh          Miami-Dade collect + extract
+    every 20 min      run_facility_tick.sh   facility batch backfill
+
+### The three decisions that shape everything
+1. **Broward history is index-only, by decision.** 2023–2025 has filings/parties/dates but no
+   document-derived data. The portal is Cloudflare-gated (403 to every non-browser client,
+   including from the droplet), so a scraper was investigated and **rejected**. The agreed path is
+   a bulk image order from Broward RTT, **954-831-4000** — user's action, when convenient.
+2. **Forward-only is the strategy.** Broward's analysed window grows ~55 documents/day on its own.
+3. **Entity tables are deliberately cross-county** and labelled "not filtered by county" in the UI.
+   They are keyed by entity, not document, so they cannot be scoped without a pipeline change —
+   and cross-county entity resolution is the point of the expansion.
+
+### Open items — all need the USER, not the assistant
+- 🔴 **Leaked GitHub PAT in `.git/config`**, this Mac and the droplet. Repo is PUBLIC. Open since
+  2026-08-04, oldest item on the list. Revoke → check security log → SSH remote / deploy key.
+- 📞 **Bulk image order** (above) — would also close the Jan–Jun 2026 index gap.
+- 🟡 **Two facility rows to sanity-check:** `2026R268269` (reads like a routine SBA renewal,
+  possible false positive) and `2026R277453` (grantor extracted as the literal string `"Lender"`).
+- 🟡 69 orphaned Broward images from 2026-07-21 (harvested before their index rows; no
+  `assignments` row, so never extractable).
+- 🟡 Broward facility detection has found **0** real facilities in 589 documents. Miami-Dade's rate
+  predicts ~3–4 at that sample size, so plausible rather than broken — recheck as volume grows.
+
+### Traps that have bitten repeatedly — read before deploying
+- **Verify a deploy by its EFFECT, not its output.** `git pull` prints `Updating <old>..<new>`
+  AFTER an abort error, so `| tail -2` looks like success. Check `git log --oneline -1` on the
+  droplet, or grep the built bundle.
+- **Never `git add -u` in this repo.** It sweeps files you did not intend; that is what blocked a
+  deploy on 2026-08-11.
+- **Never restart PM2 mid-`normalize.py`.** `aom_events_clean` reads 0 rows for the whole ~80-min
+  run; a restart re-caches the empty state for 7 days.
+- **Any API check taken BEFORE a data change poisons the 7-day cache.** Restart after, or
+  `POST /api/cache/bust`.
+- **`pgrep -f "normalize.py"` matches the watcher's own command line** → use
+  `ps -eo pid,cmd | grep "[n]ormalize.py" | grep -v "bash -c"`. And **`ps -eo cmd` is invalid on
+  macOS** — it errors, so a `|| echo "not running"` fallback lies. Use `ps aux | grep` locally.
+- **A full `normalize.py` run is ~80 minutes**, not the ~15 this log claimed for years.
+- The shell cwd drifts to the PARENT directory, which holds a 0-byte `prod_snapshot.db` decoy —
+  use absolute paths in backgrounded commands.
+
+---
+
 ## 2026-08-11 — SQLite WAL files UNTRACKED. Droplet git status is finally clean.
 
 Open since 2026-07-16 and the direct cause of today's silent deploy failure. Done properly, with
@@ -93,7 +153,7 @@ failure. Deliberate, separate change.
 
 ---
 
-## 2026-08-11 — DealIntelligence: facts gathered, DECISION STILL OPEN (do not act without the user)
+## 2026-08-11 — DealIntelligence: facts gathered (SUPERSEDED — it was retired later the same day)
 
 User asked to discuss before retiring. Nothing changed in code. Facts, so the next session does not
 re-derive them:

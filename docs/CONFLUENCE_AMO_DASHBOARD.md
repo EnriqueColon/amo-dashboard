@@ -517,9 +517,11 @@ clearer label, not a filter.
 **The LLM provider is OpenAI (`gpt-4.1-nano`)**, not Claude/Anthropic. Any `.cursor` rule claiming
 otherwise is stale.
 
-**`client/src/pages/DealIntelligence.tsx` is not routed** in `App.tsx`, though its
-`/api/deal-intelligence/*` endpoints are live and maintained. Treat it as dormant — either wire it
-back into the nav or retire both sides; do not assume it is reachable.
+**Deal Intelligence was retired on 11 Aug 2026.** The page and its eight
+`/api/deal-intelligence/*` endpoints were removed together — it had been unrouted and unreachable
+for months while still being maintained through every cross-cutting change. The implementation is
+in git history (added `197e947`, unrouted `3b1674a`, removed `9a2932d`) if distressed-sourcing ever
+comes back as a use case.
 
 ### 6.8 Runbooks
 
@@ -760,7 +762,8 @@ use case ever returns.
 
 | Risk | Impact | Mitigation in place |
 |---|---|---|
-| Broward image feed missed for >10 days | **Permanent, unrecoverable data loss** | Daily cron + retention report printed every run; ~10-day buffer absorbs several consecutive failures |
+| Broward image feed missed for >10 days | **Permanent, unrecoverable data loss** | Daily cron + retention report every run; ~10-day buffer; **Overview shows a red banner if no images harvested in 48h** (added 11 Aug 2026) |
+| A deploy silently fails | Production keeps running old code while checks look fine | `git pull` prints `Updating <old>..<new>` AFTER an abort — **verify by effect** (`git log --oneline -1` on the droplet, or grep `dist/index.cjs`), not by output. Bit us 11 Aug 2026 |
 | PM2 restarted mid-normalize | Dashboard shows zeros for up to 7 days | Nightly wrapper restarts only on success; documented in `ROLLBACK.md` and here |
 | A new writer forgets the `county` column | Rows **silently relabelled Miami-Dade**, no error anywhere | `check_county_isolation.py` asserts it — has already caught this three times |
 | Miami-Dade portal changes its markup | Collection stops | Failures surface in `collection_log` and the Collection Log page |
@@ -770,16 +773,31 @@ use case ever returns.
 
 ### 7.6 Recommended next steps
 
-1. **Set up automated off-box database backups.** Backups today are taken by hand before risky
-   changes. The whole dataset — including tens of thousands of dollars' worth of irreplaceable
-   OCR/LLM extraction work and the Broward images that cannot be re-harvested — lives on one droplet
-   with no scheduled off-host copy. This is the highest-value maintenance item on the list.
-2. **Decide the Broward history strategy** — history scraper vs. bulk export request vs. wait for
-   CY2026. Every day of delay is more permanently-lost image days.
-3. **Confirm `AMO_PASSWORD` and `AMO_SECRET` are set** in the production environment.
-4. Clean up the residual Miami-Dade copy and resolve the `DealIntelligence` page.
-5. Consider adding basic uptime/cron-failure alerting — today, a silently failing cron is only
-   noticed by looking at the Collection Log.
+**Needing the owner, not an engineer:**
+
+1. 🔴 **Revoke the leaked GitHub PAT.** It sits in plaintext in the `origin` remote URL in
+   `.git/config`, on this Mac and the droplet, and **the repo is public**. It was never committed,
+   so GitHub's secret scanning never saw it and nothing will auto-revoke it. Open since
+   4 Aug 2026 — the oldest item here and the only one with security consequences.
+   Revoke → check the account security log → move to an SSH remote / read-only deploy key.
+2. 📞 **Place the Broward bulk image order** — 954-831-4000. Document type `AST`, 2023-01-01 →
+   2025-12-31, ~41,900 documents, TIFF as the daily FTP feed already delivers so it drops straight
+   into the existing pipeline. Would also close the Jan–Jun 2026 index gap if requested together.
+
+**Engineering:**
+
+3. **Automated off-box database backups.** Still the highest-value maintenance item. Backups are
+   taken by hand before risky changes; the whole dataset — irreplaceable OCR/LLM extraction work,
+   plus Broward images that cannot be re-harvested once the feed rolls — lives on one droplet with
+   no scheduled off-host copy.
+4. **Real cron-failure alerting.** The dashboard now warns when Broward collection stalls, but that
+   only helps someone who opens it. There is still no `MAILTO`, no mail transport, and no uptime
+   ping on the droplet.
+5. **Confirm `AMO_PASSWORD` and `AMO_SECRET`** are set in the production environment. Note
+   `ecosystem.config.cjs` has drifted from the env PM2 actually holds — a `pm2 delete` + fresh
+   start would silently change the dashboard password.
+6. Sanity-check the two flagged facility rows (§7.4) and recheck Broward facility detection once
+   its extracted count grows.
 
 ---
 
