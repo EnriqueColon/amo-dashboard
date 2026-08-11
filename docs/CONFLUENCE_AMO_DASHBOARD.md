@@ -681,6 +681,7 @@ endpoints healthy across all three county scopes.
 | Per-county document links | 🟢 Deployed |
 | Endpoint county scoping | 🟢 Deployed — all document endpoints |
 | Coverage-gap detection + banner | 🟢 Deployed 11 Aug 2026 |
+| Collection-health warning (Broward) | 🟢 Deployed 11 Aug 2026 |
 | Entity normalization / duplicate manager | 🟢 Deployed 6 Aug 2026 |
 | FDIC analytics | 🟢 Live |
 | Deal Intelligence page | ⚪ Dormant — endpoints live, page not routed |
@@ -724,17 +725,28 @@ scrape AcclaimWeb for that window · request a one-off bulk export from Broward 
 954-831-4000) · wait for CY2026 to publish (~Feb 2027) and backfill then. The index self-heals when
 CY2026 lands; **the images for that window never will.**
 
-**3. 69 orphaned Broward images** from 21 Jul 2026 — that day aged off the feed before its index rows
+**3. Cron failures on the droplet are silent** — no `MAILTO`, no mail transport installed. Mitigated
+11 Aug 2026: the Overview now shows a red banner when Broward images have not been harvested for
+over 48 hours, using `MAX(harvested_at)` as the liveness signal. This matters because Broward's
+feed drops each day after ~10, so a job that quietly stops costs images permanently. Proper
+alerting (email/webhook) is still not configured — the banner only helps someone who opens the
+dashboard.
+
+**4. Broward facility detection has found 0 real facilities** in 589 extracted documents. Not
+necessarily wrong — Miami-Dade's rate (445 in 70,834, ~0.6%) predicts ~3–4 at this sample size — but
+worth re-checking once Broward's extracted count grows.
+
+**5. 69 orphaned Broward images** from 21 Jul 2026 — that day aged off the feed before its index rows
 were ingested, so the images have no `assignments` row and will never be picked up.
 
-**4. Residual Miami-Dade-specific copy** in some tooltips and report headers, now that the tool is
+**6. Residual Miami-Dade-specific copy** in some tooltips and report headers, now that the tool is
 multi-county.
 
-**5. Two facility rows flagged for manual sanity check:** `2026R268269` (JPMorgan/KB7 Holdings — the
+**7. Two facility rows flagged for manual sanity check:** `2026R268269` (JPMorgan/KB7 Holdings — the
 evidence quote reads like a routine SBA note renewal, possibly a false positive) and `2026R277453`
 (grantor extracted as the literal string `"Lender"`, likely an OCR gap).
 
-**6. `DealIntelligence.tsx` is unrouted** while its endpoints remain live and maintained — decide
+**8. `DealIntelligence.tsx` is unrouted** while its endpoints remain live and maintained — decide
 whether to wire it back in or retire both sides.
 
 ### 7.5 Risk register

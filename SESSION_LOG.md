@@ -4,6 +4,43 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-08-11 (later still) — Forward-path hardening. Silent cron failure was the real risk.
+
+User's direction: stop trying to recover Broward history, make the forward path as good as
+possible. Audited what could quietly undermine it.
+
+### 🚨 The finding — cron failures are completely silent
+No `MAILTO` in the crontab and **no mail transport installed** on the droplet. If
+`run_broward_daily.sh` starts failing, nothing tells anyone. Combined with the feed's ~10-day
+retention, a job that stops on a Monday costs images permanently by the following week.
+
+### Built
+`/api/stats` returns `collection_health`; the Overview shows a red banner when no images have been
+harvested for **over 48 hours**.
+
+**The signal is `MAX(harvested_at)` from `broward_images`, NOT the newest filing date.** Broward
+publishes ~3 business days behind, so the newest `rec_date` is always several days old even when
+the pipeline is perfectly healthy — it would be useless as liveness. `harvested_at` measures OUR
+job, not the county's schedule. 48h = one missed run is a blip, two is a pattern, and it leaves a
+week of headroom before the feed drops anything.
+
+`server/db.ts` now declares `broward_images` defensively. It is created by the Python harvester, so
+without that the new prepared statement throws on a database the harvester has never touched and
+takes the whole app down at boot.
+
+Verified both states against the production snapshot: 3 hours → healthy, simulated 5-day outage →
+banner. Live reading after deploy: `hours_since=21, stale=False`.
+
+**Still not solved:** the banner only helps someone who opens the dashboard. Real alerting
+(email/webhook/uptime ping) is not configured.
+
+### Also checked
+Broward facility detection runs on every extracted document (589 of 589 have `facility_type` set)
+but has found **0 real facilities**. Miami-Dade's rate (445 of 70,834, ~0.6%) predicts ~3–4 at this
+sample size, so this is plausible rather than broken — worth re-checking as the count grows.
+
+---
+
 ## 2026-08-11 (later) — Coverage gaps now surfaced. Broward's 6-month hole is visible.
 
 ### The finding
