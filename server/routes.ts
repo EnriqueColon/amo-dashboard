@@ -164,6 +164,22 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     // detection below: a county's date range can look continuous while hiding
     // months with no data at all, which reads as a market collapse rather than
     // as data we never collected.
+    // When the Broward daily job last actually harvested anything.
+    //
+    // Deliberately NOT "newest filing date": Broward publishes ~3 business days
+    // behind, so the newest rec_date is always several days old even when the
+    // pipeline is perfectly healthy, and it would be useless as a liveness
+    // signal. harvested_at measures OUR job, not the county's schedule.
+    //
+    // This matters because cron failures on the droplet are silent — there is
+    // no MAILTO and no mail transport — and the SFTP feed drops each day after
+    // ~10 days. A job that quietly stops costs images permanently, so the
+    // liveness signal has to appear somewhere the user actually looks.
+    browardLastHarvest:  db.prepare(`
+      SELECT MAX(harvested_at) AS last_harvest,
+             CAST((julianday('now') - julianday(MAX(harvested_at))) * 24 AS INTEGER) AS hours_since
+      FROM broward_images
+    `),
     monthsByCounty:      db.prepare(`
       SELECT COALESCE(county, '${DEFAULT_COUNTY}') AS county,
              substr(rec_date, 1, 7)               AS month,
@@ -281,8 +297,19 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const all_gaps = findCoverageGaps(stmts.monthsByCounty.all() as any[]);
     const coverage_gaps = county ? all_gaps.filter(g => g.county === county) : all_gaps;
 
+    // Pipeline liveness. Threshold is 48h: the job runs daily, so one missed run
+    // is a blip and two is a pattern. The feed drops days after ~10, which is
+    // the real deadline — flagging at 48h leaves ample room to notice and fix
+    // before anything is lost.
+    const bh = stmts.browardLastHarvest.get() as any;
+    const collection_health = {
+      broward_last_harvest: bh?.last_harvest ?? null,
+      broward_hours_since:  bh?.hours_since ?? null,
+      broward_stale: bh?.last_harvest != null && (bh.hours_since ?? 0) > 48,
+    };
+
     const unique_cfns = total;
-    const payload = { total, unique_cfns, unique_entities, self_assigns, min_date, max_date, unique_grantors, unique_grantees, private_credit_txns, market_transfers, txn_breakdown, collection_log_count, last_collected, clean_total, coverage_gaps };
+    const payload = { total, unique_cfns, unique_entities, self_assigns, min_date, max_date, unique_grantors, unique_grantees, private_credit_txns, market_transfers, txn_breakdown, collection_log_count, last_collected, clean_total, coverage_gaps, collection_health };
     setCached(KEY, payload, STATS_TTL_MS);
     res.json(payload);
   });

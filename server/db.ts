@@ -187,6 +187,21 @@ export function getDb(): Database.Database {
       try { _db.exec(`CREATE INDEX IF NOT EXISTS ${name} ON ${table} ${cols}`); } catch (_e) {}
     }
 
+    // Written by collector/broward_images.py, read here only for the liveness
+    // signal on /api/stats. Declared defensively because the server must be
+    // able to start against a database the harvester has never touched —
+    // otherwise preparing that statement throws and takes the whole app down.
+    _db.exec(`
+      CREATE TABLE IF NOT EXISTS broward_images (
+        cfn           TEXT PRIMARY KEY,
+        rec_date      TEXT,
+        page_count    INTEGER,
+        bytes_on_disk INTEGER,
+        harvested_at  TEXT DEFAULT (datetime('now')),
+        source_zip    TEXT
+      );
+    `);
+
     // Watchlist of market participants the user wants to monitor (Targets tab)
     _db.exec(`
       CREATE TABLE IF NOT EXISTS target_entities (

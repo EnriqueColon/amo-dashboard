@@ -108,6 +108,12 @@ export default function Dashboard() {
   // Whole months with no filings at all, inside the reported date range.
   const gaps: any[] = raw?.coverage_gaps ?? [];
 
+  // Pipeline liveness. Only shown when Broward is in scope — it is Broward's
+  // harvester that has a hard deadline, since its SFTP feed drops each day
+  // after ~10 and cron failures on the droplet are silent.
+  const health = raw?.collection_health;
+  const harvestStale = !!health?.broward_stale && county !== 'MIAMI-DADE';
+
   return (
     <div className="p-6 space-y-6 max-w-screen-xl mx-auto">
 
@@ -138,6 +144,24 @@ export default function Dashboard() {
             Everything derived from reading the documents themselves — entity classification,
             transaction types, private-credit detection, lending relationships — is not available
             yet and shows as “—”.
+          </span>
+        </div>
+      )}
+
+      {harvestStale && (
+        <div
+          data-testid="harvest-stale-banner"
+          className="flex items-start gap-2 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2.5 text-xs text-foreground"
+        >
+          <AlertCircle size={14} className="mt-0.5 shrink-0 text-red-500" />
+          <span>
+            <span className="font-medium">
+              Broward collection may have stopped — no images harvested in{' '}
+              {Math.floor((health.broward_hours_since ?? 0) / 24)} days.
+            </span>{' '}
+            The daily job last ran {health.broward_last_harvest}. Broward's feed drops each day
+            after about ten, and those images cannot be recovered from the free channel afterwards.
+            Check <code className="font-mono">collector/broward_daily.log</code> on the droplet.
           </span>
         </div>
       )}
