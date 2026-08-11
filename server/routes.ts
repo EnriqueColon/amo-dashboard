@@ -221,10 +221,15 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     topAcquirers:        db.prepare('SELECT entity, inbound_vol, outbound_vol, degree, entity_type FROM entity_nodes ORDER BY inbound_vol DESC LIMIT 10'),
     topSellers:          db.prepare('SELECT entity, inbound_vol, outbound_vol, degree, entity_type FROM entity_nodes ORDER BY outbound_vol DESC LIMIT 10'),
     mostConnected:       db.prepare('SELECT entity, inbound_vol, outbound_vol, degree, entity_type FROM entity_nodes ORDER BY degree DESC LIMIT 10'),
+    // These read aom_events_clean, so they are document-level and DO scope.
+    // Pagination moved from positional ? to named :limit/:offset because
+    // better-sqlite3 refuses to mix the two styles and the county predicate is
+    // named.
     privateCreditTotal:  db.prepare(`
       SELECT COUNT(*) as n FROM aom_events_clean
       WHERE (assignor_type='PRIVATE_CREDIT' OR assignee_type='PRIVATE_CREDIT')
         AND txn_type != 'SELF_ASSIGN'
+        AND ${countyPredicate()}
     `),
     privateCreditRows:   db.prepare(`
       SELECT c.cfn, c.rec_date,
@@ -233,12 +238,14 @@ export async function registerRoutes(httpServer: Server, app: Express) {
              c.assignor_type AS grantor_category,
              c.assignee_type AS grantee_category,
              c.txn_type,
+             c.county,
              a.address
       FROM aom_events_clean c
       LEFT JOIN assignments a ON c.cfn = a.cfn
       WHERE (c.assignor_type='PRIVATE_CREDIT' OR c.assignee_type='PRIVATE_CREDIT')
         AND c.txn_type != 'SELF_ASSIGN'
-      ORDER BY c.rec_date DESC LIMIT ? OFFSET ?
+        AND ${countyPredicate('c.')}
+      ORDER BY c.rec_date DESC LIMIT :limit OFFSET :offset
     `),
     privateCreditTopGrantees: db.prepare(`
       SELECT assignee_canon AS name, COUNT(*) AS count
@@ -246,6 +253,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       WHERE assignee_type = 'PRIVATE_CREDIT'
         AND txn_type != 'SELF_ASSIGN'
         AND assignor_canon != assignee_canon
+        AND ${countyPredicate()}
       GROUP BY assignee_canon
       ORDER BY count DESC LIMIT 10
     `),
@@ -658,22 +666,24 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const pageNum  = Math.max(1, parseInt(page));
     const limitNum = Math.min(parseInt(limit) || 50, 500);
     const offset   = (pageNum - 1) * limitNum;
-    const cacheKey = makeCacheKey('/api/private-credit', { page, limit });
+    const county   = countyScope(req as any);
+    const cacheKey = makeCacheKey('/api/private-credit', { page, limit, county: county ?? 'ALL' });
     const cached = getCached(cacheKey);
     if (cached) return res.json(cached);
-    const total = (stmts.privateCreditTotal.get() as any).n;
-    const rows  = stmts.privateCreditRows.all(limitNum, offset);
+    const total = (stmts.privateCreditTotal.get({ county }) as any).n;
+    const rows  = stmts.privateCreditRows.all({ county, limit: limitNum, offset });
     const payload = { total, page: pageNum, limit: limitNum, pages: Math.ceil(total / limitNum), rows };
     setCached(cacheKey, payload);
     res.json(payload);
   });
 
   // ─── GET /api/private-credit/top-grantees ─────────────────────────────────
-  app.get('/api/private-credit/top-grantees', (_req, res) => {
-    const KEY = '/api/private-credit/top-grantees';
+  app.get('/api/private-credit/top-grantees', (req, res) => {
+    const county = countyScope(req as any);
+    const KEY = makeCacheKey('/api/private-credit/top-grantees', { county: county ?? 'ALL' });
     const cached = getCached(KEY);
     if (cached) return res.json(cached);
-    const data = stmts.privateCreditTopGrantees.all();
+    const data = stmts.privateCreditTopGrantees.all({ county });
     setCached(KEY, data);
     res.json(data);
   });

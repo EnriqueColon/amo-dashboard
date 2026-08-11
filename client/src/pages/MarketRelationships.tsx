@@ -504,7 +504,7 @@ export default function MarketRelationships() {
                   How to read this graph
                 </h2>
                 <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
-                  This is a <strong>force-directed network</strong> of every canonical entity in the Miami-Dade AMO (Assignment of Mortgage) database.
+                  This is a <strong>force-directed network</strong> of every canonical entity in the AMO (Assignment of Mortgage) database.
                   Each node is an entity; each line is a relationship where assignments have flowed between them.
                   Self-assignments (same entity on both sides) are excluded to reduce noise.
                 </p>

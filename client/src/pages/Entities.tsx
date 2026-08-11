@@ -100,7 +100,7 @@ export default function Entities() {
                     <ColHeader label="Type" tooltip="Entity classification: Bank, Private Credit, Securitization Trust, GSE (government-sponsored), Servicer, MERS (registry), or Other. Used to derive transaction types and market-flow metrics." />
                   </th>
                   <th className="px-3 py-2.5 text-right font-medium">
-                    <ColHeader label={<span className="text-orange-600">Received</span>} tooltip="Total inbound assignments — times this entity appeared as the Grantee (buyer/receiver) on a Miami-Dade county filing. Includes originations, secondary-market purchases, and MERS releases." />
+                    <ColHeader label={<span className="text-orange-600">Received</span>} tooltip="Total inbound assignments — times this entity appeared as the Grantee (buyer/receiver) on a county filing. Includes originations, secondary-market purchases, and MERS releases." />
                   </th>
                   <th className="px-3 py-2.5 text-right font-medium">
                     <ColHeader label={<span className="text-blue-600">Assigned</span>} tooltip="Total outbound assignments — times this entity appeared as the Grantor (seller/transferor) on a filing. High outbound counts relative to inbound suggest net selling or portfolio wind-down." />
@@ -109,7 +109,7 @@ export default function Entities() {
                     <ColHeader label={<span className="text-purple-600">Counterparties</span>} tooltip="Distinct canonical entities this entity has transacted with (either as buyer or seller). A higher number signals broader market participation or active dealer/intermediary behavior." />
                   </th>
                   <th className="px-3 py-2.5 text-left font-medium pl-4">
-                    <ColHeader label="Active Period" tooltip="Date span from this entity's first recorded Miami-Dade AMO filing to its most recent one." />
+                    <ColHeader label="Active Period" tooltip="Date span from this entity's first recorded first AMO filing to its most recent one." />
                   </th>
                   <th className="px-3 py-2.5 text-right font-medium pr-4"></th>
                 </tr>

@@ -366,7 +366,7 @@ function DealDetailPanel({ cfn, onClose }: { cfn: string; onClose: () => void })
   const narrative = (() => {
     const parts: string[] = [];
     if (rel.total_deals === 1) {
-      parts.push(`This is the first recorded direct transfer from ${tx.assignor_canon} to ${tx.assignee_canon} in Miami-Dade County.`);
+      parts.push(`This is the first recorded direct transfer from ${tx.assignor_canon} to ${tx.assignee_canon} in this county.`);
     } else if (rel.deal_number === 1) {
       parts.push(`This is the most recent of ${rel.total_deals} recorded transfers between ${tx.assignor_canon} and ${tx.assignee_canon}, spanning ${rel.first_deal} to ${rel.last_deal}.`);
     } else {
@@ -738,7 +738,7 @@ export default function DealIntelligence() {
             <h1 className="text-xl font-semibold">Deal Intelligence</h1>
           </div>
           <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
-            Distressed debt sourcing signals derived from Miami-Dade County public mortgage assignment filings.
+            Distressed debt sourcing signals derived from public county mortgage assignment filings.
             Every metric on this page is computed from recorded assignments of mortgage — the legal documents
             that transfer ownership of a mortgage note from one party to another.
           </p>
@@ -804,7 +804,7 @@ export default function DealIntelligence() {
             icon={Users}
             accent="text-purple-400"
             priorValue={prior?.active_pe_buyers}
-            tooltip="Count of distinct private credit / PE fund entities that have received at least one assignment from an institutional seller (bank, servicer, or GSE). A higher number means more competition for distressed deals in this market. Track this figure over time — a rising count suggests the Miami-Dade distressed market is drawing new entrants."
+            tooltip="Count of distinct private credit / PE fund entities that have received at least one assignment from an institutional seller (bank, servicer, or GSE). A higher number means more competition for distressed deals in this market. Track this figure over time — a rising count suggests the local distressed market is drawing new entrants."
           />
         </>)}
       </div>
@@ -1009,7 +1009,7 @@ export default function DealIntelligence() {
               <h2 className="text-sm font-semibold text-foreground">Private Credit Competitive Map</h2>
             <CrossCountyNote className="ml-2" />
               <p className="text-[10px] text-muted-foreground mt-0.5">
-                Active PE / private credit funds in Miami-Dade ranked by total acquisition volume. These are your competitors and potential co-investors.
+                Active PE / private credit funds ranked by total acquisition volume. These are your competitors and potential co-investors.
               </p>
             </div>
           </div>
@@ -1112,10 +1112,10 @@ export default function DealIntelligence() {
             <thead className="border-b border-border bg-muted/20">
               <tr className="text-muted-foreground">
                 <th className="px-4 py-2.5 text-left font-medium">
-                  <ColHeader label="CFN" tooltip="County Filing Number — the unique ID assigned by the Miami-Dade Clerk when the document was officially recorded. Click the CFN to view the original document." />
+                  <ColHeader label="CFN" tooltip="County Filing Number — the unique ID assigned by the county Clerk when the document was officially recorded. Click the CFN to view the original document." />
                 </th>
                 <th className="px-4 py-2.5 text-left font-medium">
-                  <ColHeader label="Date" tooltip="Recording date — when the assignment was stamped by the Miami-Dade County Clerk. Slightly later than the execution date on the document itself." />
+                  <ColHeader label="Date" tooltip="Recording date — when the assignment was stamped by the county Clerk. Slightly later than the execution date on the document itself." />
                 </th>
                 <th className="px-4 py-2.5 text-left font-medium">
                   <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-500 inline-block" />
@@ -1129,7 +1129,7 @@ export default function DealIntelligence() {
                   </span>
                 </th>
                 <th className="px-4 py-2.5 text-left font-medium">
-                  <ColHeader label="Book / Page" tooltip="Miami-Dade Official Records locator — the book and page number of the recorded instrument. Used as an alternate document reference by the Clerk's office." />
+                  <ColHeader label="Book / Page" tooltip="County Official Records locator — the book and page number of the recorded instrument. Used as an alternate document reference by the Clerk's office." />
                 </th>
                 <th className="px-4 py-2.5 text-center font-medium w-16">
                   <ColHeader label="Details" tooltip="Click to open the full transaction detail panel, including classification rationale, counterparty history, and deal context." />

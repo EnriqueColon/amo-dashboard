@@ -353,7 +353,7 @@ export default function CleanEvents() {
             <p className="font-medium text-foreground">What is an Assignment of Mortgage (AOM)?</p>
             <p className="text-muted-foreground text-xs leading-relaxed">
               When a lender sells or transfers ownership of a mortgage, they record an Assignment of Mortgage with the
-              county clerk. This table shows every such transfer in Miami-Dade County. Each row represents one real
+              county clerk. This table shows every such transfer in the selected county. Each row represents one real
               estate loan changing hands between two entities.
             </p>
           </div>
@@ -392,7 +392,7 @@ export default function CleanEvents() {
           <div className="space-y-2">
             <p className="font-medium text-foreground">Column guide</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5 text-xs text-muted-foreground">
-              <div><span className="text-foreground font-medium">CFN</span> — Clerk's File Number, the unique record ID. Click to look up on Miami-Dade clerk portal.</div>
+              <div><span className="text-foreground font-medium">CFN</span> — Clerk's File Number, the unique record ID. Click to look up on county clerk portal.</div>
               <div><span className="text-foreground font-medium">Date</span> — Date the assignment was recorded with the county.</div>
               <div><span className="text-foreground font-medium">Canonical name</span> — Normalized version (suffixes stripped, brand aliases unified). The smaller grey text below is the original raw name from the filing.</div>
               <div><span className="text-foreground font-medium">Category badge</span> — Entity type: BANK, SERVICER, PRIVATE CREDIT, GSE, MERS, or OTHER.</div>
@@ -400,7 +400,7 @@ export default function CleanEvents() {
               <div><span className="text-foreground font-medium">Property</span> — Street address of the encumbered property, read from the recorded PDF when stated. Many assignments only reference a legal description, so this can be blank.</div>
               <div><span className="text-foreground font-medium">Amount</span> — Original loan amount (or actual consideration paid) extracted from the recorded PDF. Most assignments recite only nominal consideration ("$10 and other..."), which is ignored.</div>
               <div><span className="text-foreground font-medium">Parties</span> — Total parties on the original filing. Multi-party filings (e.g. 3–4) indicate complex structures; this table collapses them to their dominant direction.</div>
-              <div><span className="text-foreground font-medium">Book / Page</span> — Official recording reference in Miami-Dade's instrument index.</div>
+              <div><span className="text-foreground font-medium">Book / Page</span> — Official recording reference in the county's instrument index.</div>
             </div>
           </div>
 
@@ -499,10 +499,10 @@ export default function CleanEvents() {
             <thead className="border-b border-border bg-muted/20">
               <tr className="text-muted-foreground">
                 <th className="px-3 py-2.5 text-left font-medium">
-                  <ColHeader label="CFN" tooltip="County Filing Number — the unique ID assigned by the Miami-Dade Clerk when the document was officially recorded. Click the CFN link to view the original document in the county portal." />
+                  <ColHeader label="CFN" tooltip="County Filing Number — the unique ID assigned by the county Clerk when the document was officially recorded. Click the CFN link to view the original document in the county portal." />
                 </th>
                 <th className="px-3 py-2.5 text-left font-medium">
-                  <ColHeader label="Date" tooltip="Recording date — when the assignment was stamped by the Miami-Dade County Clerk. Slightly later than the execution/signing date on the document itself." />
+                  <ColHeader label="Date" tooltip="Recording date — when the assignment was stamped by the county Clerk. Slightly later than the execution/signing date on the document itself." />
                 </th>
                 <th className="px-3 py-2.5 text-left font-medium">
                   <span className="flex items-center gap-1">
@@ -533,7 +533,7 @@ export default function CleanEvents() {
                   </span>
                 </th>
                 <th className="px-3 py-2.5 text-left font-medium">
-                  <ColHeader label="Book / Page" tooltip="Miami-Dade Official Records locator — the book and page number of the recorded instrument. Used internally by the Clerk's office as an alternate document reference." />
+                  <ColHeader label="Book / Page" tooltip="county Official Records locator — the book and page number of the recorded instrument. Used internally by the Clerk's office as an alternate document reference." />
                 </th>
               </tr>
             </thead>

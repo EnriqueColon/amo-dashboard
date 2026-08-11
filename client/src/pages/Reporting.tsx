@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import DocLink from '@/components/DocLink';
-import { countyLabel, type CountyScope } from '@/lib/county';
+import { useCounty, countyLabel, type CountyScope } from '@/lib/county';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -453,6 +453,7 @@ function presetRange(preset: number | 'ytd' | null): { start: string; end: strin
 }
 
 export default function Reporting() {
+  const { county } = useCounty();
   const [params] = useState(initialParams);
   const [search, setSearch]       = useState(() => params.get('search') || '');
   const [applied, setApplied]     = useState(() => params.get('search') || '');
@@ -505,7 +506,7 @@ export default function Reporting() {
           <div className="flex items-center gap-2">
             <LayoutList size={15} className="text-primary" />
             <h1 className="text-lg font-semibold">Reporting</h1>
-            <span className="text-xs text-muted-foreground ml-1">Miami-Dade County</span>
+            <span className="text-xs text-muted-foreground ml-1">{countyLabel(county)}</span>
           </div>
         </div>
         <div className="flex gap-1.5">

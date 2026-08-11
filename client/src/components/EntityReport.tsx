@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
+import { useCounty, countyLabel } from '@/lib/county';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
@@ -144,6 +145,7 @@ function EntityDrilldown({ entity, color, entityType, startDate, endDate, onBack
   endDate: string;
   onBack: () => void;
 }) {
+  const { county } = useCounty();
   const qs = [
     `entities=${encodeURIComponent(entity)}`,
     startDate && `start_date=${startDate}`,
@@ -176,7 +178,7 @@ function EntityDrilldown({ entity, color, entityType, startDate, endDate, onBack
     <div className="space-y-3">
       {/* Print-only header for the focused entity */}
       <div className="hidden print:block border-b border-border pb-2">
-        <h1 className="text-base font-bold">AMO Activity Report — Miami-Dade County</h1>
+        <h1 className="text-base font-bold">AMO Activity Report — {countyLabel(county)}</h1>
         <p className="text-xs">Entity: {entity}</p>
         <p className="text-xs">
           Period: {startDate || 'beginning'} to {endDate || 'present'} · Generated {new Date().toLocaleDateString()}
@@ -276,6 +278,7 @@ export function EntityReport({ entities, startDate, endDate }: {
   startDate: string;
   endDate: string;
 }) {
+  const { county } = useCounty();
   const [chart, setChart] = useState('timeline');
   const [timelineMode, setTimelineMode] = useState<'combined' | 'per-entity'>('combined');
   const [focused, setFocused] = useState<string | null>(null);
@@ -354,7 +357,7 @@ export function EntityReport({ entities, startDate, endDate }: {
     <div className="space-y-3">
       {/* Print-only report header */}
       <div className="hidden print:block border-b border-border pb-2">
-        <h1 className="text-base font-bold">AMO Activity Report — Miami-Dade County</h1>
+        <h1 className="text-base font-bold">AMO Activity Report — {countyLabel(county)}</h1>
         <p className="text-xs">Entities: {entities.join(', ')}</p>
         <p className="text-xs">
           Period: {startDate || 'beginning'} to {endDate || 'present'} · Generated {new Date().toLocaleDateString()}
