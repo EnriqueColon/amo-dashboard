@@ -4,6 +4,45 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-08-11 — SQLite WAL files UNTRACKED. Droplet git status is finally clean.
+
+Open since 2026-07-16 and the direct cause of today's silent deploy failure. Done properly, with
+the procedure rehearsed first.
+
+### Why it needed care
+`miami_dade_amo.db-wal` on the droplet was **72MB** — transactions not yet folded into the main
+database. A careless `git rm` letting git delete that file would have discarded them. The main DB
+is live: PM2 serving, crons writing.
+
+### Rehearsed in a scratch repo before touching production
+Built a throwaway origin + two clones reproducing the exact setup (WAL tracked from before the
+gitignore rule, one clone with it locally modified like the droplet):
+
+- **Naive pull** → aborted exactly as production did, *including the misleading
+  `Updating <old>..<new>` line printing LAST, after the error.* Reproduced the trap precisely.
+- **`git rm --cached` on the droplet FIRST, then pull** → fast-forwards cleanly, working tree
+  clean, and **the live WAL file on disk untouched**.
+
+### Applied
+1. Local: `git rm --cached` both files → commit → push (`cc108bd`). Index only; working files kept.
+2. Droplet: **`git rm --cached` first**, then `git pull --ff-only`.
+
+Verified after: `PRAGMA integrity_check` = ok, `assignments` 113,393 / `aom_events_clean` 51,799
+unchanged, app serving, **WAL still 72,602,672 bytes — byte-for-byte untouched**, files no longer
+tracked, and `git pull` reports "Already up to date".
+
+No downtime. PM2 never stopped; no checkpoint needed, because the procedure never lets git touch
+the file.
+
+### Also: `.gitignore` generalised
+`collector/*.log` (was three individual entries) and `ecosystem.config.cjs` (lives on the droplet
+and holds the dashboard password — must never be committed).
+
+**The droplet's `git status` is now completely clean — 0 changes.** That is the real win: a noisy
+status is how a genuine problem hides, and today it hid a blocked deploy for hours.
+
+---
+
 ## 2026-08-11 — Deal Intelligence RETIRED (page + endpoints). Plus a deploy that silently failed.
 
 User decision: not in use, retire it. Removed **both sides together** — deleting the page alone

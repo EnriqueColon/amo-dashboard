@@ -683,6 +683,7 @@ endpoints healthy across all three county scopes.
 | Coverage-gap detection + banner | 🟢 Deployed 11 Aug 2026 |
 | Collection-health warning (Broward) | 🟢 Deployed 11 Aug 2026 |
 | County audit — all pages/endpoints | 🟢 Complete 11 Aug 2026 |
+| Repo hygiene — WAL files untracked | 🟢 Resolved 11 Aug 2026 — droplet `git status` clean |
 | Entity normalization / duplicate manager | 🟢 Deployed 6 Aug 2026 |
 | FDIC analytics | 🟢 Live |
 | Deal Intelligence page | ⚫ **Retired 11 Aug 2026** — page and its 8 endpoints removed together |
