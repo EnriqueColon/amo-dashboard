@@ -142,9 +142,12 @@ Held at 8 rather than pushed further: the facility tick was already getting cler
 the portal throttles somewhere above this, and 35.6h already clears the deadline with margin for the
 two nightly normalize runs inside the window.
 
-**The facility tick is PAUSED** (crontab, commented with the reason). It was failing 10/10 with
-clerk read timeouts while the backfill held the portal. **Re-enable when the backfill finishes** —
-41,980 documents still need facility analysis.
+**The facility tick was failing 10/10** with clerk read timeouts while the backfill held the portal
+— same endpoint, same 4 cores. Pausing it in crontab fixed that and created a worse problem: a
+disabled cron depending on someone remembering to switch it back on. So `run_facility_tick.sh` now
+**yields while `extract_pdfs.py` is running** and the cron entry is live again. All five crons
+restored, no paused state anywhere. Skipping a tick is free — the batch state machine is resume-safe
+and the next tick is 20 minutes out.
 
 ### The lesson
 **"Has a row" is not "has been done."** Two writers shared one table with no shared notion of what

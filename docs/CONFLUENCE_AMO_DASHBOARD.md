@@ -760,10 +760,27 @@ the model response and the facility path never does, so it is an exact test (ver
 22,115 rows with `raw_json` all have OCR text and a category; 50,042 without have neither). This also
 makes the weekly job self-healing if it ever happens again.
 
-**The repair.** A 49,972-document re-extraction started 15 Aug 2026 19:29 UTC at 4 workers
-(~1,286 docs/hour, ~$25 in LLM spend, ~40 hours). Progress: `collector/main_backfill.log`. Until it
-completes, document-derived fields remain absent for the affected Miami-Dade documents and any
-analysis resting on them is understated.
+**The repair.** A 49,845-document re-extraction is running since 15 Aug 2026 19:38 UTC at **8
+workers, ~1,450 docs/hour**, ~$25 in LLM spend, **expected complete Mon 17 Aug ~06:30 UTC**.
+Progress: `collector/main_backfill.log`. Until it completes, document-derived fields remain absent
+for the affected documents and any analysis resting on them is understated.
+
+The worker count was set by measurement, not by reading CPU: at 4 workers `top` showed 94.5% user /
+0.1% idle, which looks saturated, yet 8 workers proved **59% faster** (879 → 1,397 docs/hour) with
+zero fetch failures — most of each document is network wait, so more in-flight work keeps OCR fed.
+**Size this pool by measuring throughput, never by CPU percentage.**
+
+**The backfilled data only becomes visible after a normalize.** Extraction fills `pdf_extractions`;
+the dashboard reads `aom_events_clean`, which only `normalize.py` rebuilds. The scheduled Monday
+08:30 UTC nightly run lands ~2 hours after the backfill finishes and picks it all up automatically,
+including the PM2 restart that clears the cache — no manual step. Budget **2–2.5 hours** for that
+run rather than the usual 85 minutes, since it will be working through ~72k extracted Miami-Dade
+documents instead of ~22k.
+
+**Expect the dashboard's numbers to move noticeably afterwards.** 50k documents will contribute
+document-derived party names for the first time, so entity counts, rankings and classifications will
+all shift — new names entering the classification sweep can move existing entities' types (§6.8,
+"Add a new county", makes the same point). That is the repair working, not a new fault.
 
 **The general lesson, worth keeping:** *"has a row" is not "has been done."* Two writers shared one
 table with no shared definition of done, and the cheaper job's bookkeeping silently satisfied the
