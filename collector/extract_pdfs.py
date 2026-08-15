@@ -187,8 +187,14 @@ Return ONLY the JSON object, no other text."""
 # ── DB ────────────────────────────────────────────────────────────────────────
 
 def get_conn() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB)
+    conn = sqlite3.connect(DB, timeout=120)
     conn.execute('PRAGMA journal_mode=WAL')
+    # 120s rather than python's 5s default. normalize.py rebuilds the derived
+    # tables and commits the whole thing in one transaction at the end of an
+    # ~80-minute run; a writer that gives up after 5 seconds during that commit
+    # raises "database is locked". That is survivable for a 200-document cron
+    # run and fatal for a multi-day backfill, so the wait is generous.
+    conn.execute('PRAGMA busy_timeout=120000')
     return conn
 
 
@@ -742,7 +748,26 @@ def run_parallel(docs: list, conn, workers: int):
             cfn, rb, rp, dc, status, data, ocr_chars, note = fut.result()
             if note:
                 print(f'  {cfn} ({dc}) {note}', flush=True)
-            save(conn, cfn, rb, rp, status, data, ocr_chars, county=dc)
+
+            # A single failed write must never end a run that has hours of work
+            # behind it. The realistic cause is lock contention with
+            # normalize.py's end-of-run commit, which clears on its own; if it
+            # still fails after three tries, skip this document and carry on —
+            # it stays unextracted and the next pass picks it up, which is a far
+            # better outcome than losing the remaining tens of thousands.
+            for attempt in range(3):
+                try:
+                    save(conn, cfn, rb, rp, status, data, ocr_chars, county=dc)
+                    break
+                except Exception as e:
+                    if attempt == 2:
+                        print(f'  {cfn} SAVE FAILED after 3 tries, skipping: {e}',
+                              flush=True)
+                        status = 'LLM_ERROR'   # counted as a failure, not an OK
+                        data = None
+                    else:
+                        time.sleep(5 * (attempt + 1))
+
             counts[status] += 1
             if data:
                 cat = data.get('doc_category')
