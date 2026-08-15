@@ -739,6 +739,36 @@ endpoints healthy across all three county scopes.
 
 ### 7.4 Known gaps and open items
 
+**0. 🚨 70% of Miami-Dade was never fully extracted — found and being repaired 15 Aug 2026.**
+The single largest data problem found to date, and it was invisible from every angle except the UI.
+
+**What happened.** Two jobs write to `pdf_extractions`. The facility backfill
+(`batch_extract_facility.py`) writes a row as soon as it has a *facility* verdict — marked
+`status='OK'` but with none of the main fields. The main extractor picked its work by asking
+"does this document have a row yet?", so every document the facility backfill reached first became
+**permanently invisible** to it. From 22 Jul 2026 (when the full-history facility backfill started)
+this cost **50,042 of 71,366 Miami-Dade documents** their property address, folio, loan amount,
+signatory, document category and document-derived parties. Broward is unaffected.
+
+**Why it went unnoticed for three weeks.** Every affected row reads `status = 'OK'`. There was no
+error, no failed job, no log line and no banner — the pipeline believed it had succeeded 50,042
+times. The only visible symptom anywhere was the empty Property / Folio / Loan Amt / Signatory
+columns on the Reporting page, which is exactly how it was found.
+
+**The fix.** Pending work is now selected on `raw_json IS NULL` — the main extractor always stores
+the model response and the facility path never does, so it is an exact test (verified on production:
+22,115 rows with `raw_json` all have OCR text and a category; 50,042 without have neither). This also
+makes the weekly job self-healing if it ever happens again.
+
+**The repair.** A 49,972-document re-extraction started 15 Aug 2026 19:29 UTC at 4 workers
+(~1,286 docs/hour, ~$25 in LLM spend, ~40 hours). Progress: `collector/main_backfill.log`. Until it
+completes, document-derived fields remain absent for the affected Miami-Dade documents and any
+analysis resting on them is understated.
+
+**The general lesson, worth keeping:** *"has a row" is not "has been done."* Two writers shared one
+table with no shared definition of done, and the cheaper job's bookkeeping silently satisfied the
+expensive job's precondition. Any future writer to `pdf_extractions` must be checked against this.
+
 **1. Broward analytical coverage is thin — 589 of 42,559 documents (~1.4%). Largest gap in the product.**
 The index is complete; the *documents* are not. Only harvested images can be extracted, and the
 harvester has only run since 7 Aug 2026, so 2023–2025 is **index-only**: filings, parties, dates and
@@ -853,6 +883,7 @@ use case ever returns.
 | A deploy silently fails | Production keeps running old code while checks look fine | `git pull` prints `Updating <old>..<new>` AFTER an abort — **verify by effect** (`git log --oneline -1` on the droplet, or grep `dist/index.cjs`), not by output. Bit us 11 Aug 2026 |
 | PM2 restarted mid-normalize | Dashboard shows zeros for up to 7 days | Nightly wrapper restarts only on success; documented in `ROLLBACK.md` and here |
 | A new writer forgets the `county` column | Rows **silently relabelled Miami-Dade**, no error anywhere | `check_county_isolation.py` asserts it — has already caught this three times |
+| Two jobs writing `pdf_extractions` disagree on what "done" means | **50,042 documents silently never extracted**, every row reading `status='OK'` — happened 22 Jul–15 Aug 2026 | Pending work is now keyed on `raw_json IS NULL`, not row existence. **No automated check yet** — a guardrail asserting "every `status='OK'` row has `raw_json`" would have caught this on day one |
 | Miami-Dade portal changes its markup | Collection stops | Failures surface in `collection_log` and the Collection Log page |
 | Data changed without clearing the cache | Stale dashboard for up to 7 days | Nightly restart; `POST /api/cache/bust` |
 | Single droplet, single SQLite file | Total loss on host failure | Manual `.backup` before every data change; **nightly automated snapshot since 15 Aug 2026, verified and rotated — but still on the same host until Spaces credentials are added** (§7.4 item 8a) |

@@ -53,6 +53,11 @@ Broward images harvested **658**, extracted **589**. Everything deployed; drople
   confirmed false positive; the other is real with two bad fields.
 
 ### Traps that have bitten repeatedly — read before deploying
+- **`pdf_extractions` has two writers with different ideas of "done".** `extract_pdfs.py` (main
+  fields + `raw_json`) and `batch_extract_facility.py` (facility fields only, `status='OK'`,
+  no `raw_json`). Selecting pending work by "does a row exist" silently lost **50,042 documents**
+  for three weeks. Key on **`raw_json IS NULL`**, never on row existence. Any new writer to this
+  table must be checked against this.
 - **Verify a deploy by its EFFECT, not its output.** `git pull` prints `Updating <old>..<new>`
   AFTER an abort error, so `| tail -2` looks like success. Check `git log --oneline -1` on the
   droplet, or grep the built bundle.
@@ -68,6 +73,63 @@ Broward images harvested **658**, extracted **589**. Everything deployed; drople
 - **A full `normalize.py` run is ~80 minutes**, not the ~15 this log claimed for years.
 - The shell cwd drifts to the PARENT directory, which holds a 0-byte `prod_snapshot.db` decoy —
   use absolute paths in backgrounded commands.
+
+---
+
+## 2026-08-15 (later) — 🚨 70% of Miami-Dade was never extracted. Two jobs fighting over one table.
+
+**Found because the user looked at the Reporting page and asked why Property / Folio / Loan Amt /
+Signatory were empty on every row.** They were empty because the data does not exist.
+
+### The bug
+`batch_extract_facility.py` writes a `pdf_extractions` row the moment it has a FACILITY verdict —
+`status='OK'`, `ocr_chars=0`, none of the main fields. `extract_pdfs.pending_documents()` selected
+work with **`px.cfn IS NULL`**. So any document the facility backfill reached first became
+**permanently invisible** to the main extractor. Not skipped-and-retried — invisible, forever.
+
+**Damage: 50,042 of 71,366 Miami-Dade documents (70%).** No property address, folio, loan amount,
+signatory, doc_category, or document-derived parties for any of them. Broward is untouched (its
+facility detection has found nothing, so nothing claimed its rows).
+
+**Started 2026-07-22** — the day the full-history facility backfill was launched. It raced ahead
+through the corpus and locked the main extractor out behind it.
+
+### Why it hid for three weeks
+Every poisoned row says `status = 'OK'`. No error, no log line, nothing in the Collection Log,
+nothing in any banner. **The only symptom anywhere was empty columns in the UI.** The pipeline
+believed it had succeeded 50,042 times.
+
+Two false leads worth recording so nobody re-walks them:
+- `ocr_chars = 0` on all of them looks exactly like "OCR is broken". It is not — the facility path
+  simply never passes `ocr_chars` to `save_facility()`. Running the full download → pdftoppm →
+  tesseract chain by hand on a 13 Aug document gave **3,296 chars, clean**.
+- Broward extracting ~4,000 chars/doc the same morning proves the toolchain is fine.
+
+### The discriminator
+**`raw_json IS NULL`.** The main extractor always stores the model response; the facility path never
+does. On production: 22,115 rows with `raw_json` → all 22,115 have `doc_category` and OCR text;
+50,042 without → none do. Zero overlap. Now the basis of `pending_documents`, which makes the weekly
+job self-healing. Error rows stay excluded (they also lack `raw_json`) so a run does not become a
+retry of documents the clerk cannot serve.
+
+### The repair — running now
+Measured **11.85 s/doc sequential** → ~7 days for 50k. Unacceptable, so `--workers` was added:
+workers do fetch/OCR/LLM, **all DB writes stay on the main thread** (SQLite takes one writer; the
+pool exists to hide latency). Measured **2.80 s/doc at 4 workers — 1,286 docs/hr, 4.2×**.
+
+Hardened first, because a multi-day run has different failure economics than a cron run:
+`busy_timeout` 5s → **120s** (normalize.py commits its whole rebuild in one transaction at the end of
+an ~80-minute run; a 5s writer gets "database is locked"), and `save()` now retries 3× then skips
+that one document rather than ending a run with 20+ hours behind it.
+
+Launched 2026-08-15 19:29 UTC, `nohup` + `disown`, **PPID 1 verified**, log
+`collector/main_backfill.log`. 49,972 documents, `--budget 45`. **Cost ~$25** at the measured
+$0.000508/doc — note this is 2 LLM calls per document, not 1.
+
+### The lesson
+**"Has a row" is not "has been done."** Two writers shared one table with no shared notion of what
+"done" meant, and the cheaper job's bookkeeping silently satisfied the expensive job's precondition.
+Any future job writing to `pdf_extractions` must be checked against this.
 
 ---
 
