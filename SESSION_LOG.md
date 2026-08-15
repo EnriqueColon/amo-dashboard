@@ -15,6 +15,9 @@ Read this at the start of a session before re-deriving context. Most recent entr
 | Broward | 42,559 | 374 | 157 | 280 | 2023-01-03 → 2026-08-05 |
 | All | 113,393 | 51,799 | 20,367 | 24,640 | 2023-01-03 → 2026-08-06 |
 
+As of 2026-08-15 the forward pipeline has carried this to **114,127 filings / 52,342 clean**
+(Broward 42,761 · Miami-Dade 71,366) — measured from the backup snapshot, so the crons are working.
+
 Broward images harvested **658**, extracted **589**. Everything deployed; droplet `git status` is
 **clean**; `origin/main` is current.
 
@@ -70,9 +73,15 @@ Broward images harvested **658**, extracted **589**. Everything deployed; drople
 
 ## 2026-08-15 — Automated backups built (next-step #3). Facility rows checked. Env confirmed.
 
-Worked the engineering next-steps from Confluence §7.6. **Nothing has been deployed to the droplet
-yet** — code is committed and pushed, the droplet still needs `rclone`, the cron line, and the
-Spaces credentials.
+Worked the engineering next-steps from Confluence §7.6. **Deployed and live**: pulled, built,
+restarted, `rclone` installed, cron installed, first run done by hand. The droplet's `git status` is
+still clean. The one thing still missing is the **Spaces credential** — until it exists the job
+reports `local_only` and the Overview shows amber.
+
+**Production first run:** 114,127 assignments, 138MB → **29.7MB gzipped in 16 seconds**.
+**Restore round-trip verified from that real archive** — `integrity_check` ok, `journal_mode` delete,
+assignments 114,127 and clean 52,342 both matching live exactly, Broward 42,761 / Miami-Dade 71,366.
+That restore test is the point: everything before it is a hypothesis.
 
 ### `collector/run_backup.sh` — the main deliverable
 Nightly 03:15 UTC (the only window that collides with nothing — normalize owns 08:30–~09:50,
@@ -113,15 +122,20 @@ Restore round-trip verified from a rotated archive: `integrity_check` ok, row co
 Every run writes a row; `/api/stats` returns `backup_health`; the Overview shows red when there has
 been no **successful** run in 48h, amber when snapshots are fine but not reaching off-box storage.
 
-**Staleness is measured against the last SUCCESS, not the last run** — the failure this is built to
-catch is a job that keeps running and keeps not working. Three distinct red messages, because they
-need three different responses: never ran (not installed) · ran but never succeeded (installed and
-failing — the one that most looks healthy) · was succeeding, now stale (broke recently).
+**The states are split by what the operator has to DO, not by severity** — and getting that wrong
+was the one design mistake of the session, caught by looking at the deployed result rather than the
+code. First cut keyed red on "has there ever been a successful run", which meant production — where
+the job snapshots, verifies and rotates perfectly but has no Space to upload to — screamed red with
+the message "running but has never completed successfully". That is crying wolf every single day
+over a missing credential, and a banner that is always red is a banner nobody reads.
 
-All three states plus the healthy no-banner state verified in the browser by writing rows into the
-dev DB. Test rows deleted afterwards. `backup_runs` is declared defensively in `server/db.ts`, same
-reasoning as `broward_images`: the server must start against a database no backup has touched —
-**including a freshly restored one.**
+Corrected: **red** = absent, errored, or hasn't run in 48h (someone must go fix it) · **amber** =
+working but not off-box (someone must add a credential) · nothing = fine. Five states verified
+against the API and in the browser: no rows · recent `local_only` · last run `failed` · `ok` but 3
+days old · recent `ok`. Test rows deleted afterwards.
+
+`backup_runs` is declared defensively in `server/db.ts`, same reasoning as `broward_images`: the
+server must start against a database no backup has touched — **including a freshly restored one.**
 
 ### The two flagged facility rows — one is wrong, one is fine
 - `2026R268269` **confirmed false positive.** SBA 504 debenture, a single $449,560 term loan on one

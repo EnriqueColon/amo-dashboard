@@ -856,7 +856,7 @@ use case ever returns.
 | Miami-Dade portal changes its markup | Collection stops | Failures surface in `collection_log` and the Collection Log page |
 | Data changed without clearing the cache | Stale dashboard for up to 7 days | Nightly restart; `POST /api/cache/bust` |
 | Single droplet, single SQLite file | Total loss on host failure | Manual `.backup` before every data change; **nightly automated snapshot since 15 Aug 2026, verified and rotated — but still on the same host until Spaces credentials are added** (§7.4 item 8a) |
-| Backups run but silently stop working | False confidence — the failure is only discovered when a restore is attempted | Every run records status in `backup_runs`; the Overview raises a red banner when no *successful* run in 48h, and distinguishes "never ran", "never succeeded" and "stopped succeeding". Snapshots are integrity-checked and row-count-asserted before they may rotate an older one away |
+| Backups run but silently stop working | False confidence — the failure is only discovered when a restore is attempted | Every run records status in `backup_runs`. The Overview shows **red** when the job is absent, errored, or has not run in 48h, and **amber** when it is working but not reaching off-box storage. Snapshots are integrity-checked and row-count-asserted before they may rotate an older one away |
 | Weak default password | Unauthorised access | `AMO_PASSWORD`/`AMO_SECRET` must be set in the production `.env` |
 
 ### 7.6 Recommended next steps

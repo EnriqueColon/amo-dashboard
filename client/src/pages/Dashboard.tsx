@@ -182,17 +182,16 @@ export default function Dashboard() {
         >
           <AlertCircle size={14} className="mt-0.5 shrink-0 text-red-500" />
           <span>
-            {/* Three distinct states, because they need three different
-                responses. Never run = the job is not installed. Run but never
-                succeeded = it is installed and failing, which is the one that
-                most looks like it is working. Was succeeding, now stale = it
-                broke recently. */}
+            {/* Three distinct red states, because they need three different
+                responses: the job is not installed · it ran and errored · it
+                stopped running at all. "Working but not off-box" is amber and
+                handled by the banner below, not here. */}
             <span className="font-medium">
               {backup?.never_run
-                ? 'No off-box backup has ever run.'
-                : backup?.last_good_at == null
-                  ? 'The backup job is running but has never completed successfully.'
-                  : `No successful backup in ${Math.floor((backup.hours_since_good ?? 0) / 24)} days.`}
+                ? 'No backup has ever run.'
+                : backup?.last_status === 'failed'
+                  ? 'The nightly backup is failing.'
+                  : `No backup has run in ${Math.floor((backup?.hours_since_run ?? 0) / 24)} days.`}
             </span>{' '}
             Everything here lives on one droplet, and the Broward document images cannot be
             re-harvested once the feed rolls past its ten-day window.
@@ -211,7 +210,8 @@ export default function Dashboard() {
           <span>
             <span className="font-medium">Backups are running, but staying on the droplet.</span>{' '}
             The nightly snapshot is being taken and verified, yet it is not reaching off-box
-            storage — so a host failure would still take the data with it.
+            storage — so a host failure would still take the data with it, including the Broward
+            images that cannot be re-harvested.
             {backup?.last_detail && <> Reason given: “{backup.last_detail}”.</>}
           </span>
         </div>
