@@ -254,7 +254,29 @@ def pending_documents(conn: sqlite3.Connection, limit: int, retry_errors: bool,
     elif retry_errors:
         status_clause = "(px.cfn IS NULL OR px.status != 'OK')"
     else:
-        status_clause = "px.cfn IS NULL"
+        # "No row yet" is NOT the same as "never extracted", and treating them as
+        # the same silently lost 50,042 Miami-Dade documents between 22 Jul and
+        # 15 Aug 2026.
+        #
+        # batch_extract_facility.py writes a pdf_extractions row as soon as it
+        # has a FACILITY verdict, with status='OK' and none of the main fields.
+        # The old clause here was `px.cfn IS NULL`, so the moment the facility
+        # backfill reached a document first, that document became invisible to
+        # this extractor permanently — no property address, folio, loan amount,
+        # signatory, doc_category or document-derived parties, ever. The rows
+        # looked complete from every angle: status OK, no error, nothing in any
+        # log. The only visible symptom was empty columns in the UI.
+        #
+        # raw_json is the honest test. This extractor always stores the model's
+        # response; the facility path never does. Verified on production: of
+        # 22,115 rows with raw_json, 22,115 have doc_category and OCR text; of
+        # 50,042 without it, none do.
+        #
+        # Error rows are deliberately still excluded — they also lack raw_json,
+        # and picking them up here would silently turn every run into a retry of
+        # documents the clerk genuinely cannot serve. That stays behind
+        # --retry-errors, as before.
+        status_clause = "(px.cfn IS NULL OR (px.status = 'OK' AND px.raw_json IS NULL))"
 
     date_clause = f"AND a.rec_date >= '{since}'" if since else ""
     join_type   = "INNER" if redo else "LEFT"
