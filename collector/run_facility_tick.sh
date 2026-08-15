@@ -24,6 +24,25 @@ set -u
 cd /opt/amo-dashboard/collector
 source /opt/amo-dashboard/.env
 
+# ── Stand aside while a main extraction backfill is running ──────────────────
+# Both jobs download from the same Miami-Dade clerk endpoint and OCR on the same
+# 4 cores. On 2026-08-15, with the 50k repair backfill holding the portal, this
+# tick failed 10 out of 10 documents with read timeouts — burning CPU and
+# connections to accomplish nothing, and slowing the backfill while doing it.
+#
+# The tick was paused in crontab that day, which worked but created the worse
+# problem: a disabled cron nobody remembers to re-enable. This check is the
+# durable version — the cron entry stays live, and the tick simply yields for as
+# long as a backfill is running, then resumes on its own with no human step.
+#
+# Deliberately narrow: it matches the main extractor only. A tick skipped here
+# costs nothing, because the state machine is resume-safe by design and the next
+# tick is 20 minutes away.
+if pgrep -f "[e]xtract_pdfs.py" >/dev/null 2>&1; then
+    echo "$(date -u +%FT%TZ) main extraction backfill is running — skipping this tick"
+    exit 0
+fi
+
 # --max-concurrent 4 sized for the 4 vCPU / 8GB droplet (resized 2026-07-21);
 # OCR workers auto-scale to os.cpu_count() capped at 4. On a smaller box,
 # drop this back to 2.
