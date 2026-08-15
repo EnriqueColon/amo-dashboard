@@ -44,7 +44,9 @@ import re
 import sqlite3
 import subprocess
 import tempfile
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import requests
 
@@ -79,6 +81,7 @@ PRICE_INPUT_PER_M  = 0.10
 PRICE_OUTPUT_PER_M = 0.40
 
 _spend = {'input_tokens': 0, 'output_tokens': 0, 'cost_usd': 0.0}
+_spend_lock = threading.Lock()
 
 VALID_CATEGORIES = {'LOAN_TRANSFER', 'RENTS_LEASES', 'COLLATERAL', 'OTHER'}
 VALID_FACILITY_TYPES = {'warehouse_or_revolving_credit_facility', 'syndicated_credit_agreement',
@@ -540,10 +543,15 @@ def postprocess_facility(raw: dict) -> dict:
 def _track_spend(usage: dict):
     in_tok  = usage.get('prompt_tokens', 0)
     out_tok = usage.get('completion_tokens', 0)
-    _spend['input_tokens']  += in_tok
-    _spend['output_tokens'] += out_tok
-    _spend['cost_usd'] += (in_tok  * PRICE_INPUT_PER_M  / 1_000_000
-                           + out_tok * PRICE_OUTPUT_PER_M / 1_000_000)
+    # Locked because --workers runs several documents at once and `+=` on a dict
+    # value is read-modify-write, not atomic. An undercounted total here would
+    # under-report spend against --budget, which is the one counter that is
+    # supposed to be able to stop the run.
+    with _spend_lock:
+        _spend['input_tokens']  += in_tok
+        _spend['output_tokens'] += out_tok
+        _spend['cost_usd'] += (in_tok  * PRICE_INPUT_PER_M  / 1_000_000
+                               + out_tok * PRICE_OUTPUT_PER_M / 1_000_000)
 
 
 def llm_extract(ocr_text: str) -> dict | None:
@@ -680,8 +688,89 @@ def save_facility(conn, cfn, rec_book, rec_page, status, data=None, ocr_chars=0)
 
 # ── Main loop ─────────────────────────────────────────────────────────────────
 
+def process_one(cfn: str, rec_book: str, rec_page: str, doc_county: str) -> tuple:
+    """Everything slow for one document: fetch, OCR, both LLM calls.
+
+    Touches no database and no shared state, so it is safe to run in a thread
+    pool. Returns (cfn, rec_book, rec_page, doc_county, status, data, ocr_chars,
+    note) for the caller to persist — writes stay on the main thread, because
+    SQLite takes one writer and the pool exists to hide network and OCR latency,
+    not to parallelise the database.
+    """
+    with tempfile.TemporaryDirectory() as workdir:
+        try:
+            text = fetch_document_text(doc_county, cfn, rec_book, rec_page, workdir)
+        except FileNotFoundError as e:
+            return (cfn, rec_book, rec_page, doc_county, 'DOWNLOAD_ERROR', None, 0,
+                    f'source unavailable: {e}')
+        except Exception as e:
+            return (cfn, rec_book, rec_page, doc_county, 'OCR_ERROR', None, 0,
+                    f'fetch/OCR failed: {e}')
+
+        if len(text) < 80:
+            return (cfn, rec_book, rec_page, doc_county, 'OCR_ERROR', None, len(text),
+                    f'OCR produced only {len(text)} chars')
+
+        try:
+            data = llm_extract(text)
+            data.update(llm_extract_facility(text))
+        except Exception as e:
+            return (cfn, rec_book, rec_page, doc_county, 'LLM_ERROR', None, len(text),
+                    f'LLM failed: {e}')
+
+        return (cfn, rec_book, rec_page, doc_county, 'OK', data, len(text), None)
+
+
+def run_parallel(docs: list, conn, workers: int):
+    """Same work as run()'s loop, `workers` documents at a time.
+
+    Sized for the droplet's 4 vCPUs. Each document is ~12s of which most is
+    waiting — two OpenAI round trips and a clerk download — so the pool mostly
+    buys back idle time rather than competing for CPU. tesseract is already
+    pinned to one thread per process (see ocr_pdf), which is what makes stacking
+    them safe.
+    """
+    counts = {'OK': 0, 'DOWNLOAD_ERROR': 0, 'OCR_ERROR': 0, 'LLM_ERROR': 0}
+    categories: dict = {}
+    done = 0
+    started = time.time()
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [pool.submit(process_one, cfn, rb, rp, c)
+                   for cfn, rb, rp, _rec_date, c in docs]
+        for fut in futures:
+            cfn, rb, rp, dc, status, data, ocr_chars, note = fut.result()
+            if note:
+                print(f'  {cfn} ({dc}) {note}', flush=True)
+            save(conn, cfn, rb, rp, status, data, ocr_chars, county=dc)
+            counts[status] += 1
+            if data:
+                cat = data.get('doc_category')
+                categories[cat] = categories.get(cat, 0) + 1
+
+            done += 1
+            if done % 50 == 0 or done == len(docs):
+                rate = done / max(time.time() - started, 1)
+                remaining = (len(docs) - done) / rate if rate else 0
+                print(f'  [{done}/{len(docs)}] ok={counts["OK"]} '
+                      f'dl_err={counts["DOWNLOAD_ERROR"]} ocr_err={counts["OCR_ERROR"]} '
+                      f'llm_err={counts["LLM_ERROR"]} '
+                      f'{rate*3600:.0f}/hr eta={remaining/3600:.1f}h '
+                      f'spend=${_spend["cost_usd"]:.2f}/${BUDGET_USD:.2f}', flush=True)
+
+            # Budget is checked here, not in the workers, so the decision is made
+            # in one place against a total that is already committed to the DB.
+            if _spend['cost_usd'] >= BUDGET_USD:
+                print(f'Budget ${BUDGET_USD:.2f} reached — cancelling remaining work.')
+                for f in futures:
+                    f.cancel()
+                break
+
+    return counts, categories
+
+
 def run(limit: int, retry_errors: bool, since: str | None = None, redo: bool = False,
-        county: str | None = None):
+        county: str | None = None, workers: int = 1):
     if not OPENAI_KEY:
         raise SystemExit('OPENAI_API_KEY is not set')
 
@@ -696,6 +785,15 @@ def run(limit: int, retry_errors: bool, since: str | None = None, redo: bool = F
     breakdown = ', '.join(f'{c}={n}' for c, n in sorted(by_county.items()))
     print(f'Pending documents{scope}: {len(docs)} (limit {limit})'
           + (f' — {breakdown}' if breakdown else ''))
+
+    if workers > 1:
+        counts, categories = run_parallel(docs, conn, workers)
+        print(f'\nDone. {counts}')
+        print(f'LLM spend: ${_spend["cost_usd"]:.4f} '
+              f'({_spend["input_tokens"]:,} in / {_spend["output_tokens"]:,} out tokens)')
+        if categories:
+            print(f'Categories: {categories}')
+        return
 
     counts = {'OK': 0, 'DOWNLOAD_ERROR': 0, 'OCR_ERROR': 0, 'LLM_ERROR': 0}
     categories: dict = {}
@@ -778,6 +876,12 @@ if __name__ == '__main__':
     p.add_argument('--budget', type=float, default=None,
                    help=f'max LLM spend in USD for this run (default {BUDGET_USD}, '
                         'or OPENAI_BUDGET_USD env var)')
+    p.add_argument('--workers', type=int, default=1,
+                   help='documents processed concurrently (default 1). '
+                        'Most of a document is spent waiting on the clerk and '
+                        'two OpenAI calls, so 4 on the 4-vCPU droplet is roughly '
+                        '4x throughput. Left at 1 by default so the cron jobs '
+                        'behave exactly as before.')
     p.add_argument('--county', type=str, default=None,
                    help="restrict to one county, e.g. 'BROWARD' or 'MIAMI-DADE' "
                         '(default: all counties, newest documents first)')
@@ -785,4 +889,5 @@ if __name__ == '__main__':
     if args.budget is not None:
         BUDGET_USD = args.budget
     run(args.limit, args.retry_errors, since=args.since, redo=args.redo,
-        county=args.county.upper() if args.county else None)
+        county=args.county.upper() if args.county else None,
+        workers=max(1, args.workers))
