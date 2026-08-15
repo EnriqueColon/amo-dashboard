@@ -28,6 +28,40 @@ Broward images harvested **658**, extracted **589**. Everything deployed; drople
     weekly Fri 06:00  run_weekly.sh          Miami-Dade collect + extract
     every 20 min      run_facility_tick.sh   facility batch backfill
 
+### ⏳ IN FLIGHT — the 50k repair backfill (started 2026-08-15 19:38 UTC)
+
+Re-extracting the 49,845 Miami-Dade documents the facility job locked out (full entry below).
+**Runs entirely on the droplet.** Verified detached: **PPID 1**, no login session attached, so
+closing a laptop, dropping SSH or ending a Claude session has **no effect** on it. Same for all five
+crons, the cron daemon and PM2 — nothing in this pipeline depends on a local machine.
+
+    process   extract_pdfs.py --county MIAMI-DADE --limit 60000 --workers 8 --budget 45
+    log       /opt/amo-dashboard/collector/main_backfill.log
+    rate      ~1,495 docs/hr, 0 errors
+    finish    Mon 2026-08-17 ~05:00 UTC (~01:00 ET)
+
+**Check it in one command:**
+
+    ssh root@165.22.35.75 'pgrep -f "[e]xtract_pdfs.py" >/dev/null && echo RUNNING || echo STOPPED; \
+      sqlite3 /opt/amo-dashboard/miami_dade_amo.db "SELECT COUNT(*) FROM pdf_extractions WHERE status=\"OK\" AND raw_json IS NULL;"'
+
+Second number is documents left. **0 = repair complete.** Or run
+`collector/tests/check_extraction_completeness.py`, which fails with a shrinking count until then.
+
+**Nothing to do when it finishes.** Monday's 08:30 UTC normalize lands ~3.5h later, rebuilds the
+derived tables and restarts PM2 to clear the cache. Budget **2–2.5h** for that run, not the usual
+85 min — it will process ~72k extracted Miami-Dade documents instead of ~22k. **Expect entity
+counts, rankings and classifications to shift** once 50k documents contribute document-derived
+party names for the first time; that is the repair landing, not a regression.
+
+If it is STOPPED with documents still remaining, just relaunch — completed work is committed as it
+goes and the restart re-selects whatever is left:
+
+    ssh root@165.22.35.75 'cd /opt/amo-dashboard/collector && nohup bash -c \
+      "source /opt/amo-dashboard/.env && exec ./.venv/bin/python3 -u extract_pdfs.py \
+      --county MIAMI-DADE --limit 60000 --workers 8 --budget 45" \
+      >> /opt/amo-dashboard/collector/main_backfill.log 2>&1 & disown'
+
 ### The three decisions that shape everything
 1. **Broward history is index-only, by decision.** 2023–2025 has filings/parties/dates but no
    document-derived data. The portal is Cloudflare-gated (403 to every non-browser client,
@@ -41,9 +75,23 @@ Broward images harvested **658**, extracted **589**. Everything deployed; drople
 ### Open items — all need the USER, not the assistant
 - 🔴 **Leaked GitHub PAT in `.git/config`**, this Mac and the droplet. Repo is PUBLIC. Open since
   2026-08-04, oldest item on the list. Revoke → check security log → SSH remote / deploy key.
-- 🔑 **Create a DigitalOcean Space + access key** so the nightly backup actually goes off-box.
-  The job runs and verifies, but reports `local_only` until the six `.env` lines exist
-  (Confluence §7.4 item 8a). Backing up to the same disk does not address the risk. ~$5/mo.
+- 🔑 **Finish wiring the DigitalOcean Space** — user is doing this 2026-08-16. The Space itself is
+  **created** (NYC3, same region as the droplet, Restrict listing, CDN off). Still to do:
+  generate a Spaces access key, then add six lines to `/opt/amo-dashboard/.env`:
+
+      export BACKUP_REMOTE=spaces:<space-name>
+      export RCLONE_CONFIG_SPACES_TYPE=s3
+      export RCLONE_CONFIG_SPACES_PROVIDER=DigitalOcean
+      export RCLONE_CONFIG_SPACES_ENDPOINT=nyc3.digitaloceanspaces.com
+      export RCLONE_CONFIG_SPACES_ACCESS_KEY_ID=<key>
+      export RCLONE_CONFIG_SPACES_SECRET_ACCESS_KEY=<secret>
+
+  **`export` is mandatory** — rclone is a child process and cannot see unexported vars. No quotes,
+  no spaces around `=`. Edit with `nano`, not a shell command, so the secret misses shell history.
+  Until this exists the job reports `local_only` and the Overview shows amber; **backups are being
+  taken and verified, but to the same disk they are protecting.** rclone is already installed.
+  Verify after with `collector/run_backup.sh` — it prints `status=ok` and uploads to `<space>/db/`
+  plus a one-off ~97MB image sync. A wrong credential fails loudly rather than silently.
 - 📞 **Bulk image order** (above) — would also close the Jan–Jun 2026 index gap.
 - 🟡 69 orphaned Broward images from 2026-07-21 (harvested before their index rows; no
   `assignments` row, so never extractable).
