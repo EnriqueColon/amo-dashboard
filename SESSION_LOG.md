@@ -126,6 +126,26 @@ Launched 2026-08-15 19:29 UTC, `nohup` + `disown`, **PPID 1 verified**, log
 `collector/main_backfill.log`. 49,972 documents, `--budget 45`. **Cost ~$25** at the measured
 $0.000508/doc — note this is 2 LLM calls per document, not 1.
 
+**Worker count was tuned by measurement, and the intuition was wrong.** At 4 workers `top` showed
+94.5% user / 0.1% idle, which reads as a saturated box — the call was that more workers would only
+timeshare the same 4 vCPUs. Measured instead:
+
+    4 workers    879 docs/hr    ETA 56.7h   (Tuesday)
+    8 workers  1,397 docs/hr    ETA 35.6h   (Monday ~03:00 ET)   ← running
+
+**59% faster with zero fetch failures.** High `%us` is not the same as a saturated pipeline: most of
+each document is network wait (one clerk download, two OpenAI calls), so more in-flight documents
+keep tesseract fed rather than competing with it. Do not size this pool from a CPU percentage —
+measure throughput.
+
+Held at 8 rather than pushed further: the facility tick was already getting clerk read timeouts, so
+the portal throttles somewhere above this, and 35.6h already clears the deadline with margin for the
+two nightly normalize runs inside the window.
+
+**The facility tick is PAUSED** (crontab, commented with the reason). It was failing 10/10 with
+clerk read timeouts while the backfill held the portal. **Re-enable when the backfill finishes** —
+41,980 documents still need facility analysis.
+
 ### The lesson
 **"Has a row" is not "has been done."** Two writers shared one table with no shared notion of what
 "done" meant, and the cheaper job's bookkeeping silently satisfied the expensive job's precondition.
