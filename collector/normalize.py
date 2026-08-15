@@ -835,8 +835,17 @@ def canonicalize(name: str) -> str:
 
 
 def build_normalized_tables():
-    conn = sqlite3.connect(DB)
+    # timeout/busy_timeout rather than python's 5s default. This rebuild ends in
+    # ONE large commit, and it has to take the write lock to do it. Any other
+    # writer active at that moment — the facility tick, or an extraction
+    # backfill writing a row every couple of seconds — makes a 5s limit a
+    # coin toss, and losing it raises "database is locked" and throws away the
+    # whole ~85-minute run. run_nightly_normalize.sh then correctly skips the
+    # PM2 restart, so the symptom is simply that the dashboard silently does not
+    # refresh that night.
+    conn = sqlite3.connect(DB, timeout=300)
     conn.execute('PRAGMA journal_mode=WAL')
+    conn.execute('PRAGMA busy_timeout=300000')
 
     # ── Step 0a: Load user-managed merges so canonicalize() honors them ─────
     n_aliases = load_aliases(conn)
@@ -1487,7 +1496,8 @@ def build_normalized_tables():
     print("\nNormalization complete.")
 
     # ── Quick validation ──────────────────────────────────────────────────────
-    conn2 = sqlite3.connect(DB)
+    conn2 = sqlite3.connect(DB, timeout=300)
+    conn2.execute('PRAGMA busy_timeout=300000')
     print("\n=== Validation ===")
     print("Top 10 acquirers (inbound):")
     for r in conn2.execute("SELECT entity, inbound_vol, entity_type FROM entity_nodes ORDER BY inbound_vol DESC LIMIT 10").fetchall():
