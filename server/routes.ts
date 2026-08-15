@@ -180,6 +180,19 @@ export async function registerRoutes(httpServer: Server, app: Express) {
              CAST((julianday('now') - julianday(MAX(harvested_at))) * 24 AS INTEGER) AS hours_since
       FROM broward_images
     `),
+    lastBackup:          db.prepare(`
+      SELECT finished_at, status, remote, detail,
+             CAST((julianday('now') - julianday(finished_at)) * 24 AS INTEGER) AS hours_since
+      FROM backup_runs
+      ORDER BY id DESC LIMIT 1
+    `),
+    lastGoodBackup:      db.prepare(`
+      SELECT finished_at,
+             CAST((julianday('now') - julianday(finished_at)) * 24 AS INTEGER) AS hours_since
+      FROM backup_runs
+      WHERE status = 'ok'
+      ORDER BY id DESC LIMIT 1
+    `),
     monthsByCounty:      db.prepare(`
       SELECT COALESCE(county, '${DEFAULT_COUNTY}') AS county,
              substr(rec_date, 1, 7)               AS month,
@@ -316,8 +329,31 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       broward_stale: bh?.last_harvest != null && (bh.hours_since ?? 0) > 48,
     };
 
+    // Backup health. Same 48h threshold and the same reasoning as above — the
+    // job is daily, so one miss is a blip and two is a pattern.
+    //
+    // Staleness is measured against the last SUCCESSFUL run, not the last run,
+    // because the failure mode this is built to catch is a job that keeps
+    // running and keeps not working. `last_status` is reported separately so a
+    // run that took a good local snapshot but could not reach the remote
+    // (status `local_only`) is visible as its own, lesser problem rather than
+    // being flattened into either "fine" or "broken".
+    const lastBk = stmts.lastBackup.get() as any;
+    const goodBk = stmts.lastGoodBackup.get() as any;
+    const backup_health = {
+      last_run_at:     lastBk?.finished_at ?? null,
+      last_status:     lastBk?.status ?? null,
+      last_detail:     lastBk?.detail || null,
+      last_good_at:    goodBk?.finished_at ?? null,
+      hours_since_good: goodBk?.hours_since ?? null,
+      // Null last_good covers "never backed up", which is the same red as
+      // "stopped backing up" — in both cases there is no off-box copy.
+      stale:           goodBk?.finished_at == null || (goodBk.hours_since ?? 0) > 48,
+      never_run:       lastBk?.finished_at == null,
+    };
+
     const unique_cfns = total;
-    const payload = { total, unique_cfns, unique_entities, self_assigns, min_date, max_date, unique_grantors, unique_grantees, private_credit_txns, market_transfers, txn_breakdown, collection_log_count, last_collected, clean_total, coverage_gaps, collection_health };
+    const payload = { total, unique_cfns, unique_entities, self_assigns, min_date, max_date, unique_grantors, unique_grantees, private_credit_txns, market_transfers, txn_breakdown, collection_log_count, last_collected, clean_total, coverage_gaps, collection_health, backup_health };
     setCached(KEY, payload, STATS_TTL_MS);
     res.json(payload);
   });

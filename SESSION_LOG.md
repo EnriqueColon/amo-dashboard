@@ -4,7 +4,7 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
-## ▶ CURRENT STATE — as of 2026-08-11 (read this first)
+## ▶ CURRENT STATE — as of 2026-08-15 (read this first)
 
 **Both counties are live end to end.** Broward went from nothing to fully integrated between
 6 and 11 Aug 2026: index → images → extraction → normalization → county-scoped UI.
@@ -19,6 +19,7 @@ Broward images harvested **658**, extracted **589**. Everything deployed; drople
 **clean**; `origin/main` is current.
 
 ### Crons (all live)
+    nightly 03:15 UTC run_backup.sh          verified snapshot + rotation + Spaces  (NEW 08-15)
     daily 12:30 UTC   run_broward_daily.sh   index + images + extraction  (BROWARD_INGEST_INDEX=1)
     nightly 08:30     run_nightly_normalize  normalize + PM2 cache bust   (~80 min at current scale)
     weekly Fri 06:00  run_weekly.sh          Miami-Dade collect + extract
@@ -37,13 +38,16 @@ Broward images harvested **658**, extracted **589**. Everything deployed; drople
 ### Open items — all need the USER, not the assistant
 - 🔴 **Leaked GitHub PAT in `.git/config`**, this Mac and the droplet. Repo is PUBLIC. Open since
   2026-08-04, oldest item on the list. Revoke → check security log → SSH remote / deploy key.
+- 🔑 **Create a DigitalOcean Space + access key** so the nightly backup actually goes off-box.
+  The job runs and verifies, but reports `local_only` until the six `.env` lines exist
+  (Confluence §7.4 item 8a). Backing up to the same disk does not address the risk. ~$5/mo.
 - 📞 **Bulk image order** (above) — would also close the Jan–Jun 2026 index gap.
-- 🟡 **Two facility rows to sanity-check:** `2026R268269` (reads like a routine SBA renewal,
-  possible false positive) and `2026R277453` (grantor extracted as the literal string `"Lender"`).
 - 🟡 69 orphaned Broward images from 2026-07-21 (harvested before their index rows; no
   `assignments` row, so never extractable).
 - 🟡 Broward facility detection has found **0** real facilities in 589 documents. Miami-Dade's rate
   predicts ~3–4 at that sample size, so plausible rather than broken — recheck as volume grows.
+- ✅ The two flagged facility rows were checked 2026-08-15 — see the entry below. One is a
+  confirmed false positive; the other is real with two bad fields.
 
 ### Traps that have bitten repeatedly — read before deploying
 - **Verify a deploy by its EFFECT, not its output.** `git pull` prints `Updating <old>..<new>`
@@ -61,6 +65,86 @@ Broward images harvested **658**, extracted **589**. Everything deployed; drople
 - **A full `normalize.py` run is ~80 minutes**, not the ~15 this log claimed for years.
 - The shell cwd drifts to the PARENT directory, which holds a 0-byte `prod_snapshot.db` decoy —
   use absolute paths in backgrounded commands.
+
+---
+
+## 2026-08-15 — Automated backups built (next-step #3). Facility rows checked. Env confirmed.
+
+Worked the engineering next-steps from Confluence §7.6. **Nothing has been deployed to the droplet
+yet** — code is committed and pushed, the droplet still needs `rclone`, the cron line, and the
+Spaces credentials.
+
+### `collector/run_backup.sh` — the main deliverable
+Nightly 03:15 UTC (the only window that collides with nothing — normalize owns 08:30–~09:50,
+Broward 12:30, weekly Friday 06:00). Snapshot → un-WAL → verify → gzip → upload → rotate 7.
+
+**Design points that are not obvious:**
+- **`sqlite3 .backup`, never `cp`.** Online backup API, so it is consistent against the live app and
+  the overlapping 20-minute facility tick. A byte copy of a WAL-mode database with a 70MB `-wal` is
+  exactly the corrupt-restore trap this job exists to avoid.
+- **Two independent verifications before anything rotates.** `integrity_check` catches structural
+  damage; a `COUNT(*) FROM assignments` assertion catches the subtler disaster — a *valid, empty*
+  SQLite file, which `integrity_check` happily calls "ok". Rotation runs last and only over
+  verified archives, so a bad run can never age out the good snapshots it failed to replace.
+- **`local_only` is a distinct status, not a failure.** No credentials / no rclone still produces a
+  good verified local snapshot; it just says so, and the UI shows amber rather than red.
+- **rclone `copy`, never `sync`, for the images.** `sync` mirrors deletions, and these are the only
+  copies of images the feed no longer serves.
+- **rclone configured entirely by env vars** in `.env` — no `rclone.conf`, so the credential lives
+  in exactly one already-gitignored place.
+
+### Three bugs caught by testing it, not by reading it
+Built a WAL-mode fixture with a *concurrent writer* rather than testing against an idle file:
+1. 🚨 **The status write lost a lock race and the error was swallowed** (`2>/dev/null`). A backup
+   that WORKED would have reported as missing and raised a false alarm on the Overview. Fixed with
+   `PRAGMA busy_timeout` on both the snapshot and the status write, and by no longer discarding
+   stderr. This is the failure mode that would have been believed.
+2. **Orphaned `-shm`/`-wal` sidecars, one pair per run, forever.** The snapshot inherits WAL mode, so
+   the verification reads re-create them, gzip archives only the `.db`, and the rotation glob
+   (`*.db.gz`) cannot see them. Rotation test: 3 archives kept, **10 sidecars left behind.** Fixed
+   at the root by putting the snapshot into `journal_mode=DELETE` — which also makes the archive
+   provably self-contained.
+3. **`.gitignore` `*.db` does NOT match `*.db.gz`.** Seven untracked archives would have appeared on
+   the droplet — the same `git status` noise that hid a blocked deploy for hours on 08-11.
+
+Restore round-trip verified from a rotated archive: `integrity_check` ok, row counts match.
+
+### Health surfacing — `backup_runs` + Overview banner
+Every run writes a row; `/api/stats` returns `backup_health`; the Overview shows red when there has
+been no **successful** run in 48h, amber when snapshots are fine but not reaching off-box storage.
+
+**Staleness is measured against the last SUCCESS, not the last run** — the failure this is built to
+catch is a job that keeps running and keeps not working. Three distinct red messages, because they
+need three different responses: never ran (not installed) · ran but never succeeded (installed and
+failing — the one that most looks healthy) · was succeeding, now stale (broke recently).
+
+All three states plus the healthy no-banner state verified in the browser by writing rows into the
+dev DB. Test rows deleted afterwards. `backup_runs` is declared defensively in `server/db.ts`, same
+reasoning as `broward_images`: the server must start against a database no backup has touched —
+**including a freshly restored one.**
+
+### The two flagged facility rows — one is wrong, one is fine
+- `2026R268269` **confirmed false positive.** SBA 504 debenture, a single $449,560 term loan on one
+  property, classified `warehouse_or_revolving_credit_facility` at `confidence = high`. Trigger was
+  probably "504 **Renewal** Note" in the evidence quote.
+- `2026R277453` **real, two bad fields.** Tower 36 Owner → Cirrus Real Estate Funding, ALR securing a
+  loan with a stated *maximum principal amount* — genuinely facility-shaped. But
+  `facility_lender_name` is empty (the document says only "Lender"; the real lender is the grantee),
+  and `facility_amount` is **$34.4M while its own evidence quote says $30M**.
+
+Class size: of 445 rows, 11 are `loan_amount` under $2M, 3 name SBA/504, 19 have no lender. Small,
+not systemic. **`facility_confidence` is confidence in the reading, not the classification** — both
+bad rows carry `high`. Audit on *incoherence between fields*, not on the confidence column.
+
+### Also
+- ✅ `AMO_PASSWORD` and `AMO_SECRET` confirmed present in the live PM2 env (next-step #5). Two
+  caveats stand: `ecosystem.config.cjs` has drifted from what PM2 holds, and the password in use is
+  short for a single shared gate with no lockout.
+- Login page still said "Miami-Dade County" — the 08-11 copy sweep covered the React app but not
+  this server-rendered page. Now county-neutral. Found by looking at the screen, not by grepping.
+- Broward facility detection still **0** in 589 documents.
+- 4 ad-hoc `backup_pre_*.db` files (~420MB) sit unrotated on the droplet. Keep
+  `backup_pre_broward_normalize.db` (ROLLBACK.md names it); the rest can go once copied off-box.
 
 ---
 

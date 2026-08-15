@@ -202,6 +202,24 @@ export function getDb(): Database.Database {
       );
     `);
 
+    // Written by collector/run_backup.sh, read here only for the backup-health
+    // signal on /api/stats. Declared defensively for the same reason as
+    // broward_images above: the server has to start on a database no backup has
+    // ever run against, including a freshly restored one.
+    _db.exec(`
+      CREATE TABLE IF NOT EXISTS backup_runs (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        started_at    TEXT,
+        finished_at   TEXT,
+        status        TEXT,
+        db_bytes      INTEGER,
+        archive_bytes INTEGER,
+        assignments   INTEGER,
+        remote        TEXT,
+        detail        TEXT
+      );
+    `);
+
     // Watchlist of market participants the user wants to monitor (Targets tab)
     _db.exec(`
       CREATE TABLE IF NOT EXISTS target_entities (

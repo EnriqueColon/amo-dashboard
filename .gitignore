@@ -29,3 +29,9 @@ collector/tests/name_system_disagreements.tsv
 collector/broward_collector.log
 collector/broward_images.log
 collector/broward_images/
+
+# Nightly snapshots from collector/run_backup.sh. Note `*.db` above does NOT
+# cover these — the archives are `.db.gz`, so without this line seven of them
+# sit untracked on the droplet and make `git status` noisy again.
+backups/
+collector/backup.log

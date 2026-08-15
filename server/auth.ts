@@ -148,7 +148,10 @@ function loginPage(error?: string): string {
       </svg>
       <div>
         <div class="logo-text">AMO Tracker</div>
-        <div class="logo-sub">Miami-Dade County · Assignment of Mortgages</div>
+        <!-- County-neutral: Broward went live 10 Aug 2026. The 11 Aug copy sweep
+             covered the React app but not this server-rendered page, so this was
+             still asserting a single county on the first screen anyone sees. -->
+        <div class="logo-sub">Public county records · Assignment of Mortgages</div>
       </div>
     </div>
     <h1>Sign in to continue</h1>

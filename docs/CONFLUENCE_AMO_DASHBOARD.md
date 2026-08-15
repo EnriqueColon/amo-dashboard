@@ -1,6 +1,6 @@
 # AMO Tracker — Mortgage Assignment Intelligence Dashboard
 
-> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 11 Aug 2026
+> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 15 Aug 2026
 > **Production URL:** `http://165.22.35.75:5000` (single shared password)
 > **Repository:** `amo-dashboard` (`origin/main`)
 
@@ -314,6 +314,7 @@ amo-dashboard/
 | `entity_aliases` | analyst-managed | ❌ | ❌ **decisions, never overwritten** |
 | `target_entities` | analyst-managed | ❌ | ❌ |
 | `batch_jobs` / `batch_job_documents` | in-flight state | n/a | ❌ |
+| `backup_runs` | one row per nightly backup | n/a | ❌ operational log, read by the Overview banner |
 
 **The rule that matters:** `pdf_extractions`, `entity_aliases` and `target_entities` are *inputs* —
 expensive extraction results and human decisions. `aom_events_clean`, `credit_facility_events`,
@@ -437,6 +438,7 @@ All installed via `crontab -e` on the droplet.
 | `30 8 * * *` | `run_nightly_normalize.sh` | Rebuild derived tables, then `pm2 restart` to clear the cache. **Skips the restart if normalize fails**, so a failure leaves the last good data serving. |
 | `30 12 * * *` | `run_broward_daily.sh` (`BROWARD_INGEST_INDEX=1`) | Broward index → images → retention report. **Time-critical.** |
 | `0 6 * * 5` | `run_weekly.sh` | Miami-Dade: collect last 10 days → extract PDFs → normalize → enrich. |
+| `15 3 * * *` | `run_backup.sh` | Verified snapshot of the database + Broward images → local rotation (7 kept) → DigitalOcean Spaces. Records every run in `backup_runs`; the Overview banner reads it. |
 
 #### Two things about these jobs that must not be forgotten
 
@@ -454,6 +456,11 @@ the very end. Restarting inside that window clears the 7-day cache and immediate
 *empty* state — leaving Clean Transactions, Reporting and Lending Relationships showing zeros for up
 to a week. This is exactly why `run_nightly_normalize.sh` restarts only *after* a successful run.
 A long silent stretch during `Building aom_events_clean...` is normal, not a hang.
+
+**3. The backup runs at 03:15 for a reason.** It is the only window that collides with nothing: the
+nightly normalize occupies 08:30–~09:50, the Broward pull is 12:30, the weekly Miami-Dade collect is
+Friday 06:00. It does overlap the 20-minute facility tick, which is harmless — `sqlite3 .backup` uses
+SQLite's online backup API, so it snapshots consistently while other processes write.
 
 **Budget ~80 minutes for a full `normalize.py` run on the droplet** at current scale (~113k rows).
 Older notes claiming "~15 minutes" are stale. The same run takes ~20 minutes locally — the droplet is
@@ -591,6 +598,45 @@ To back out Broward from the analytics without deleting any data: set
 `NORMALIZE_COUNTIES="MIAMI-DADE"`, re-run `normalize.py`, restart PM2. The rebuild drops Broward rows
 from the derived tables on its own — no manual `DELETE`.
 
+#### Restore from a nightly backup
+
+The nightly job (§6.5) writes verified, gzipped snapshots to `/opt/amo-dashboard/backups/` and, once
+credentials are configured, to DigitalOcean Spaces. **A backup nobody has restored is a hypothesis,
+not a backup** — so this procedure is written to be followed literally, and the restore is verified
+before anything live is touched.
+
+```bash
+# 1. Get an archive. Locally:
+ls -lt /opt/amo-dashboard/backups/          # or: rclone ls "$BACKUP_REMOTE/db/"
+# From Spaces:
+rclone copy "$BACKUP_REMOTE/db/amo-YYYYMMDD-HHMMSS.db.gz" /tmp/
+
+# 2. Decompress to a SCRATCH path — never straight over the live database.
+gunzip -c /tmp/amo-YYYYMMDD-HHMMSS.db.gz > /tmp/restore_check.db
+
+# 3. Verify BEFORE trusting it.
+sqlite3 /tmp/restore_check.db "PRAGMA integrity_check;"          # must print: ok
+sqlite3 /tmp/restore_check.db "SELECT county, COUNT(*) FROM assignments GROUP BY county;"
+sqlite3 /tmp/restore_check.db "SELECT COUNT(*) FROM aom_events_clean;"
+```
+
+Only if those numbers look right, swap it in:
+
+```bash
+pm2 stop amo-dashboard                                     # stop writers first
+sqlite3 /opt/amo-dashboard/miami_dade_amo.db ".backup /opt/amo-dashboard/pre_restore.db"
+mv /tmp/restore_check.db /opt/amo-dashboard/miami_dade_amo.db
+rm -f /opt/amo-dashboard/miami_dade_amo.db-wal /opt/amo-dashboard/miami_dade_amo.db-shm
+pm2 start amo-dashboard
+```
+
+- **Delete the `-wal`/`-shm` sidecars.** They belong to the *replaced* database. Leaving them beside a
+  different file is how a good restore turns into a corrupt one.
+- **Take `pre_restore.db` even when the live database looks broken.** A restore that turns out to be
+  the wrong archive is recoverable; one that overwrote the only copy of the current state is not.
+- Broward images restore separately — they are files, not database rows:
+  `rclone copy "$BACKUP_REMOTE/broward_images/" /opt/amo-dashboard/collector/broward_images/`
+
 #### Before any production data change
 
 1. `sqlite3 miami_dade_amo.db ".backup /opt/amo-dashboard/backup_<what>.db"`, then integrity-check it.
@@ -689,6 +735,7 @@ endpoints healthy across all three county scopes.
 | Entity normalization / duplicate manager | 🟢 Deployed 6 Aug 2026 |
 | FDIC analytics | 🟢 Live |
 | Deal Intelligence page | ⚫ **Retired 11 Aug 2026** — page and its 8 endpoints removed together |
+| Automated backups | 🟡 **Built 15 Aug 2026** — nightly verified snapshot + rotation + health banner. Off-box upload is wired but **inactive until Spaces credentials are added** (see §7.4) |
 
 ### 7.4 Known gaps and open items
 
@@ -748,11 +795,51 @@ gone: assertive headers (Reporting subtitle, both printed EntityReport titles) a
 descriptive tooltips are county-neutral. The only "Miami-Dade" left in the DOM is the county
 selector's own option.
 
-**7. Two facility rows flagged for manual sanity check:** `2026R268269` (JPMorgan/KB7 Holdings — the
-evidence quote reads like a routine SBA note renewal, possibly a false positive) and `2026R277453`
-(grantor extracted as the literal string `"Lender"`, likely an OCR gap).
+**7. ~~Two facility rows flagged for manual sanity check~~ — CHECKED 15 Aug 2026. One is wrong, one is
+fine.**
 
-**8. ~~`DealIntelligence.tsx` is unrouted~~ — RESOLVED 11 Aug 2026: retired.**
+- `2026R268269` is a **confirmed false positive.** It is an SBA 504 debenture — a single $449,560 term
+  loan on one property, assigned Florida First Capital → JPMorgan Chase — classified as
+  `warehouse_or_revolving_credit_facility` with `facility_confidence = high`. A 504 debenture is the
+  opposite of a revolving facility. The likely trigger is the evidence quote's "504 **Renewal** Note".
+- `2026R277453` is **real, with two field-level defects.** Tower 36 Owner LLC → Cirrus Real Estate
+  Funding LLC, an Assignment of Leases and Rents securing a loan with a stated *maximum principal
+  amount* — that structure is a genuine facility. But `facility_lender_name` is **empty**, because the
+  document refers to the lender only by the defined term "Lender" (this is the "grantor extracted as
+  the literal string `Lender`" note); the real lender is the grantee. And `facility_amount` is
+  **$34,400,000 while its own evidence quote says $30,000,000** — the quote describes the *existing*
+  loan, not the amount recorded.
+
+**How big is the class?** Small, and not systemic: of 445 facility rows, 11 have
+`amount_type = loan_amount` under $2M (the shape of the 504 false positive) and 3 name SBA/504
+instruments. 19 rows have no lender name. Worth a targeted prompt fix, not a re-extraction.
+
+**The transferable lesson:** `facility_confidence = high` is the extractor's confidence in its own
+reading, not in the classification. Both rows carry it. Any future audit should key on *incoherence
+between fields* — a "revolving facility" with a fixed `loan_amount`, an amount that contradicts its
+own evidence quote — rather than on the confidence column.
+
+**8a. Backups are taken and verified, but not yet off-box.** As of 15 Aug 2026 `run_backup.sh` runs
+nightly at 03:15, takes an online-API snapshot, integrity-checks it, asserts it is non-empty, gzips
+it and keeps the last 7 locally. The DigitalOcean Spaces upload is written and tested, but
+**dormant until a Space and access key exist** — the job reports `local_only` and the Overview shows
+an amber banner while that is true. Local-only backups do not address the actual risk, which is loss
+of the host. To activate, add to `/opt/amo-dashboard/.env`:
+
+```
+BACKUP_REMOTE=spaces:<bucket-name>
+RCLONE_CONFIG_SPACES_TYPE=s3
+RCLONE_CONFIG_SPACES_PROVIDER=DigitalOcean
+RCLONE_CONFIG_SPACES_ENDPOINT=<region>.digitaloceanspaces.com
+RCLONE_CONFIG_SPACES_ACCESS_KEY_ID=<key>
+RCLONE_CONFIG_SPACES_SECRET_ACCESS_KEY=<secret>
+```
+
+Configuring rclone through environment variables rather than `rclone.conf` is deliberate: `.env` is
+already gitignored, so the credential exists in exactly one place. `rclone` must also be installed
+(`apt-get install -y rclone`) — until it is, the job reports `local_only` rather than failing.
+
+**8b. ~~`DealIntelligence.tsx` is unrouted~~ — RESOLVED 11 Aug 2026: retired.**
 The page and its 8 endpoints were removed together (deleting the page alone would have left
 orphaned endpoints still needing county-correctness). 40 endpoints → 32. Implementation remains
 in git history (added `197e947`, unrouted `3b1674a`, removed `9a2932d`) if the distressed-sourcing
@@ -768,7 +855,8 @@ use case ever returns.
 | A new writer forgets the `county` column | Rows **silently relabelled Miami-Dade**, no error anywhere | `check_county_isolation.py` asserts it — has already caught this three times |
 | Miami-Dade portal changes its markup | Collection stops | Failures surface in `collection_log` and the Collection Log page |
 | Data changed without clearing the cache | Stale dashboard for up to 7 days | Nightly restart; `POST /api/cache/bust` |
-| Single droplet, single SQLite file | Total loss on host failure | Manual `.backup` before every data change; **no automated off-box backup — see below** |
+| Single droplet, single SQLite file | Total loss on host failure | Manual `.backup` before every data change; **nightly automated snapshot since 15 Aug 2026, verified and rotated — but still on the same host until Spaces credentials are added** (§7.4 item 8a) |
+| Backups run but silently stop working | False confidence — the failure is only discovered when a restore is attempted | Every run records status in `backup_runs`; the Overview raises a red banner when no *successful* run in 48h, and distinguishes "never ran", "never succeeded" and "stopped succeeding". Snapshots are integrity-checked and row-count-asserted before they may rotate an older one away |
 | Weak default password | Unauthorised access | `AMO_PASSWORD`/`AMO_SECRET` must be set in the production `.env` |
 
 ### 7.6 Recommended next steps
@@ -784,20 +872,29 @@ use case ever returns.
    2025-12-31, ~41,900 documents, TIFF as the daily FTP feed already delivers so it drops straight
    into the existing pipeline. Would also close the Jan–Jun 2026 index gap if requested together.
 
+3. 🔑 **Create a DigitalOcean Space and give the key to the backup job.** The nightly job is built,
+   tested and running as of 15 Aug 2026 — but it is copying to the same disk it is protecting until
+   this is done, which does not address the risk it exists for. Create a Space, generate a Spaces
+   access key, and add the six lines in §7.4 item 8a to `/opt/amo-dashboard/.env`. ~$5/month.
+   The amber banner on the Overview clears once the first upload succeeds.
+
 **Engineering:**
 
-3. **Automated off-box database backups.** Still the highest-value maintenance item. Backups are
-   taken by hand before risky changes; the whole dataset — irreplaceable OCR/LLM extraction work,
-   plus Broward images that cannot be re-harvested once the feed rolls — lives on one droplet with
-   no scheduled off-host copy.
-4. **Real cron-failure alerting.** The dashboard now warns when Broward collection stalls, but that
-   only helps someone who opens it. There is still no `MAILTO`, no mail transport, and no uptime
-   ping on the droplet.
-5. **Confirm `AMO_PASSWORD` and `AMO_SECRET`** are set in the production environment. Note
-   `ecosystem.config.cjs` has drifted from the env PM2 actually holds — a `pm2 delete` + fresh
-   start would silently change the dashboard password.
-6. Sanity-check the two flagged facility rows (§7.4) and recheck Broward facility detection once
-   its extracted count grows.
+4. **Real cron-failure alerting.** The dashboard now warns when Broward collection stalls *and* when
+   backups stop succeeding, but both only help someone who opens it. There is still no `MAILTO`, no
+   mail transport, and no uptime ping on the droplet.
+5. **Confirm `AMO_PASSWORD` and `AMO_SECRET`** are set in the production environment.
+   ✅ **Verified 15 Aug 2026** — both are present in the live PM2 environment. Two caveats stand:
+   `ecosystem.config.cjs` has drifted from the env PM2 actually holds, so a `pm2 delete` + fresh
+   start would silently change the dashboard password; and the password in use is short and
+   guessable, which matters because the gate is a single shared password with no lockout.
+6. ✅ **Both flagged facility rows checked 15 Aug 2026** — see §7.4 item 7. One confirmed false
+   positive, one real with two bad fields. Worth a targeted extractor-prompt fix keyed on
+   field incoherence rather than confidence. Broward facility detection is **still 0 in 589
+   documents**; recheck as the extracted count grows.
+7. **Clean up the four ad-hoc `backup_pre_*.db` files** on the droplet (~420MB). They predate the
+   automated job and are unrotated. Keep `backup_pre_broward_normalize.db` — `ROLLBACK.md` and §6.8
+   both name it as the Broward rollback point — and copy the rest to Spaces before deleting.
 
 ---
 

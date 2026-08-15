@@ -114,6 +114,15 @@ export default function Dashboard() {
   const health = raw?.collection_health;
   const harvestStale = !!health?.broward_stale && county !== 'MIAMI-DADE';
 
+  // Backup health. NOT county-scoped — there is one database and one backup job
+  // covering both counties, so this shows under every scope.
+  const backup = raw?.backup_health;
+  const backupStale = !!backup?.stale;
+  // A run that snapshotted locally but could not reach the remote. Lesser than
+  // stale — there IS a current copy, it is just on the same disk as the
+  // original, which is the one place a backup is worth nothing.
+  const backupLocalOnly = !backupStale && backup?.last_status === 'local_only';
+
   return (
     <div className="p-6 space-y-6 max-w-screen-xl mx-auto">
 
@@ -162,6 +171,48 @@ export default function Dashboard() {
             The daily job last ran {health.broward_last_harvest}. Broward's feed drops each day
             after about ten, and those images cannot be recovered from the free channel afterwards.
             Check <code className="font-mono">collector/broward_daily.log</code> on the droplet.
+          </span>
+        </div>
+      )}
+
+      {backupStale && (
+        <div
+          data-testid="backup-stale-banner"
+          className="flex items-start gap-2 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2.5 text-xs text-foreground"
+        >
+          <AlertCircle size={14} className="mt-0.5 shrink-0 text-red-500" />
+          <span>
+            {/* Three distinct states, because they need three different
+                responses. Never run = the job is not installed. Run but never
+                succeeded = it is installed and failing, which is the one that
+                most looks like it is working. Was succeeding, now stale = it
+                broke recently. */}
+            <span className="font-medium">
+              {backup?.never_run
+                ? 'No off-box backup has ever run.'
+                : backup?.last_good_at == null
+                  ? 'The backup job is running but has never completed successfully.'
+                  : `No successful backup in ${Math.floor((backup.hours_since_good ?? 0) / 24)} days.`}
+            </span>{' '}
+            Everything here lives on one droplet, and the Broward document images cannot be
+            re-harvested once the feed rolls past its ten-day window.
+            {backup?.last_detail && <> Last run reported: “{backup.last_detail}”.</>} Check{' '}
+            <code className="font-mono">collector/backup.log</code> on the droplet.
+          </span>
+        </div>
+      )}
+
+      {backupLocalOnly && (
+        <div
+          data-testid="backup-local-only-banner"
+          className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs text-foreground"
+        >
+          <Info size={14} className="mt-0.5 shrink-0 text-amber-500" />
+          <span>
+            <span className="font-medium">Backups are running, but staying on the droplet.</span>{' '}
+            The nightly snapshot is being taken and verified, yet it is not reaching off-box
+            storage — so a host failure would still take the data with it.
+            {backup?.last_detail && <> Reason given: “{backup.last_detail}”.</>}
           </span>
         </div>
       )}
