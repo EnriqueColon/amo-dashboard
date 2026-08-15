@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { CountyCell } from '@/components/CountyCell';
 import { useQuery } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import { Input } from '@/components/ui/input';
@@ -213,6 +214,9 @@ export default function Assignments() {
                   <ColHeader label="Date" tooltip="Recording date — when the assignment was stamped by the county Clerk. This is slightly later than the execution/signing date on the document itself." />
                 </th>
                 <th className="px-3 py-2.5 text-left font-medium">
+                  <ColHeader label="County" tooltip="Which county's Official Records the document was recorded in. Matters most under the All Counties scope, where Miami-Dade CFNs and Broward instrument numbers sit side by side. Note the two counties are not equally deep: Broward's pre-Aug-2026 history is index-only." />
+                </th>
+                <th className="px-3 py-2.5 text-left font-medium">
                   <ColHeader label="Grantor (Assignor)" tooltip="The party transferring/selling the mortgage. This entity is giving up the right to collect or enforce the debt. Often a bank, servicer, or fund offloading a loan from its portfolio." />
                 </th>
                 <th className="px-3 py-2.5 text-left font-medium">
@@ -244,6 +248,7 @@ export default function Assignments() {
                     >
                       <td className="px-3 py-2 font-mono text-primary whitespace-nowrap text-[11px]">{r.cfn}</td>
                       <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">{r.rec_date}</td>
+                      <td className="px-3 py-2 whitespace-nowrap"><CountyCell county={r.county} /></td>
                       <td className="px-3 py-2 max-w-[200px]">
                         <div className="truncate font-medium" title={r.grantor}>{r.grantor}</div>
                         <CategoryBadge category={r.grantor_category} size="xs" />
@@ -263,7 +268,7 @@ export default function Assignments() {
               }
               {!isLoading && data?.rows?.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-3 py-12 text-center text-muted-foreground">
+                  <td colSpan={7} className="px-3 py-12 text-center text-muted-foreground">
                     No records found. Try adjusting your filters.
                   </td>
                 </tr>

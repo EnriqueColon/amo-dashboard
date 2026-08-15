@@ -439,6 +439,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const dataSql = `
       SELECT a.cfn, a.rec_date, a.grantor, a.grantee, a.address,
         a.rec_book, a.rec_page, a.misc_ref, a.legal_desc,
+        COALESCE(a.county, '${DEFAULT_COUNTY}') AS county,
         COALESCE(c.assignor_type, 'UNCLASSIFIED') as grantor_category,
         COALESCE(c.assignee_type, 'UNCLASSIFIED') as grantee_category
       FROM assignments a

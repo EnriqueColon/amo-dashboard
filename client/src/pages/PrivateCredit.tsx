@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { CountyCell } from '@/components/CountyCell';
 import { useQuery } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import DocLink from '@/components/DocLink';
@@ -80,6 +81,7 @@ export default function PrivateCredit() {
               <tr className="text-muted-foreground">
                 <th className="px-3 py-2.5 text-left font-medium">CFN</th>
                 <th className="px-3 py-2.5 text-left font-medium">Date</th>
+                <th className="px-3 py-2.5 text-left font-medium" title="Which county's Official Records the document was recorded in. Matters most under the All Counties scope, where Miami-Dade CFNs and Broward instrument numbers sit side by side. Note the two counties are not equally deep: Broward's pre-Aug-2026 history is index-only.">County</th>
                 <th className="px-3 py-2.5 text-left font-medium">Grantor (Seller)</th>
                 <th className="px-2 py-2.5 w-5"></th>
                 <th className="px-3 py-2.5 text-left font-medium">Grantee (Buyer)</th>
@@ -111,6 +113,7 @@ export default function PrivateCredit() {
                       <tr key={r.cfn + r.rec_date} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
                         <td className="px-3 py-2 font-mono text-primary/80 text-[11px] whitespace-nowrap">{r.cfn}</td>
                         <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">{r.rec_date}</td>
+                        <td className="px-3 py-2 whitespace-nowrap"><CountyCell county={r.county} /></td>
                         <td className="px-3 py-2 max-w-[180px]">
                           <div className="truncate font-medium text-foreground" title={r.assignor_canon}>{r.assignor_canon}</div>
                           {r.grantor !== r.assignor_canon && (
@@ -147,7 +150,7 @@ export default function PrivateCredit() {
                   })
               }
               {!isLoading && !data?.rows?.length && (
-                <tr><td colSpan={8} className="px-3 py-10 text-center text-muted-foreground">No records found.</td></tr>
+                <tr><td colSpan={9} className="px-3 py-10 text-center text-muted-foreground">No records found.</td></tr>
               )}
             </tbody>
           </table>

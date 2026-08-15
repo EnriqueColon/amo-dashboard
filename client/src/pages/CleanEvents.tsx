@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { CountyCell } from '@/components/CountyCell';
 import { useQuery } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import DocLink from '@/components/DocLink';
@@ -192,7 +193,7 @@ function TransactionDetail({ row }: { row: any }) {
     || loanAmt || considAmt;
   return (
     <tr className="bg-muted/10 border-b border-border/30">
-      <td colSpan={10} className="px-4 py-4">
+      <td colSpan={11} className="px-4 py-4">
         <div className="flex gap-4">
           {/* Icon column */}
           <div className={`shrink-0 mt-0.5 ${n.accentClass}`}>
@@ -505,6 +506,9 @@ export default function CleanEvents() {
                   <ColHeader label="Date" tooltip="Recording date — when the assignment was stamped by the county Clerk. Slightly later than the execution/signing date on the document itself." />
                 </th>
                 <th className="px-3 py-2.5 text-left font-medium">
+                  <ColHeader label="County" tooltip="Which county's Official Records the document was recorded in. Matters most under the All Counties scope, where Miami-Dade CFNs and Broward instrument numbers sit side by side. Note the two counties are not equally deep: Broward's pre-Aug-2026 history is index-only." />
+                </th>
+                <th className="px-3 py-2.5 text-left font-medium">
                   <span className="flex items-center gap-1">
                     <TrendingUp size={10} className="text-orange-400" />
                     <ColHeader label={<>Assignor <span className="text-muted-foreground/60 font-normal">(Seller)</span></>} tooltip="The party transferring/selling the mortgage. This entity gives up the right to collect or enforce the debt. Institutional assignors (banks, servicers, PE funds) are the primary signal for market activity." />
@@ -568,6 +572,7 @@ export default function CleanEvents() {
                         </td>
                         {/* Date */}
                         <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">{r.rec_date}</td>
+                        <td className="px-3 py-2 whitespace-nowrap"><CountyCell county={r.county} /></td>
                         {/* Assignor */}
                         <td className="px-3 py-2 max-w-[200px]">
                           <div className="font-semibold text-foreground truncate" title={r.assignor_canon}>{r.assignor_canon}</div>
@@ -626,7 +631,7 @@ export default function CleanEvents() {
                   })
               }
               {!isLoading && !data?.rows?.length && (
-                <tr><td colSpan={10} className="px-3 py-12 text-center text-muted-foreground">No records found.</td></tr>
+                <tr><td colSpan={11} className="px-3 py-12 text-center text-muted-foreground">No records found.</td></tr>
               )}
             </tbody>
           </table>

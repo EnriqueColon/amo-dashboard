@@ -18,6 +18,7 @@ import {
 } from 'recharts';
 import { EntityPicker, EntityReport } from '@/components/EntityReport';
 import CrossCountyNote from '@/components/CrossCountyNote';
+import { CountyCell } from '@/components/CountyCell';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function fmtAmt(v: number | null | undefined): string | null {
@@ -209,7 +210,7 @@ function ParticipantStats({ startDate, endDate, targetsOnly }: { startDate: stri
 function RowDetail({ row, onClose }: { row: any; onClose: () => void }) {
   return (
     <tr className="bg-muted/10 border-b border-border/30">
-      <td colSpan={12} className="px-4 py-4">
+      <td colSpan={13} className="px-4 py-4">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-8 gap-y-3 text-xs">
           <div className="space-y-1">
             <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Document</p>
@@ -310,6 +311,7 @@ function TransactionsTable({ title, filterQs, exportQs }: {
             <tr className="bg-muted/40 border-b border-border text-muted-foreground">
               <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap">CFN</th>
               <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap">Date</th>
+              <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap">County</th>
               <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap">Assignor</th>
               <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap">Type</th>
               <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap">Assignee</th>
@@ -326,7 +328,7 @@ function TransactionsTable({ title, filterQs, exportQs }: {
             {isLoading
               ? Array(10).fill(0).map((_, i) => (
                   <tr key={i} className="border-b border-border/30">
-                    {Array(12).fill(0).map((_, j) => <td key={j} className="px-2 py-1.5"><Skeleton className="h-3 w-full" /></td>)}
+                    {Array(13).fill(0).map((_, j) => <td key={j} className="px-2 py-1.5"><Skeleton className="h-3 w-full" /></td>)}
                   </tr>
                 ))
               : (data?.rows || []).flatMap((r: any, i: number) => {
@@ -353,6 +355,9 @@ function TransactionsTable({ title, filterQs, exportQs }: {
                       </td>
                       {/* Date */}
                       <td className="px-2 py-1.5 border-r border-border/20 whitespace-nowrap text-muted-foreground">{r.rec_date}</td>
+
+                      {/* County */}
+                      <td className="px-2 py-1.5 border-r border-border/20 whitespace-nowrap"><CountyCell county={r.county} /></td>
                       {/* Assignor */}
                       <td className="px-2 py-1.5 border-r border-border/20 max-w-[150px]">
                         <div className="font-medium truncate" title={r.assignor_canon}>{r.assignor_canon}</div>
@@ -407,7 +412,7 @@ function TransactionsTable({ title, filterQs, exportQs }: {
                 })
             }
             {!isLoading && !data?.rows?.length && (
-              <tr><td colSpan={12} className="px-4 py-10 text-center text-muted-foreground text-xs">No records found.</td></tr>
+              <tr><td colSpan={13} className="px-4 py-10 text-center text-muted-foreground text-xs">No records found.</td></tr>
             )}
           </tbody>
         </table>
