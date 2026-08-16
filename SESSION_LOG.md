@@ -40,10 +40,20 @@ crons, the cron daemon and PM2 — nothing in this pipeline depends on a local m
     rate      ~1,495 docs/hr, 0 errors
     finish    Mon 2026-08-17 ~05:00 UTC (~01:00 ET)
 
-**Check it in one command:**
+**Check it in one command.** Two forms — the `ssh` form only works FROM A LOCAL MACHINE. Running it
+while already logged into the droplet makes the box SSH to itself, which has no key and fails with
+`Permission denied (publickey)`. The prompt tells you which you are on: `root@ubuntu-s-...` means you
+are already there, so use the second form.
+
+*From the Mac:*
 
     ssh root@165.22.35.75 'pgrep -f "[e]xtract_pdfs.py" >/dev/null && echo RUNNING || echo STOPPED; \
       sqlite3 /opt/amo-dashboard/miami_dade_amo.db "SELECT COUNT(*) FROM pdf_extractions WHERE status=\"OK\" AND raw_json IS NULL;"'
+
+*Already on the droplet:*
+
+    pgrep -f "[e]xtract_pdfs.py" >/dev/null && echo RUNNING || echo STOPPED
+    sqlite3 /opt/amo-dashboard/miami_dade_amo.db "SELECT COUNT(*) FROM pdf_extractions WHERE status='OK' AND raw_json IS NULL;"
 
 Second number is documents left. **0 = repair complete.** Or run
 `collector/tests/check_extraction_completeness.py`, which fails with a shrinking count until then.
