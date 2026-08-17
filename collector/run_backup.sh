@@ -45,6 +45,28 @@ KEEP_LOCAL="${KEEP_LOCAL:-7}"
 [ -f "$APP_DIR/.env" ] && . "$APP_DIR/.env"
 BACKUP_REMOTE="${BACKUP_REMOTE:-}"
 
+# There is deliberately no rclone.conf (see above), so say so rather than let
+# rclone log "Config file not found" on every run.
+export RCLONE_CONFIG=/dev/null
+
+# Both flags are REQUIRED for a bucket-scoped Spaces key, and their absence
+# looks exactly like a wrong password:
+#
+#   --s3-no-check-bucket  rclone otherwise probes the bucket — and will try to
+#                         CREATE it — before uploading. A key limited to one
+#                         bucket holds no bucket-level rights, so that probe
+#                         returns 403 AccessDenied before a byte moves.
+#   --s3-acl=             rclone otherwise sends `x-amz-acl: private` on every
+#                         PUT. A limited key has no PutObjectAcl right, so the
+#                         upload is refused for setting an ACL nobody asked for.
+#
+# Diagnosed 2026-08-17 against the real key: `rclone lsd` listed the bucket
+# fine while `rclone copy` returned 403 — read working and write failing reads
+# as a permissions mistake in the DO panel, and is not one. A full-access key
+# would also "fix" it, by handing the droplet rights over every Space in the
+# account; these flags keep the key least-privilege instead.
+RCLONE_OPTS="--s3-no-check-bucket --s3-acl="
+
 STAMP=$(date -u +%Y%m%d-%H%M%S)
 STARTED=$(date -u +%FT%TZ)
 SNAP="$BACKUP_DIR/amo-$STAMP.db"
@@ -152,7 +174,7 @@ elif ! command -v rclone >/dev/null 2>&1; then
     detail="rclone not installed — snapshot kept locally only"
     echo "WARNING: $detail"
 else
-    if rclone copy "$ARCHIVE" "$BACKUP_REMOTE/db/" --no-traverse; then
+    if rclone copy $RCLONE_OPTS --no-traverse "$ARCHIVE" "$BACKUP_REMOTE/db/"; then
         echo "uploaded db → $BACKUP_REMOTE/db/"
     else
         status=local_only
@@ -165,7 +187,7 @@ else
     # of images the feed no longer serves. `copy` is append-only and, being
     # incremental, moves only the ~55 documents a normal day adds.
     if [ -d "$IMAGES_DIR" ]; then
-        if rclone copy "$IMAGES_DIR" "$BACKUP_REMOTE/broward_images/"; then
+        if rclone copy $RCLONE_OPTS "$IMAGES_DIR" "$BACKUP_REMOTE/broward_images/"; then
             echo "synced images → $BACKUP_REMOTE/broward_images/"
         else
             status=local_only
