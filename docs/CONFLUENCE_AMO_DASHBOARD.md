@@ -1,6 +1,6 @@
 # AMO Tracker — Mortgage Assignment Intelligence Dashboard
 
-> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 15 Aug 2026
+> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 17 Aug 2026
 > **Production URL:** `http://165.22.35.75:5000` (single shared password)
 > **Repository:** `amo-dashboard` (`origin/main`)
 
@@ -705,11 +705,27 @@ completed on 10 Aug 2026.
 
 ### 7.2 Production data
 
-| Scope | Filings | Clean transactions | Entities | Market transfers | Date range |
-|---|---|---|---|---|---|
-| Miami-Dade | 70,834 | 51,425 | 20,320 | 24,360 | 3 Jan 2023 → 6 Aug 2026 |
-| **Broward** | **42,559** | **374** | **157** | **280** | 3 Jan 2023 → 5 Aug 2026 |
-| **All** | **113,393** | **51,799** | **20,367** | **24,640** | 3 Jan 2023 → 6 Aug 2026 |
+| Scope | Filings | Clean transactions | Entities | Market transfers |
+|---|---|---|---|---|
+| Miami-Dade | 71,366 | 44,034 | 17,938 | 20,076 |
+| **Broward** | **42,761** | **551** | **219** | **406** |
+| **All** | **114,127** | **44,585** | **18,021** | **20,482** |
+
+> ### ⚠️ Read this before comparing against any earlier report
+>
+> **Clean transactions fell from ~51,800 to 44,585 on 17 Aug 2026, and the smaller number is the
+> correct one.** This is not data loss — it is the removal of documents that never belonged.
+>
+> `normalize.py` counts a filing as a clean transaction when its document category is
+> `LOAN_TRANSFER` **or is unknown**. Because 50,042 Miami-Dade documents had never been read
+> (§7.4 item 0), their category was unknown, so they were all counted as mortgage transfers by
+> default. Now that every one has been read, Miami-Dade divides as **LOAN_TRANSFER 44,025 ·
+> COLLATERAL 18,480 · RENTS_LEASES 5,816 · OTHER 3,028** — and only the first is a mortgage trade.
+>
+> **Practical effect: every clean-transaction, entity and market-transfer figure this tool reported
+> before 17 Aug 2026 was overstated**, because collateral assignments and assignments of leases and
+> rents were being counted as mortgage sales. Any analysis, screenshot or exported CSV from before
+> that date should be re-run rather than compared directly.
 
 Verified after the flip: Miami-Dade's clean count is **identical** to the pre-flip baseline — Broward
 added rows without disturbing existing data. County isolation guardrail green; all 37 checked
@@ -721,7 +737,7 @@ endpoints healthy across all three county scopes.
 |---|---|
 | Miami-Dade collection (weekly cron) | 🟢 Live |
 | Broward index + images + extraction (daily cron) | 🟢 Live — 42,559 index rows, 658 images, 589 extracted |
-| PDF extraction — Miami-Dade | 🟢 Live |
+| PDF extraction — Miami-Dade | 🟢 Live — **repair backfill complete 17 Aug 2026**, 49,838 documents re-read |
 | PDF extraction — Broward | 🟡 Live **daily**, but coverage thin — 589 of 42,559 documents |
 | Facility batch backfill (20-min tick) | 🟢 Live |
 | Nightly normalize + cache bust | 🟢 Live |
