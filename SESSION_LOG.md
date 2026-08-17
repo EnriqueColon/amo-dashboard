@@ -77,23 +77,11 @@ weekly run picks them up on its own. Expect a handful of these at any given mome
 ### Open items — all need the USER, not the assistant
 - 🔴 **Leaked GitHub PAT in `.git/config`**, this Mac and the droplet. Repo is PUBLIC. Open since
   2026-08-04, oldest item on the list. Revoke → check security log → SSH remote / deploy key.
-- 🔑 **Finish wiring the DigitalOcean Space** — user is doing this 2026-08-16. The Space itself is
-  **created** (NYC3, same region as the droplet, Restrict listing, CDN off). Still to do:
-  generate a Spaces access key, then add six lines to `/opt/amo-dashboard/.env`:
-
-      export BACKUP_REMOTE=spaces:<space-name>
-      export RCLONE_CONFIG_SPACES_TYPE=s3
-      export RCLONE_CONFIG_SPACES_PROVIDER=DigitalOcean
-      export RCLONE_CONFIG_SPACES_ENDPOINT=nyc3.digitaloceanspaces.com
-      export RCLONE_CONFIG_SPACES_ACCESS_KEY_ID=<key>
-      export RCLONE_CONFIG_SPACES_SECRET_ACCESS_KEY=<secret>
-
-  **`export` is mandatory** — rclone is a child process and cannot see unexported vars. No quotes,
-  no spaces around `=`. Edit with `nano`, not a shell command, so the secret misses shell history.
-  Until this exists the job reports `local_only` and the Overview shows amber; **backups are being
-  taken and verified, but to the same disk they are protecting.** rclone is already installed.
-  Verify after with `collector/run_backup.sh` — it prints `status=ok` and uploads to `<space>/db/`
-  plus a one-off ~97MB image sync. A wrong credential fails loudly rather than silently.
+- ✅ **Off-box backups are LIVE as of 2026-08-17.** Space `amo-dashboard-backups-ec` (NYC3, same
+  region as the droplet, Restrict listing, CDN off), bucket-scoped Read/Write/Delete key, six
+  `export` lines in `.env`. First run: DB 37.9MB → `db/`, 2,421 Broward images (119MB) →
+  `broward_images/`, `status=ok`, Overview banner cleared. **Restore verified from the Spaces copy
+  itself** — integrity ok, assignments/clean/extractions all matching live exactly.
 - 📞 **Bulk image order** (above) — would also close the Jan–Jun 2026 index gap.
 - 🟡 69 orphaned Broward images from 2026-07-21 (harvested before their index rows; no
   `assignments` row, so never extractable).
@@ -103,6 +91,11 @@ weekly run picks them up on its own. Expect a handful of these at any given mome
   confirmed false positive; the other is real with two bad fields.
 
 ### Traps that have bitten repeatedly — read before deploying
+- **A bucket-scoped Spaces key makes rclone 403 on upload while reads work fine.** That looks like a
+  permissions mistake in the DO panel and is not one — it is rclone probing (and trying to create)
+  the bucket, and sending `x-amz-acl: private`, neither of which a least-privilege key may do.
+  `--s3-no-check-bucket --s3-acl=` are both set in `run_backup.sh`. Do NOT "fix" this by switching
+  to a full-access key.
 - **`pdf_extractions` has two writers with different ideas of "done".** `extract_pdfs.py` (main
   fields + `raw_json`) and `batch_extract_facility.py` (facility fields only, `status='OK'`,
   no `raw_json`). Selecting pending work by "does a row exist" silently lost **50,042 documents**

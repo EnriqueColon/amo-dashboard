@@ -751,7 +751,7 @@ endpoints healthy across all three county scopes.
 | Entity normalization / duplicate manager | 🟢 Deployed 6 Aug 2026 |
 | FDIC analytics | 🟢 Live |
 | Deal Intelligence page | ⚫ **Retired 11 Aug 2026** — page and its 8 endpoints removed together |
-| Automated backups | 🟡 **Built 15 Aug 2026** — nightly verified snapshot + rotation + health banner. Off-box upload is wired but **inactive until Spaces credentials are added** (see §7.4) |
+| Automated backups | 🟢 **Live off-box 17 Aug 2026** — nightly verified snapshot → DigitalOcean Spaces (`amo-dashboard-backups-ec`, NYC3). Restore verified from the bucket copy |
 
 ### 7.4 Known gaps and open items
 
@@ -919,7 +919,7 @@ use case ever returns.
 | Two jobs writing `pdf_extractions` disagree on what "done" means | **50,042 documents silently never extracted**, every row reading `status='OK'` — happened 22 Jul–15 Aug 2026 | Pending work is now keyed on `raw_json IS NULL`, not row existence. **No automated check yet** — a guardrail asserting "every `status='OK'` row has `raw_json`" would have caught this on day one |
 | Miami-Dade portal changes its markup | Collection stops | Failures surface in `collection_log` and the Collection Log page |
 | Data changed without clearing the cache | Stale dashboard for up to 7 days | Nightly restart; `POST /api/cache/bust` |
-| Single droplet, single SQLite file | Total loss on host failure | Manual `.backup` before every data change; **nightly automated snapshot since 15 Aug 2026, verified and rotated — but still on the same host until Spaces credentials are added** (§7.4 item 8a) |
+| Single droplet, single SQLite file | Total loss on host failure | **Resolved 17 Aug 2026** — nightly verified snapshot to DigitalOcean Spaces (different failure domain from the droplet), 7 archives retained locally, all Broward images mirrored. Restore tested from the bucket copy, counts matched live exactly |
 | Backups run but silently stop working | False confidence — the failure is only discovered when a restore is attempted | Every run records status in `backup_runs`. The Overview shows **red** when the job is absent, errored, or has not run in 48h, and **amber** when it is working but not reaching off-box storage. Snapshots are integrity-checked and row-count-asserted before they may rotate an older one away |
 | Weak default password | Unauthorised access | `AMO_PASSWORD`/`AMO_SECRET` must be set in the production `.env` |
 
