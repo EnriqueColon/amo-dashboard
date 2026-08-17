@@ -14,7 +14,7 @@
 | **Who uses it** | Internal — one analyst/deal team. Single shared password, no user accounts. |
 | **Counties live** | Miami-Dade (full), Broward (live since 10 Aug 2026) |
 | **History depth** | 3 Jan 2023 → present |
-| **Data volume** | ~113,000 recorded filings, ~20,400 resolved entities |
+| **Data volume** | ~114,100 recorded filings, ~18,000 resolved entities, 44,585 confirmed loan transfers |
 | **Refresh cadence** | Broward daily, Miami-Dade weekly, derived tables rebuilt nightly |
 | **Stack** | React + Vite (client) · Express + SQLite (server) · Python (collector) |
 | **Hosting** | Single DigitalOcean droplet, PM2-managed Node process |
