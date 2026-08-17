@@ -4,7 +4,7 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
-## ▶ CURRENT STATE — as of 2026-08-15 (read this first)
+## ▶ CURRENT STATE — as of 2026-08-17 (read this first)
 
 **Both counties are live end to end.** Broward went from nothing to fully integrated between
 6 and 11 Aug 2026: index → images → extraction → normalization → county-scoped UI.
@@ -15,8 +15,21 @@ Read this at the start of a session before re-deriving context. Most recent entr
 | Broward | 42,559 | 374 | 157 | 280 | 2023-01-03 → 2026-08-05 |
 | All | 113,393 | 51,799 | 20,367 | 24,640 | 2023-01-03 → 2026-08-06 |
 
-As of 2026-08-15 the forward pipeline has carried this to **114,127 filings / 52,342 clean**
-(Broward 42,761 · Miami-Dade 71,366) — measured from the backup snapshot, so the crons are working.
+**SUPERSEDED 2026-08-17 — the repair backfill completed and the clean numbers went DOWN, correctly:**
+
+| Scope | Filings | Clean | Entities | Market transfers |
+|---|---|---|---|---|
+| Miami-Dade | 71,366 | **44,034** | 17,938 | 20,076 |
+| Broward | 42,761 | 551 | 219 | 406 |
+| All | 114,127 | **44,585** | 18,021 | 20,482 |
+
+**Clean fell ~51,800 → 44,585 and that is the fix, not a regression.** `normalize.py:1080` includes a
+document when `doc_category` is NULL — i.e. **unread documents were counted as loan transfers by
+default.** Now that all 49,838 have actually been read, Miami-Dade splits
+LOAN_TRANSFER 44,025 · COLLATERAL 18,480 · RENTS_LEASES 5,816 · OTHER 3,028, and only LOAN_TRANSFER
+belongs in `aom_events_clean`. **Every clean/entity/market-transfer figure before 2026-08-17 was
+overstated** — collateral assignments and lease assignments were being counted as mortgage trades.
+Treat older reports and screenshots accordingly.
 
 Broward images harvested **658**, extracted **589**. Everything deployed; droplet `git status` is
 **clean**; `origin/main` is current.
@@ -28,49 +41,28 @@ Broward images harvested **658**, extracted **589**. Everything deployed; drople
     weekly Fri 06:00  run_weekly.sh          Miami-Dade collect + extract
     every 20 min      run_facility_tick.sh   facility batch backfill
 
-### ⏳ IN FLIGHT — the 50k repair backfill (started 2026-08-15 19:38 UTC)
+### ✅ COMPLETE — the 50k repair backfill (2026-08-15 19:38 → 2026-08-17 ~04:20 UTC)
 
-Re-extracting the 49,845 Miami-Dade documents the facility job locked out (full entry below).
-**Runs entirely on the droplet.** Verified detached: **PPID 1**, no login session attached, so
-closing a laptop, dropping SSH or ending a Claude session has **no effect** on it. Same for all five
-crons, the cron daemon and PM2 — nothing in this pipeline depends on a local machine.
+    processed   49,845     OK 49,838 · OCR_ERROR 1 · LLM_ERROR 6 · DOWNLOAD_ERROR 0
+    rate        1,550/hr sustained over ~32h at 8 workers
+    cost        $26.58 (210.4M in / 13.8M out tokens) against a $45 cap
+    categories  LOAN_TRANSFER 30,063 · COLLATERAL 13,710 · RENTS_LEASES 3,794 · OTHER 2,271
 
-    process   extract_pdfs.py --county MIAMI-DADE --limit 60000 --workers 8 --budget 45
-    log       /opt/amo-dashboard/collector/main_backfill.log
-    rate      ~1,495 docs/hr, 0 errors
-    finish    Mon 2026-08-17 ~05:00 UTC (~01:00 ET)
+**0 download failures in 49,845 fetches** — 8 workers never provoked clerk throttling.
 
-**Check it in one command.** Two forms — the `ssh` form only works FROM A LOCAL MACHINE. Running it
-while already logged into the droplet makes the box SSH to itself, which has no key and fails with
-`Permission denied (publickey)`. The prompt tells you which you are on: `root@ubuntu-s-...` means you
-are already there, so use the second form.
+Monday's 08:30 UTC normalize picked it all up and took **82 minutes**, not the 2–2.5h estimated —
+the estimate assumed cost scales with extracted documents; it does not, so the usual ~85 min holds.
 
-*From the Mac:*
+**The headline result is that the clean numbers DROPPED**, because unread documents had been
+counted as loan transfers by default (see the CURRENT STATE block above). Populated fields on
+Miami-Dade clean rows now: property 27,771 · loan_amount 25,759 · signatory 43,593 · folio 20,456,
+where before the repair these were effectively zero for anything recorded after 2026-07-22.
 
-    ssh root@165.22.35.75 'pgrep -f "[e]xtract_pdfs.py" >/dev/null && echo RUNNING || echo STOPPED; \
-      sqlite3 /opt/amo-dashboard/miami_dade_amo.db "SELECT COUNT(*) FROM pdf_extractions WHERE status=\"OK\" AND raw_json IS NULL;"'
-
-*Already on the droplet:*
-
-    pgrep -f "[e]xtract_pdfs.py" >/dev/null && echo RUNNING || echo STOPPED
-    sqlite3 /opt/amo-dashboard/miami_dade_amo.db "SELECT COUNT(*) FROM pdf_extractions WHERE status='OK' AND raw_json IS NULL;"
-
-Second number is documents left. **0 = repair complete.** Or run
-`collector/tests/check_extraction_completeness.py`, which fails with a shrinking count until then.
-
-**Nothing to do when it finishes.** Monday's 08:30 UTC normalize lands ~3.5h later, rebuilds the
-derived tables and restarts PM2 to clear the cache. Budget **2–2.5h** for that run, not the usual
-85 min — it will process ~72k extracted Miami-Dade documents instead of ~22k. **Expect entity
-counts, rankings and classifications to shift** once 50k documents contribute document-derived
-party names for the first time; that is the repair landing, not a regression.
-
-If it is STOPPED with documents still remaining, just relaunch — completed work is committed as it
-goes and the restart re-selects whatever is left:
-
-    ssh root@165.22.35.75 'cd /opt/amo-dashboard/collector && nohup bash -c \
-      "source /opt/amo-dashboard/.env && exec ./.venv/bin/python3 -u extract_pdfs.py \
-      --county MIAMI-DADE --limit 60000 --workers 8 --budget 45" \
-      >> /opt/amo-dashboard/collector/main_backfill.log 2>&1 & disown'
+**6 documents remain unextracted and that is expected steady state, not a leftover.** The facility
+tick resumed the moment the backfill exited and claimed them (all `extracted_at` 04:20–07:00 UTC
+today, `facility_type='none'`). The two jobs still interleave — what changed is that this is now a
+**lag rather than permanent loss**: `pending_documents` keys on `raw_json IS NULL`, so Friday's
+weekly run picks them up on its own. Expect a handful of these at any given moment.
 
 ### The three decisions that shape everything
 1. **Broward history is index-only, by decision.** 2023–2025 has filings/parties/dates but no
