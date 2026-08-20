@@ -152,6 +152,19 @@ the gap; email-report work is on hold meanwhile (its blockers unchanged: app pas
 **NOT deployed** — needs the standard `git pull && npm run build && pm2 restart amo-dashboard`
 (no DB/normalize step involved). Remember the 7-day cache: restart is what busts it.
 
+**Same day, later — "Download report" Excel workbook replaces the main CSV button (user request:
+"big 4 reporting standards, two sheets").** New dep **exceljs**; `server/reporting/workbook.ts`
+(`buildActivityWorkbook`) + `GET /api/reporting/export-report` (same params as `/export`, which
+still exists for the per-entity mini CSV buttons). Sheet 1 *Summary*: title/meta block (scope,
+period, direction, filters, generated-at) + per-entity stats table (total/sold/acquired/net/$
+known/first/last/top counterparty), banded rows, double-rule totals, zero-activity entities muted
+but listed; no-entity mode falls back to top-sellers/top-acquirers tables. Sheet 2 *Transaction
+Detail*: all filings, navy header, frozen pane, autofilter, CFN hyperlinks (same per-county guard
+as CSV — Broward gets no link), money numFmt. **Tie-out verified** on the 37-bank YTD sold-only
+run: detail = 95 rows = summary Sold total = the UI KPI; the 17 Acquired attributions on a
+sold-only report are intra-selection bank-to-bank sales (one filing, both sides) — footnoted in
+the sheet itself. Deploy note: **`npm install` needed on the droplet** for exceljs.
+
 ---
 
 ## 2026-08-19 — Emailed reports: BUILT and preview-tested locally, NOT yet deployed

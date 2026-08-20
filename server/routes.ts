@@ -3,6 +3,7 @@ import type { Server } from 'http';
 import { getDb } from './db';
 import { fetchFDICFinancials } from './fdic';
 import { queryGroupedFacilities } from './lending/facilities';
+import { buildActivityWorkbook } from './reporting/workbook';
 import {
   getCached, setCached, clearCache, clearCacheByPrefix, getCacheStats,
   makeCacheKey, DEFAULT_TTL_MS, STATS_TTL_MS,
@@ -1772,6 +1773,77 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', `attachment; filename="amo-reporting-${new Date().toISOString().slice(0,10)}.csv"`);
     res.send(csv);
+  });
+
+  // ─── GET /api/reporting/export-report ─────────────────────────────────────
+  // Two-sheet Excel report (Summary + Transaction Detail) for the current
+  // filter set — same parameters as /api/reporting/export. The workbook layout
+  // lives in server/reporting/workbook.ts.
+  app.get('/api/reporting/export-report', async (req, res) => {
+    const search    = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+    const startDate = typeof req.query.start_date === 'string' ? req.query.start_date : '';
+    const endDate   = typeof req.query.end_date === 'string' ? req.query.end_date : '';
+    const reviewed  = typeof req.query.reviewed === 'string' ? req.query.reviewed : '';
+    const targetsOnly = req.query.targets === '1';
+    const entities  = parseEntities(req.query);
+    const entityRole = entityRoleParam(req.query);
+    const county    = countyScope(req as any);
+
+    const clauses: string[] = [];
+    const params: any[] = [];
+    if (county) { clauses.push(`COALESCE(county, '${DEFAULT_COUNTY}') = ?`); params.push(county); }
+    if (search) {
+      clauses.push(`(UPPER(assignor_canon) LIKE UPPER(?) OR UPPER(assignee_canon) LIKE UPPER(?) OR cfn LIKE ?)`);
+      params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+    }
+    if (entities.length > 0) {
+      pushEntityClause(clauses, params, entities, entityRole);
+    }
+    if (startDate) { clauses.push(`rec_date >= ?`); params.push(startDate); }
+    if (endDate)   { clauses.push(`rec_date <= ?`); params.push(endDate); }
+    if (reviewed === 'yes') { clauses.push(`reviewed_at IS NOT NULL`); }
+    if (reviewed === 'no')  { clauses.push(`reviewed_at IS NULL`); }
+    if (targetsOnly) { clauses.push(TARGETS_MATCH); }
+    clauses.push(`txn_type != 'SELF_ASSIGN'`);
+    const wc = `WHERE ${clauses.join(' AND ')}`;
+
+    const rows = db.prepare(`
+      SELECT cfn, rec_date, doc_type, doc_category, doc_title,
+             assignor_canon AS assignor, assignee_canon AS assignee,
+             assignor_type, assignee_type, txn_type,
+             property_address, folio_parcel, loan_amount, consideration_amount,
+             signatory_officer, rec_book, rec_page, county,
+             classification, reviewed_by, reviewed_at
+      FROM aom_events_clean ${wc}
+      ORDER BY rec_date DESC
+    `).all(...params) as any[];
+
+    const entityTypes = new Map<string, string>();
+    for (const e of entities) {
+      const node = db.prepare('SELECT entity_type FROM entity_nodes WHERE entity = ?').get(e) as any;
+      if (node?.entity_type) entityTypes.set(e, node.entity_type);
+    }
+
+    // Same per-county guard as the CSV export: a Miami-Dade book/page URL built
+    // from a Broward row resolves to an unrelated real document.
+    const docLink = (r: any) => {
+      const c = String(r.county || DEFAULT_COUNTY).toUpperCase();
+      if (c !== 'MIAMI-DADE' || !r.rec_book || !r.rec_page) return '';
+      return 'https://onlineservices.miamidadeclerk.gov/officialrecords/api/DocumentImage/getdocumentimage'
+           + `?redact=false&sBook=${encodeURIComponent(r.rec_book)}`
+           + `&sBookType=O+&sPage=${encodeURIComponent(r.rec_page)}`;
+    };
+
+    const wb = buildActivityWorkbook(rows, {
+      countyLabel: county === 'MIAMI-DADE' ? 'Miami-Dade County' : county === 'BROWARD' ? 'Broward County' : 'All counties',
+      startDate, endDate, direction: entityRole, search, reviewed, targetsOnly,
+      entities, entityTypes, docLink,
+    });
+
+    const buf = await wb.xlsx.writeBuffer();
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="amo-report-${new Date().toISOString().slice(0, 10)}.xlsx"`);
+    res.send(Buffer.from(buf));
   });
 
   // ─── POST /api/reporting/resolve-entities ─────────────────────────────────

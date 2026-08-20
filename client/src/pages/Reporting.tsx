@@ -501,7 +501,7 @@ export default function Reporting() {
   const hasFilters  = applied || startDate || endDate || reviewed || targetsOnly || entities.length > 0;
 
   const handleExport = () => {
-    window.location.href = `/api/reporting/export${exportQs}`;
+    window.location.href = `/api/reporting/export-report${exportQs}`;
   };
 
   const handlePrint = () => window.print();
@@ -524,8 +524,9 @@ export default function Reporting() {
               <Printer size={12} />Print report
             </Button>
           )}
-          <Button size="sm" variant="outline" onClick={handleExport} className="h-8 gap-1.5 text-xs">
-            <Download size={12} />Export CSV
+          <Button size="sm" variant="outline" onClick={handleExport} className="h-8 gap-1.5 text-xs"
+            title="Excel workbook: a Summary sheet for the selected entities plus the full Transaction Detail sheet">
+            <Download size={12} />Download report
           </Button>
         </div>
       </div>

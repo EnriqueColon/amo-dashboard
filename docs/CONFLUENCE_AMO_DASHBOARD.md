@@ -146,7 +146,15 @@ analytics header, a participant-activity breakdown and a time-series chart.
 - Search by CFN, assignor or assignee.
 - **Review workflow:** mark a row reviewed/unreviewed; the marking is stored server-side and shared
   by everyone.
-- **Export to CSV** for the current filter set.
+- **Download report** (replaced the CSV button, 20 Aug 2026): a two-sheet Excel workbook for the
+  current filter set. Sheet 1 *Summary* — report parameters (scope, period, direction, filters,
+  generated-at) and per-entity summary statistics (total/sold/acquired filings, net, $ volume
+  where known, first/last activity, top counterparty) with a totals row that ties out to the
+  detail sheet; entities with zero activity stay listed, muted — that absence is often the
+  finding. With no entities selected it shows top-sellers/top-acquirers tables instead. Sheet 2
+  *Transaction Detail* — every filing, styled header, frozen pane, autofilter, CFNs hyperlinked
+  to the county document image. The raw-CSV endpoint (`/api/reporting/export`) still exists for
+  the per-entity mini CSV buttons and any scripted use.
 - **Entity report:** a per-company written summary of activity.
 - **Paste a list** (added 19 Aug 2026): for requests like "run a report on these 29 banks" — click
   *paste a list* in the entity picker, paste one name per line (slashes and parentheticals are
