@@ -1,6 +1,6 @@
 # AMO Tracker — Mortgage Assignment Intelligence Dashboard
 
-> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 17 Aug 2026
+> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 19 Aug 2026
 > **Production URL:** `http://165.22.35.75:5000` (single shared password)
 > **Repository:** `amo-dashboard` (`origin/main`)
 
@@ -394,6 +394,11 @@ System dependencies for OCR: `poppler-utils` and `tesseract-ocr`
 | `CLERK_EMAIL` / `CLERK_PASSWORD` | `collect_live.py` | Miami-Dade portal login |
 | `BROWARD_FTP_HOST/PORT/USER/PASS` | `broward_collect.py`, `broward_images.py` | Public credentials, overridable |
 | `DOWNLOAD_WORKERS` | `extract_pdfs.py` | Auto-scales to `cpu_count()`, capped at 4 |
+| `REPORT_SMTP_HOST` | `server/email/mailer.ts` | Default `smtp-mail.outlook.com`. **Not yet set in production** — see §7.4 item 9 |
+| `REPORT_SMTP_PORT` | `server/email/mailer.ts` | Default `587` (STARTTLS) |
+| `REPORT_SMTP_USER` | `server/email/mailer.ts`, `sendWeeklyReport.ts` | Default `mktinfo@safeharborcp.com` |
+| `REPORT_SMTP_PASS` | `server/email/mailer.ts` | Outlook **app password** (not the account password); required only for `--send`, unset today |
+| `REPORT_RECIPIENTS` | `sendWeeklyReport.ts` | Comma-separated; default `andres@safeharborcp.com,david@safeharborcp.com` |
 
 Production values live in `/opt/amo-dashboard/.env`, sourced by every cron wrapper.
 
@@ -439,6 +444,10 @@ All installed via `crontab -e` on the droplet.
 | `30 12 * * *` | `run_broward_daily.sh` (`BROWARD_INGEST_INDEX=1`) | Broward index → images → retention report. **Time-critical.** |
 | `0 6 * * 5` | `run_weekly.sh` | Miami-Dade: collect last 10 days → extract PDFs → normalize → enrich. |
 | `15 3 * * *` | `run_backup.sh` | Verified snapshot of the database + Broward images → local rotation (7 kept) → DigitalOcean Spaces. Records every run in `backup_runs`; the Overview banner reads it. |
+
+**Not yet installed:** a weekly emailed report (`server/scripts/sendWeeklyReport.ts`), planned to run
+right after `run_weekly.sh` on the same Friday 06:00 UTC slot. Built and preview-tested locally as of
+19 Aug 2026 but not yet wired into cron — see §7.4 item 9.
 
 #### Two things about these jobs that must not be forgotten
 
@@ -839,7 +848,9 @@ scrape AcclaimWeb for that window · request a one-off bulk export from Broward 
 954-831-4000) · wait for CY2026 to publish (~Feb 2027) and backfill then. The index self-heals when
 CY2026 lands; **the images for that window never will.**
 
-**3. Cron failures on the droplet are silent** — no `MAILTO`, no mail transport installed. Mitigated
+**3. Cron failures on the droplet are silent** — no `MAILTO` configured for cron itself. A mail
+transport now exists for the weekly report (item 9, `server/email/mailer.ts`) but is not wired to
+alerting. Mitigated
 11 Aug 2026: the Overview now shows a red banner when Broward images have not been harvested for
 over 48 hours, using `MAX(harvested_at)` as the liveness signal. This matters because Broward's
 feed drops each day after ~10, so a job that quietly stops costs images permanently. Proper
@@ -908,6 +919,24 @@ orphaned endpoints still needing county-correctness). 40 endpoints → 32. Imple
 in git history (added `197e947`, unrouted `3b1674a`, removed `9a2932d`) if the distressed-sourcing
 use case ever returns.
 
+**9. Weekly emailed report — built and preview-tested 19 Aug 2026, NOT yet live.** New capability:
+`server/scripts/sendWeeklyReport.ts` builds a rolling 15-day report as an inline HTML email — the
+Reporting page's transaction table (CFNs linked to county document images, capped at the 50 most
+recent inline) with a per-day filing-volume bar chart, and a Lending Relationships snapshot (top 10
+most active lender↔borrower pairs, same grouped query as the tab via the shared
+`server/lending/facilities.ts`) with a filings-per-relationship bar chart. Charts are email-safe
+nested-table bars (no JS/SVG — Outlook desktop renders with the Word engine), every bar
+direct-labeled. Full row-level data for both datasets is attached as CSVs. No third-party email
+vendor — sends over SMTP through the existing `mktinfo@safeharborcp.com` Outlook/Office 365 mailbox
+via `nodemailer` (`server/email/mailer.ts`, `server/email/report.ts`). Recipients today:
+`andres@safeharborcp.com`, `david@safeharborcp.com` (§6.2, `REPORT_RECIPIENTS`).
+
+The script defaults to **preview mode** — writes the HTML + both CSVs to
+`server/scripts/output/` (gitignored) and sends nothing — and only sends for real with an explicit
+`--send` flag, so it cannot fire accidentally. **Blocking on:** an Outlook app password for
+`mktinfo@safeharborcp.com` (§7.6), after which it still needs a real test send, cron wiring next to
+`run_weekly.sh` (§6.5), and a deploy — none of that has happened yet.
+
 ### 7.5 Risk register
 
 | Risk | Impact | Mitigation in place |
@@ -941,22 +970,29 @@ use case ever returns.
    this is done, which does not address the risk it exists for. Create a Space, generate a Spaces
    access key, and add the six lines in §7.4 item 8a to `/opt/amo-dashboard/.env`. ~$5/month.
    The amber banner on the Overview clears once the first upload succeeds.
+4. 📧 **Generate an Outlook app password for `mktinfo@safeharborcp.com`** so the weekly emailed
+   report (§7.4 item 9) can go live: account.microsoft.com → Security → Advanced security options →
+   App passwords. Send the generated password so it can be added to `REPORT_SMTP_PASS` in
+   `/opt/amo-dashboard/.env` — it is not the account's normal login password. Also confirm the
+   report's local preview (layout/content) is approved before the first real test send.
 
 **Engineering:**
 
-4. **Real cron-failure alerting.** The dashboard now warns when Broward collection stalls *and* when
-   backups stop succeeding, but both only help someone who opens it. There is still no `MAILTO`, no
-   mail transport, and no uptime ping on the droplet.
-5. **Confirm `AMO_PASSWORD` and `AMO_SECRET`** are set in the production environment.
+5. **Real cron-failure alerting.** The dashboard now warns when Broward collection stalls *and* when
+   backups stop succeeding, but both only help someone who opens it. There is still no `MAILTO` and
+   no uptime ping on the droplet. A mail transport now exists (`server/email/mailer.ts`, built for
+   the weekly report, item 9 in §7.4) — it is scoped to that report only today, but the same Outlook
+   SMTP path could carry cron-failure alerts later without a new vendor.
+6. **Confirm `AMO_PASSWORD` and `AMO_SECRET`** are set in the production environment.
    ✅ **Verified 15 Aug 2026** — both are present in the live PM2 environment. Two caveats stand:
    `ecosystem.config.cjs` has drifted from the env PM2 actually holds, so a `pm2 delete` + fresh
    start would silently change the dashboard password; and the password in use is short and
    guessable, which matters because the gate is a single shared password with no lockout.
-6. ✅ **Both flagged facility rows checked 15 Aug 2026** — see §7.4 item 7. One confirmed false
+7. ✅ **Both flagged facility rows checked 15 Aug 2026** — see §7.4 item 7. One confirmed false
    positive, one real with two bad fields. Worth a targeted extractor-prompt fix keyed on
    field incoherence rather than confidence. Broward facility detection is **still 0 in 589
    documents**; recheck as the extracted count grows.
-7. **Clean up the four ad-hoc `backup_pre_*.db` files** on the droplet (~420MB). They predate the
+8. **Clean up the four ad-hoc `backup_pre_*.db` files** on the droplet (~420MB). They predate the
    automated job and are unrotated. Keep `backup_pre_broward_normalize.db` — `ROLLBACK.md` and §6.8
    both name it as the Broward rollback point — and copy the rest to Spaces before deleting.
 

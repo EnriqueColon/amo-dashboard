@@ -119,6 +119,110 @@ weekly run picks them up on its own. Expect a handful of these at any given mome
 
 ---
 
+## 2026-08-19 — Emailed reports: BUILT and preview-tested locally, NOT yet deployed
+
+Continuation of 2026-08-18 (below) — the two blockers landed: sender `mktinfo@safeharborcp.com`,
+recipients `andres@safeharborcp.com` + `david@safeharborcp.com`, rolling-15-day window confirmed.
+User also asked to see the email before any real send is attempted, so the script defaults to a
+safe preview mode.
+
+**Built (all local, nothing deployed, nothing sent):**
+- `server/email/report.ts` — queries `aom_events_clean` and `credit_facility_events` for a given
+  date range, returns an inline HTML summary (counts by txn_type/county, top assignees, top
+  lender↔borrower pairs by filing count) + a CSV per dataset. Facility-pair amounts are never
+  summed across filings (same rule as the dashboard's total-volume stat — a recurring facility's
+  `facility_amount` is its credit limit, repeated on every filing, not a new draw).
+- `server/email/mailer.ts` — nodemailer transport over Outlook SMTP (`smtp-mail.outlook.com:587`,
+  STARTTLS), reads `REPORT_SMTP_USER`/`REPORT_SMTP_PASS` from env.
+- `server/scripts/sendWeeklyReport.ts` — the runnable entry point (`tsx server/scripts/sendWeeklyReport.ts`).
+  **Defaults to preview mode**: writes the HTML + both CSVs to `server/scripts/output/` (gitignored)
+  and sends nothing. Only sends for real with an explicit `--send` flag. `REPORT_START_DATE` /
+  `REPORT_END_DATE` env overrides let you regenerate a specific past window (used this session to
+  preview against the dev DB, which lags today — see below).
+- Added `nodemailer` + `@types/nodemailer` to `package.json`. New dep, no external paid service.
+- `docs/CONFLUENCE_AMO_DASHBOARD.md` updated: new §7.4 item 9, new env vars in §6.2, a note in
+  §6.5, and a new owner action in §7.6 (generate the Outlook app password + approve the preview).
+
+**Verified locally:** `tsc --noEmit` clean. Ran the script against the local dev DB — real 15-days-
+from-today window returned 0 rows (dev DB's newest `aom_events_clean` row is 2026-04-22, confirming
+the known "local dev DB lags production" gotcha, not a bug). Used the date overrides to preview
+against a window with real data instead (2023-01-01 → 2025-10-29, 40,119 clean rows / 11 facility
+rows) — rendered correctly in-browser and the CSVs matched. Sent the preview HTML + both CSVs to the
+user via `SendUserFile` for review.
+
+**Same day, later — content reworked twice on user feedback, then charts added:**
+- Body now shows the actual Reporting-page table (CFN linked to the county doc image, date, county,
+  assignor/assignee + type, property, folio, loan amt, signatory, classification badge; same
+  `cleanField` garbage-OCR filtering as the UI) capped at 50 most-recent rows inline, plus a
+  Lending Relationships snapshot = top 10 pairs from the same grouped query as the tab.
+  **Refactor:** the family-aware relationship-grouping SQL moved out of `routes.ts` into
+  `server/lending/facilities.ts` (`queryGroupedFacilities`), shared by the API route and the email —
+  route behavior unchanged, `tsc` clean.
+- **Bug found & fixed:** the relationships CSV attachment was capped at the same top-10 as the
+  inline table; it now carries the full set (237 rows on the 08-05 prod snapshot) while only the
+  inline table is trimmed. Also: sender now has a display name (`"AMO Dashboard" <mktinfo@…>`).
+- **Bar charts added to both sections** (user request). Email clients run no JS and Outlook desktop
+  renders with the Word engine (no SVG/flexbox), so charts are nested-table horizontal bars — a
+  `<td>` with background color and percentage width, value direct-labeled on every bar
+  (`chartBarRow`/`barChart` in `server/email/report.ts`). Clean events → "Filings per day" (one bar
+  per calendar day incl. zero weekends, via `eachDate`); relationships → "Filings per relationship"
+  for the same top-10 pairs. Single hue (#2563eb) both charts — same measure (filing count).
+- Preview regenerated against `prod_snapshot.db` (2026-08-05 copy; window 07-15→07-30: 765 clean
+  rows, 237 relationships) after the local dev DB proved too stale (max rec_date 2026-04-22).
+  **Shareable mockup published as a Claude artifact** (inbox-framed: sender/recipients/schedule/
+  attachment chips around the real generated HTML) for the user to show teammates:
+  https://claude.ai/code/artifact/ac603756-051b-4c64-83f8-7ffb6cf812b4
+
+**Blocking on, before any real send or deploy:**
+1. User's sign-off on the preview content/layout (artifact above is the review vehicle).
+2. An Outlook **app password** for `mktinfo@safeharborcp.com` (not the account password) — user is
+   generating it via account.microsoft.com → Security → Advanced security options → App passwords.
+
+**Next session:** once the app password lands, add it to `/opt/amo-dashboard/.env` as
+`REPORT_SMTP_PASS`, do one real test `--send` to the two recipients, then wire the script into
+`run_weekly.sh` right after `enrich_entities.py` (or a separate line in the same Friday 06:00 cron
+slot), `git pull` + no build-step change needed beyond the normal deploy (`npm run build` picks up
+the new files), and confirm the first live Friday run. See [[amo-email-reports]] in memory, kept in
+sync.
+
+---
+
+## 2026-08-18 — Emailed reports: scoped, NOT yet built (planning only, no code/deploy changes)
+
+**Status: decisions made, waiting on two facts from the user before writing any code.** No files
+in this repo were touched this session.
+
+Trigger for the idea: Reporting page ([client/src/pages/Reporting.tsx](client/src/pages/Reporting.tsx))
+already has "Print report" (`window.print()`) and "Export CSV" (`GET /api/reporting/export`), but
+no way to *deliver* a report — everything requires someone to open the dashboard. User wants a
+report emailed out instead.
+
+**Decisions locked in:**
+- **No third-party email vendor** (ruled out Resend/SendGrid). Sending goes over **SMTP through
+  the user's own Outlook/Office 365 mailbox** via `nodemailer` (new dep, no paid service) —
+  `smtp-mail.outlook.com`, app password in `/opt/amo-dashboard/.env` (same pattern as
+  `OPENAI_API_KEY`).
+- **Scheduled only, no manual "send" button.** Weekly, piggybacking on the existing Friday 06:00
+  `run_weekly.sh` cron entry rather than adding a separate schedule.
+- **Content = rolling last-15-days window**, covering **both** data sources: clean AMO events
+  (`aom_events_clean`, the Reporting-page dataset) and lending relationships
+  (`credit_facility_events`, the Credit Facilities / Lending Relationships tab dataset). Email body
+  is an **inline HTML summary** (counts/highlights, readable without opening anything) with **CSVs
+  attached** for both datasets (reuse `/api/reporting/export`-style query logic).
+
+**Blocking on, before any code gets written:**
+1. Sender Outlook address + recipient address(es) — not yet provided.
+2. Confirmation that "last 15 days" means a rolling lookback from send time every Friday (assumed,
+   not yet confirmed).
+
+**Next session:** once the two facts above land, build `server/email/` (nodemailer + Outlook SMTP
+config), a report-assembly script pulling the 15-day window from both tables, wire it into the
+Friday cron next to `run_weekly.sh`, add the app password to the droplet `.env`, deploy, and test
+with a real send before trusting the schedule. See [[amo-email-reports]] in memory for the same
+facts, kept in sync.
+
+---
+
 ## 2026-08-15 (later) — 🚨 70% of Miami-Dade was never extracted. Two jobs fighting over one table.
 
 **Found because the user looked at the Reporting page and asked why Property / Folio / Loan Amt /
