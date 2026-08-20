@@ -467,6 +467,9 @@ export default function Reporting() {
   const [reviewed, setReviewed]   = useState('');
   const [targetsOnly, setTargetsOnly] = useState(() => params.get('targets') === '1');
   const [entities, setEntities]   = useState<string[]>([]);
+  // '' = both sides; 'assignor' = filings the selection sold/assigned out;
+  // 'assignee' = filings it acquired. Applies to the filing tables + CSV export.
+  const [entityRole, setEntityRole] = useState('');
 
   const { data: targets } = useQuery({
     queryKey: ['/api/targets'],
@@ -488,12 +491,13 @@ export default function Reporting() {
 
   const targetsQ = targetsOnly ? '&targets=1' : '';
   const entitiesQ = entities.map(e => `&entities=${encodeURIComponent(e)}`).join('');
+  const roleQ = entities.length > 0 && entityRole ? `&entity_role=${entityRole}` : '';
   // Shared filter fragment (no page/limit/entities) — TransactionsTable adds its own
   const filterQs = `&search=${encodeURIComponent(applied)}&start_date=${startDate}&end_date=${endDate}&reviewed=${reviewed}${targetsQ}`;
-  const exportQs = `?search=${encodeURIComponent(applied)}&start_date=${startDate}&end_date=${endDate}&reviewed=${reviewed}${targetsQ}${entitiesQ}`;
+  const exportQs = `?search=${encodeURIComponent(applied)}&start_date=${startDate}&end_date=${endDate}&reviewed=${reviewed}${targetsQ}${entitiesQ}${roleQ}`;
 
   const applySearch = () => setApplied(search);
-  const clearAll    = () => { setSearch(''); setApplied(''); setStartDate(''); setEndDate(''); setReviewed(''); setTargetsOnly(false); setEntities([]); };
+  const clearAll    = () => { setSearch(''); setApplied(''); setStartDate(''); setEndDate(''); setReviewed(''); setTargetsOnly(false); setEntities([]); setEntityRole(''); };
   const hasFilters  = applied || startDate || endDate || reviewed || targetsOnly || entities.length > 0;
 
   const handleExport = () => {
@@ -558,6 +562,18 @@ export default function Reporting() {
             Pick one or more entities to generate a focused report — KPIs, activity timeline, counterparties, and a summary table. The filing table and CSV export below follow the same selection.
           </p>
         )}
+        {entities.length > 0 && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[11px] text-muted-foreground">Direction:</span>
+            {([['', 'All activity'], ['assignor', 'Sold / assigned out'], ['assignee', 'Acquired']] as const).map(([val, label]) => (
+              <button key={val} onClick={() => setEntityRole(val)}
+                className={`h-6 px-2 rounded-full border text-[10px] font-medium transition-colors ${entityRole === val ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+                {label}
+              </button>
+            ))}
+            <span className="text-[10px] text-muted-foreground/70">applies to the filing tables and CSV export</span>
+          </div>
+        )}
       </div>
 
       {/* Entity report (only when entities are selected) */}
@@ -609,15 +625,15 @@ export default function Reporting() {
         <div className="space-y-4">
           {entities.map(e => (
             <TransactionsTable
-              key={`${e}|${filterQs}`}
+              key={`${e}|${filterQs}${roleQ}`}
               title={e}
-              filterQs={`${filterQs}&entities=${encodeURIComponent(e)}`}
-              exportQs={`?search=${encodeURIComponent(applied)}&start_date=${startDate}&end_date=${endDate}&reviewed=${reviewed}${targetsQ}&entities=${encodeURIComponent(e)}`}
+              filterQs={`${filterQs}&entities=${encodeURIComponent(e)}${roleQ}`}
+              exportQs={`?search=${encodeURIComponent(applied)}&start_date=${startDate}&end_date=${endDate}&reviewed=${reviewed}${targetsQ}&entities=${encodeURIComponent(e)}${roleQ}`}
             />
           ))}
         </div>
       ) : (
-        <TransactionsTable key={filterQs + entitiesQ} filterQs={filterQs + entitiesQ} />
+        <TransactionsTable key={filterQs + entitiesQ + roleQ} filterQs={filterQs + entitiesQ + roleQ} />
       )}
     </div>
   );

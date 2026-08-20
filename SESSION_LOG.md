@@ -119,6 +119,41 @@ weekly run picks them up on its own. Expect a handful of these at any given mome
 
 ---
 
+## 2026-08-20 — Reporting: paste-a-list bulk entity resolver + direction filter (built, verified locally, NOT deployed)
+
+**Trigger:** a colleague's email — "Rafael wants a report on local banks that have assigned/sold
+loans this year" with a 29-bank list. Adding those one-by-one through the picker autocomplete was
+the gap; email-report work is on hold meanwhile (its blockers unchanged: app password + sign-off).
+
+**Built (commit pending this entry):**
+- `POST /api/reporting/resolve-entities` (routes.ts): bulk freeform-name → canonical-entity
+  matching. Splits alternatives on `/` and parentheticals; scores candidates from `entity_nodes`
+  via a non-generic anchor word (LIKE, vol-ranked 60) — **STRONG** = every significant input word
+  whole-word-present (client pre-checks), **weak** = ≥half whole-word or single-word substring
+  (unchecked). Verified against the 29-bank list on `prod_snapshot.db`: 38 strong matches incl.
+  multi-variant coverage (BANKUNITED + BANKUNITED N A; both U S CENTURY spellings; OCR variant
+  "CITY NATIONAL BANK 0F FLORIDA") while AMERISAVE ("Ameris"), SILICON VALLEY BANK ("Valley
+  National") and GRACE UNITED COMMUNITY CHURCH ("United Community") stayed weak/reviewable —
+  the church IS all-whole-words so it lands strong; that's the known cost of the rule, users
+  uncheck it. 4 names had zero recorded activity (Interamerican, Executive National, Plus
+  International, Paradise Bank) — surfaced as "no match on record", not silently dropped.
+- `?entity_role=assignor|assignee` on `/api/reporting` + `/api/reporting/export`
+  (`entityRoleParam`/`pushEntityClause` helpers): restricts the entity filter to one transaction
+  side. Verified: OCEAN BANK YTD 11 rows = 8 assignor + 3 assignee, export CSV honors it.
+- Client: `BulkEntityPanel` in `EntityReport.tsx` ("paste a list" under the picker; bullets/dashes
+  stripped per line; strong pre-checked, per-line chips toggle; "no match on record" flagged;
+  picker cap raised 50→120 for multi-variant bank lists). `Reporting.tsx`: Direction chips
+  (All / Sold-assigned out / Acquired) shown when entities selected — applies to filing tables +
+  CSV export only; the entity report above already splits in/out and stays both-sides (labeled).
+- Rafael's ask = paste list → confirm matches → YTD preset → Direction "Sold / assigned out" →
+  Export CSV. Whole flow verified in-browser on the snapshot server (port 5051; launch.json's
+  `amo-dashboard-snapshot` entry now points at `./prod_snapshot.db`, was a dead `/tmp/final2.db`).
+
+**NOT deployed** — needs the standard `git pull && npm run build && pm2 restart amo-dashboard`
+(no DB/normalize step involved). Remember the 7-day cache: restart is what busts it.
+
+---
+
 ## 2026-08-19 — Emailed reports: BUILT and preview-tested locally, NOT yet deployed
 
 Continuation of 2026-08-18 (below) — the two blockers landed: sender `mktinfo@safeharborcp.com`,

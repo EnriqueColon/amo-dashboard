@@ -43,13 +43,131 @@ function useDebounced(value: string, ms = 300) {
   return debounced;
 }
 
+// ── Bulk paste-a-list resolver panel ─────────────────────────────────────────
+// For requests like "run a report on these 29 banks": paste one name per line,
+// the server suggests canonical-entity matches per line (confident whole-word
+// matches pre-checked, loose substring hits unchecked), confirm, and they all
+// become picker chips at once.
+type ResolveMatch = { entity: string; entity_type: string | null; total_vol: number; strong: boolean };
+type ResolveResult = { input: string; matches: ResolveMatch[] };
+
+function BulkEntityPanel({ selected, onAdd, onClose }: {
+  selected: string[];
+  onAdd: (entities: string[]) => void;
+  onClose: () => void;
+}) {
+  const [text, setText] = useState('');
+  const [resolving, setResolving] = useState(false);
+  const [results, setResults] = useState<ResolveResult[] | null>(null);
+  const [chosen, setChosen] = useState<Set<string>>(new Set());
+
+  const resolve = async () => {
+    const names = text.split('\n').map(s => s.replace(/^[\s*\-•·]+/, '').trim()).filter(Boolean);
+    if (!names.length) return;
+    setResolving(true);
+    try {
+      const r = await apiRequest('POST', '/api/reporting/resolve-entities', { names }).then(r => r.json());
+      const res: ResolveResult[] = r.results || [];
+      setResults(res);
+      const pre = new Set<string>();
+      for (const line of res) for (const m of line.matches) if (m.strong) pre.add(m.entity);
+      setChosen(pre);
+    } finally {
+      setResolving(false);
+    }
+  };
+
+  const toggle = (entity: string) => setChosen(prev => {
+    const next = new Set(prev);
+    next.has(entity) ? next.delete(entity) : next.add(entity);
+    return next;
+  });
+
+  const addable = Array.from(chosen).filter(e => !selected.includes(e));
+  const unmatched = (results || []).filter(r => r.matches.length === 0);
+
+  return (
+    <div className="rounded-md border border-border bg-muted/20 p-2.5 space-y-2">
+      {!results ? (
+        <>
+          <p className="text-[11px] text-muted-foreground">
+            Paste a list of names — one per line. Each line is matched against the entities on record; you confirm the matches before anything is added.
+          </p>
+          <textarea
+            value={text}
+            onChange={e => setText(e.target.value)}
+            placeholder={'BankUnited\nAmerant Bank\nOcean Bank\n…'}
+            rows={6}
+            className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs font-mono resize-y focus:outline-none focus:ring-1 focus:ring-primary"
+            data-testid="bulk-entity-textarea"
+          />
+          <div className="flex items-center gap-1.5">
+            <button onClick={resolve} disabled={resolving || !text.trim()}
+              className="h-7 px-3 rounded-md bg-primary text-primary-foreground text-xs font-medium disabled:opacity-50">
+              {resolving ? 'Matching…' : 'Find matches'}
+            </button>
+            <button onClick={onClose} className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground">Cancel</button>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="max-h-72 overflow-y-auto space-y-1.5 pr-1">
+            {results.map(line => (
+              <div key={line.input} className="text-[11px]">
+                <span className="font-medium">{line.input}</span>
+                {line.matches.length === 0 && <span className="ml-2 text-amber-600">no match on record</span>}
+                <div className="flex flex-wrap gap-1 mt-0.5">
+                  {line.matches.map(m => {
+                    const on = chosen.has(m.entity);
+                    return (
+                      <button key={m.entity} onClick={() => toggle(m.entity)}
+                        title={`${m.total_vol.toLocaleString()} transactions${m.strong ? '' : ' — loose match, double-check'}`}
+                        className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium transition-colors ${on
+                          ? 'bg-primary/10 border-primary/40 text-primary'
+                          : 'border-border text-muted-foreground hover:text-foreground'}`}>
+                        <span className={`w-2.5 h-2.5 rounded-sm border inline-flex items-center justify-center ${on ? 'bg-primary border-primary' : 'border-muted-foreground/40'}`}>
+                          {on && <span className="text-primary-foreground text-[8px] leading-none">✓</span>}
+                        </span>
+                        {m.entity}
+                        <span className="text-muted-foreground font-normal">{m.total_vol.toLocaleString()}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+          {unmatched.length > 0 && (
+            <p className="text-[10px] text-muted-foreground">
+              {unmatched.length} name{unmatched.length === 1 ? ' has' : 's have'} no recorded activity — they can't appear in a report.
+            </p>
+          )}
+          <div className="flex items-center gap-1.5">
+            <button onClick={() => { onAdd(addable); onClose(); }} disabled={addable.length === 0}
+              className="h-7 px-3 rounded-md bg-primary text-primary-foreground text-xs font-medium disabled:opacity-50"
+              data-testid="bulk-entity-add">
+              Add {addable.length} selected
+            </button>
+            <button onClick={() => { setResults(null); setChosen(new Set()); }}
+              className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground">Edit list</button>
+            <button onClick={onClose} className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground">Cancel</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ── Entity multi-select picker ────────────────────────────────────────────────
+const MAX_SELECTED = 120;
+
 export function EntityPicker({ selected, onChange }: {
   selected: string[];
   onChange: (entities: string[]) => void;
 }) {
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
   const query = useDebounced(q.trim());
 
   const { data } = useQuery({
@@ -61,9 +179,17 @@ export function EntityPicker({ selected, onChange }: {
   const results: any[] = (query.length >= 2 ? (data || []) : []).filter((r: any) => !selected.includes(r.entity));
 
   const add = (entity: string) => {
-    if (!selected.includes(entity) && selected.length < 50) onChange([...selected, entity]);
+    if (!selected.includes(entity) && selected.length < MAX_SELECTED) onChange([...selected, entity]);
     setQ('');
     setOpen(false);
+  };
+
+  const addMany = (entities: string[]) => {
+    const merged = [...selected];
+    for (const e of entities) {
+      if (!merged.includes(e) && merged.length < MAX_SELECTED) merged.push(e);
+    }
+    onChange(merged);
   };
 
   return (
@@ -111,6 +237,11 @@ export function EntityPicker({ selected, onChange }: {
             </div>
           )}
         </div>
+        <button onClick={() => setBulkOpen(v => !v)}
+          className="text-[10px] text-muted-foreground hover:text-foreground underline underline-offset-2"
+          data-testid="bulk-entity-toggle">
+          paste a list
+        </button>
         {selected.length > 0 && (
           <button onClick={() => onChange([])}
             className="text-[10px] text-muted-foreground hover:text-foreground underline underline-offset-2">
@@ -118,6 +249,9 @@ export function EntityPicker({ selected, onChange }: {
           </button>
         )}
       </div>
+      {bulkOpen && (
+        <BulkEntityPanel selected={selected} onAdd={addMany} onClose={() => setBulkOpen(false)} />
+      )}
     </div>
   );
 }

@@ -1250,6 +1250,22 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     res.json({ ok: true });
   });
 
+  // ── Helper: ?entity_role= restricts the entity filter to one side of the
+  // transaction — 'assignor' = filings the selection SOLD/assigned out,
+  // 'assignee' = filings it acquired. Anything else means both sides.
+  function entityRoleParam(q: any): 'assignor' | 'assignee' | '' {
+    return q.entity_role === 'assignor' || q.entity_role === 'assignee' ? q.entity_role : '';
+  }
+  function pushEntityClause(clauses: string[], params: any[], entities: string[], role: 'assignor' | 'assignee' | '') {
+    const ph = entities.map(() => '?').join(',');
+    if (role === 'assignor')      { clauses.push(`assignor_canon IN (${ph})`); params.push(...entities); }
+    else if (role === 'assignee') { clauses.push(`assignee_canon IN (${ph})`); params.push(...entities); }
+    else {
+      clauses.push(`(assignor_canon IN (${ph}) OR assignee_canon IN (${ph}))`);
+      params.push(...entities, ...entities);
+    }
+  }
+
   // ── Helper: parse ?entities= (repeatable) into a clean string array ────────
   function parseEntities(q: any): string[] {
     const raw = q.entities;
@@ -1609,6 +1625,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const reviewed  = typeof req.query.reviewed === 'string' ? req.query.reviewed : '';
     const targetsOnly = req.query.targets === '1';
     const entities  = parseEntities(req.query);
+    const entityRole = entityRoleParam(req.query);
 
     const county    = countyScope(req as any);
     const clauses: string[] = [];
@@ -1620,9 +1637,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       params.push(`%${search}%`, `%${search}%`, `%${search}%`);
     }
     if (entities.length > 0) {
-      const ph = entities.map(() => '?').join(',');
-      clauses.push(`(assignor_canon IN (${ph}) OR assignee_canon IN (${ph}))`);
-      params.push(...entities, ...entities);
+      pushEntityClause(clauses, params, entities, entityRole);
     }
     if (startDate) { clauses.push(`rec_date >= ?`); params.push(startDate); }
     if (endDate)   { clauses.push(`rec_date <= ?`); params.push(endDate); }
@@ -1680,6 +1695,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const reviewed  = typeof req.query.reviewed === 'string' ? req.query.reviewed : '';
     const targetsOnly = req.query.targets === '1';
     const entities  = parseEntities(req.query);
+    const entityRole = entityRoleParam(req.query);
     const county    = countyScope(req as any);
 
     const clauses: string[] = [];
@@ -1690,9 +1706,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       params.push(`%${search}%`, `%${search}%`, `%${search}%`);
     }
     if (entities.length > 0) {
-      const ph = entities.map(() => '?').join(',');
-      clauses.push(`(assignor_canon IN (${ph}) OR assignee_canon IN (${ph}))`);
-      params.push(...entities, ...entities);
+      pushEntityClause(clauses, params, entities, entityRole);
     }
     if (startDate) { clauses.push(`rec_date >= ?`); params.push(startDate); }
     if (endDate)   { clauses.push(`rec_date <= ?`); params.push(endDate); }
@@ -1758,6 +1772,70 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', `attachment; filename="amo-reporting-${new Date().toISOString().slice(0,10)}.csv"`);
     res.send(csv);
+  });
+
+  // ─── POST /api/reporting/resolve-entities ─────────────────────────────────
+  // Bulk freeform-name → canonical-entity matching, for pasted lists ("run a
+  // report on these 29 banks"). One input line may carry alternatives
+  // ("U.S. Century Bank / USCB Financial") and parentheticals ("Centennial
+  // (Home BancShares)") — each is tried separately. A candidate is STRONG when
+  // every significant input word appears as a whole word in it (the client
+  // pre-checks those); substring-only hits stay weak — "Ameris" must surface
+  // AMERISAVE MORTGAGE as an option but never auto-select it.
+  const RESOLVE_NOISE = new Set(['OF', 'THE', 'N', 'A', 'NA', 'AND']);
+  // Generic words make bad LIKE anchors: %BANK% ranked by volume would bury
+  // small banks below the top-N cutoff before scoring ever sees them.
+  const RESOLVE_GENERIC = new Set(['BANK', 'BANKS', 'NATIONAL', 'MORTGAGE', 'TRUST', 'FINANCIAL', 'COMPANY', 'CORP', 'INC', 'LLC', 'FLORIDA', 'FIRST']);
+  const normEntityName = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim().replace(/ +/g, ' ');
+
+  app.post('/api/reporting/resolve-entities', (req, res) => {
+    const rawNames = Array.isArray((req.body as any)?.names) ? (req.body as any).names : [];
+    const inputs: string[] = rawNames.map((n: any) => String(n).trim()).filter(Boolean).slice(0, 100);
+
+    const results = inputs.map(input => {
+      const alts: string[] = [];
+      const paren = input.match(/\(([^)]+)\)/);
+      if (paren) alts.push(paren[1]);
+      for (const part of input.replace(/\([^)]*\)/g, ' ').split('/')) {
+        if (part.trim()) alts.push(part);
+      }
+
+      // entity → best match info across alternatives
+      const seen = new Map<string, { entity: string; entity_type: string | null; total_vol: number; strong: boolean }>();
+      for (const alt of alts) {
+        const words = normEntityName(alt).split(' ').filter(w => w && !RESOLVE_NOISE.has(w));
+        if (!words.length) continue;
+        const anchors = words.filter(w => !RESOLVE_GENERIC.has(w));
+        const anchor = (anchors.length ? anchors : words).sort((x, y) => y.length - x.length)[0];
+
+        const rows = db.prepare(`
+          SELECT entity, entity_type, total_vol FROM entity_nodes
+          WHERE entity LIKE ? ORDER BY total_vol DESC LIMIT 60
+        `).all(`%${anchor}%`) as any[];
+
+        for (const r of rows) {
+          const en = normEntityName(r.entity);
+          const padded = ` ${en} `;
+          const wholeHits = words.filter(w => padded.includes(` ${w} `)).length;
+          const strong = wholeHits === words.length;
+          // Weak needs either half the words as whole words, or (single-word
+          // input) a plain substring hit like AMERIS→AMERISAVE.
+          const weak = wholeHits * 2 >= words.length || (words.length === 1 && en.includes(words[0]));
+          if (!strong && !weak) continue;
+          const prev = seen.get(r.entity);
+          if (!prev || (strong && !prev.strong)) {
+            seen.set(r.entity, { entity: r.entity, entity_type: r.entity_type ?? null, total_vol: r.total_vol ?? 0, strong });
+          }
+        }
+      }
+
+      const matches = Array.from(seen.values())
+        .sort((a, b) => (Number(b.strong) - Number(a.strong)) || (b.total_vol - a.total_vol))
+        .slice(0, 8);
+      return { input, matches };
+    });
+
+    res.json({ results });
   });
 
   // ─── GET /api/reporting/participants ──────────────────────────────────────

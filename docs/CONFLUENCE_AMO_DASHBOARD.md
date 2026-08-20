@@ -1,6 +1,6 @@
 # AMO Tracker — Mortgage Assignment Intelligence Dashboard
 
-> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 19 Aug 2026
+> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 20 Aug 2026
 > **Production URL:** `http://165.22.35.75:5000` (single shared password)
 > **Repository:** `amo-dashboard` (`origin/main`)
 
@@ -148,6 +148,16 @@ analytics header, a participant-activity breakdown and a time-series chart.
   by everyone.
 - **Export to CSV** for the current filter set.
 - **Entity report:** a per-company written summary of activity.
+- **Paste a list** (added 19 Aug 2026): for requests like "run a report on these 29 banks" — click
+  *paste a list* in the entity picker, paste one name per line (slashes and parentheticals are
+  understood, e.g. "U.S. Century Bank / USCB Financial"). Each line is matched against the entities
+  on record: confident whole-word matches come pre-checked, loose look-alikes (e.g. "Ameris" →
+  AMERISAVE MORTGAGE) stay unchecked for human review. Confirm, and all matches become report
+  entities at once. Banks often exist under several recorded spellings (BANKUNITED + BANKUNITED
+  N A) — select all variants to cover the institution.
+- **Direction filter** (same date): with entities selected, restrict the filing tables and CSV
+  export to *Sold / assigned out* (the selection as assignor) or *Acquired* (as assignee). The
+  entity-report KPIs above it always show both directions, labeled in/out.
 
 #### Targets (`/targets`)
 Your watchlist of market participants. Search the canonical entity list, add a firm, and the page
