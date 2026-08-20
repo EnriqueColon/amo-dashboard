@@ -35,3 +35,7 @@ collector/broward_images/
 # sit untracked on the droplet and make `git status` noisy again.
 backups/
 collector/backup.log
+
+# Weekly emailed-report previews (server/scripts/sendWeeklyReport.ts --preview) —
+# real production data, regenerable on demand, never committed.
+server/scripts/output/
