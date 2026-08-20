@@ -68,7 +68,7 @@ function buildSummarySheet(wb: ExcelJS.Workbook, rows: any[], meta: ReportMeta) 
   const ws = wb.addWorksheet('Summary', { views: [{ showGridLines: false }] });
   ws.columns = [
     { width: 42 }, { width: 14 }, { width: 13 }, { width: 15 }, { width: 15 },
-    { width: 10 }, { width: 17 }, { width: 13 }, { width: 13 }, { width: 34 },
+    { width: 10 }, { width: 18 }, { width: 18 }, { width: 13 }, { width: 13 }, { width: 34 },
   ];
 
   // Title block
@@ -111,17 +111,18 @@ function buildSummarySheet(wb: ExcelJS.Workbook, rows: any[], meta: ReportMeta) 
   // Footnotes
   r++;
   const notes = [
-    '$ volume sums the underlying loan amount where the recorded document states one; many filings state none, so it is a floor, not a total.',
+    '$ columns sum the principal of the underlying mortgage stated on each recorded document — the size of the loans changing hands, not the price paid for the assignment (recorded consideration is usually nominal). "$ Assigned out" attributes each filing’s principal to its assignor; "$ Acquired" to its assignee.',
+    'Many recorded documents state no loan amount, so all $ figures are floors, not totals.',
     `Transaction Detail sheet contains ${rows.length.toLocaleString('en-US')} filings — the evidence for every figure above.`,
   ];
   if (meta.entities.length > 0) {
-    notes.splice(1, 0,
-      'A filing between two selected entities appears once in the detail sheet but is attributed to each side above, so column totals can exceed distinct filings.');
+    notes.splice(2, 0,
+      'A filing between two selected entities appears once in the detail sheet but is attributed to each side above (one’s $ assigned is the other’s $ acquired), so column totals can exceed distinct filings.');
   }
   for (const note of notes) {
     ws.getCell(r, 1).value = `• ${note}`;
     ws.getCell(r, 1).font = { size: 9, italic: true, color: { argb: MUTED } };
-    ws.mergeCells(r, 1, r, 10);
+    ws.mergeCells(r, 1, r, 11);
     r++;
   }
 }
@@ -133,44 +134,48 @@ function entitySummaryTable(ws: ExcelJS.Worksheet, rows: any[], meta: ReportMeta
   let r = startRow + 1;
 
   const header = ws.getRow(r);
-  header.values = ['Entity', 'Type', 'Total filings', 'Sold (assignor)', 'Acquired (assignee)', 'Net', '$ Volume (known)', 'First activity', 'Last activity', 'Top counterparty'];
+  header.values = ['Entity', 'Type', 'Total filings', 'Sold (assignor)', 'Acquired (assignee)', 'Net', '$ Assigned out (known)', '$ Acquired (known)', 'First activity', 'Last activity', 'Top counterparty'];
   styleHeaderRow(header);
   r++;
 
-  const totals = { filings: 0, sold: 0, acquired: 0, dollars: 0 };
+  const totals = { filings: 0, sold: 0, acquired: 0, dollarsSold: 0, dollarsAcquired: 0 };
   meta.entities.forEach((entity, i) => {
-    let sold = 0, acquired = 0, dollars = 0;
+    let sold = 0, acquired = 0, dollarsSold = 0, dollarsAcquired = 0;
     let first: string | null = null, last: string | null = null;
     const counterparties = new Map<string, number>();
     for (const row of rows) {
       const isSeller = row.assignor === entity;
       const isBuyer = row.assignee === entity;
       if (!isSeller && !isBuyer) continue;
-      if (isSeller) { sold++; bump(counterparties, row.assignee); }
-      if (isBuyer) { acquired++; bump(counterparties, row.assignor); }
-      if (row.loan_amount > 0) dollars += row.loan_amount;
+      // The recorded loan amount is the principal of the mortgage being
+      // transferred, so it attributes cleanly by side: assigned out by the
+      // assignor, received by the assignee — on the same filing.
+      if (isSeller) { sold++; bump(counterparties, row.assignee); if (row.loan_amount > 0) dollarsSold += row.loan_amount; }
+      if (isBuyer) { acquired++; bump(counterparties, row.assignor); if (row.loan_amount > 0) dollarsAcquired += row.loan_amount; }
       if (!first || row.rec_date < first) first = row.rec_date;
       if (!last || row.rec_date > last) last = row.rec_date;
     }
     const topCp = Array.from(counterparties.entries()).sort((a, b) => b[1] - a[1])[0];
     const filings = sold + acquired;
-    totals.filings += filings; totals.sold += sold; totals.acquired += acquired; totals.dollars += dollars;
+    totals.filings += filings; totals.sold += sold; totals.acquired += acquired;
+    totals.dollarsSold += dollarsSold; totals.dollarsAcquired += dollarsAcquired;
 
     const row = ws.getRow(r);
     row.values = [
       entity, meta.entityTypes.get(entity) || '—', filings, sold, acquired,
-      acquired - sold, dollars || null, first || '—', last || '—',
+      acquired - sold, dollarsSold || null, dollarsAcquired || null,
+      first || '—', last || '—',
       topCp ? `${topCp[0]} (${topCp[1]})` : '—',
     ];
     row.eachCell({ includeEmpty: true }, (cell, col) => {
-      if (col > 10) return;
+      if (col > 11) return;
       cell.border = thinBorder;
       cell.font = { size: 10 };
       if (col >= 3 && col <= 6) cell.numFmt = INT_FMT;
-      if (col === 7) cell.numFmt = MONEY_FMT;
+      if (col === 7 || col === 8) cell.numFmt = MONEY_FMT;
     });
     if (i % 2 === 1) {
-      for (let c = 1; c <= 10; c++) {
+      for (let c = 1; c <= 11; c++) {
         ws.getCell(r, c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: LIGHT_FILL } };
       }
     }
@@ -183,13 +188,13 @@ function entitySummaryTable(ws: ExcelJS.Worksheet, rows: any[], meta: ReportMeta
 
   const totalRow = ws.getRow(r);
   totalRow.values = ['Total', '', totals.filings, totals.sold, totals.acquired,
-    totals.acquired - totals.sold, totals.dollars || null, '', '', ''];
+    totals.acquired - totals.sold, totals.dollarsSold || null, totals.dollarsAcquired || null, '', '', ''];
   totalRow.eachCell({ includeEmpty: true }, (cell, col) => {
-    if (col > 10) return;
+    if (col > 11) return;
     cell.font = { bold: true, size: 10 };
     cell.border = { ...thinBorder, top: { style: 'double', color: { argb: NAVY } } };
     if (col >= 3 && col <= 6) cell.numFmt = INT_FMT;
-    if (col === 7) cell.numFmt = MONEY_FMT;
+    if (col === 7 || col === 8) cell.numFmt = MONEY_FMT;
   });
   r++;
 

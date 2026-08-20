@@ -172,6 +172,16 @@ built bundle greps for `export-report`/`resolve-entities`/"Download report"/"pas
 live localhost:5000 login + `/api/reporting/export-report` round-trip returned a valid xlsx with
 28 production detail rows (Ocean Bank + BankUnited YTD sold-only test).
 
+**Follow-up (user question: "can we split loan amount by assigned vs received — does the
+documentation actually work that way?"): YES — and the split exposed a double-count.** Each filing
+has one assignor, one assignee, and (when stated) the underlying mortgage principal, so the amount
+attributes exactly by side. Summary sheet's single "$ Volume (known)" became **"$ Assigned out
+(known)" + "$ Acquired (known)"**; footnotes now state it's note principal (not price paid —
+consideration is nominal) and a floor (many documents state no amount). Tie-out on the sold-only
+test: detail loan amounts sum $156,918,254.73 = "$ Assigned out" total exactly; the old combined
+figure ($158.4M) had been double-counting $1.5M of intra-selection bank-to-bank sales (same
+dollars in both banks' volume). Verified locally; **pending deploy** at time of writing.
+
 **Gotcha found while verifying: `ecosystem.config.cjs`'s `AMO_PASSWORD` does NOT match the
 running process env** (login with the ecosystem value fails; `pm2 env 0`'s value — 11 chars — is
 what works). PM2 restarts keep the old env ("Use --update-env" notice), so today's password
