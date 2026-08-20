@@ -163,7 +163,21 @@ Detail*: all filings, navy header, frozen pane, autofilter, CFN hyperlinks (same
 as CSV — Broward gets no link), money numFmt. **Tie-out verified** on the 37-bank YTD sold-only
 run: detail = 95 rows = summary Sold total = the UI KPI; the 17 Acquired attributions on a
 sold-only report are intra-selection bank-to-bank sales (one filing, both sides) — footnoted in
-the sheet itself. Deploy note: **`npm install` needed on the droplet** for exceljs.
+the sheet itself.
+
+**DEPLOYED same day (both features: resolver/direction filter + Excel report).** Droplet
+`3400e94 → bc45895` (it had also been one commit behind on the backup-docs commit), `npm install`
+(exceljs OK), build, `pm2 restart amo-dashboard` (also busts the 7-day cache). Verified by effect:
+built bundle greps for `export-report`/`resolve-entities`/"Download report"/"paste a list", and a
+live localhost:5000 login + `/api/reporting/export-report` round-trip returned a valid xlsx with
+28 production detail rows (Ocean Bank + BankUnited YTD sold-only test).
+
+**Gotcha found while verifying: `ecosystem.config.cjs`'s `AMO_PASSWORD` does NOT match the
+running process env** (login with the ecosystem value fails; `pm2 env 0`'s value — 11 chars — is
+what works). PM2 restarts keep the old env ("Use --update-env" notice), so today's password
+survives normal restarts, but anyone running `pm2 restart --update-env` or re-`pm2 start
+ecosystem.config.cjs` would silently switch the dashboard password to the stale file value.
+Flagged to user; not changed.
 
 ---
 
