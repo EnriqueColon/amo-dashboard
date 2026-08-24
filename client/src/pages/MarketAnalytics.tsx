@@ -10,6 +10,7 @@ import {
 } from '@/lib/metrics'
 import { getCreCapitalColor } from '@/lib/score-colors'
 import { getErrorMessage } from '@/lib/error-utils'
+import { TREND_QUARTERS, TTM_QUARTERS } from '@shared/fdic-window'
 import { DefTerm } from '@/components/DefTerm'
 import { InstitutionProfileDrawer, type InstitutionProfileRow } from '@/components/InstitutionProfileDrawer'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -134,6 +135,7 @@ export default function MarketAnalytics() {
   const [compareRows, setCompareRows] = useState<ScreeningRow[]>([])
   const [loading, setLoading] = useState(false)
   const [financials, setFinancials] = useState<Financial[]>([])
+  const [truncated, setTruncated] = useState(false)
   const [error, setError] = useState<string | undefined>()
 
   useEffect(() => {
@@ -149,10 +151,12 @@ export default function MarketAnalytics() {
         if (!mounted) return
         if (json.error) { setError(json.error); setFinancials([]); return }
         setFinancials(json.data ?? [])
+        setTruncated(Boolean(json.truncated))
       } catch (err) {
         if (!mounted) return
         setError(`Failed to load FDIC data: ${getErrorMessage(err)}`)
         setFinancials([])
+        setTruncated(false)
       } finally {
         if (mounted) setLoading(false)
       }
@@ -168,10 +172,10 @@ export default function MarketAnalytics() {
 
   const lastQuarterDates = useMemo(() => {
     const dates = Array.from(new Set(regionFinancials.map((item) => item.reportDate).filter(Boolean))) as string[]
-    return dates.sort((a, b) => normalizeReportDate(b).localeCompare(normalizeReportDate(a))).slice(0, 8)
+    return dates.sort((a, b) => normalizeReportDate(b).localeCompare(normalizeReportDate(a))).slice(0, TREND_QUARTERS)
   }, [regionFinancials])
 
-  const lastQuarterDatesDisplay = useMemo(() => lastQuarterDates.slice(0, 4), [lastQuarterDates])
+  const lastQuarterDatesDisplay = useMemo(() => lastQuarterDates.slice(0, TTM_QUARTERS), [lastQuarterDates])
 
   const filteredFinancials = useMemo(() => {
     return regionFinancials.filter((item) => {
@@ -268,11 +272,11 @@ export default function MarketAnalytics() {
       const nimDelta4Q = lastQuarterDates.length >= 4 && nimLatest != null && byDateNorm.get(normalizeReportDate(q3))?.netInterestMargin != null
         ? nimLatest - (byDateNorm.get(normalizeReportDate(q3))!.netInterestMargin ?? 0) : null
 
-      const niCurrent4 = lastQuarterDates.slice(0, 4).map((d) => byDateNorm.get(normalizeReportDate(d))?.netIncome)
-      const hasAll4 = niCurrent4.length === 4 && niCurrent4.every((v) => v != null && Number.isFinite(v))
+      const niCurrent4 = lastQuarterDates.slice(0, TTM_QUARTERS).map((d) => byDateNorm.get(normalizeReportDate(d))?.netIncome)
+      const hasAll4 = niCurrent4.length === TTM_QUARTERS && niCurrent4.every((v) => v != null && Number.isFinite(v))
       const netIncomeTTM = hasAll4 ? (niCurrent4.reduce((s, v) => s! + v!, 0) as number) : null
-      const niPrior4 = lastQuarterDates.slice(4, 8).map((d) => byDateNorm.get(normalizeReportDate(d))?.netIncome)
-      const hasAll8 = niPrior4.length === 4 && niPrior4.every((v) => v != null && Number.isFinite(v))
+      const niPrior4 = lastQuarterDates.slice(TTM_QUARTERS, TREND_QUARTERS).map((d) => byDateNorm.get(normalizeReportDate(d))?.netIncome)
+      const hasAll8 = niPrior4.length === TTM_QUARTERS && niPrior4.every((v) => v != null && Number.isFinite(v))
       const netIncomeTTMPrior = hasAll8 ? (niPrior4.reduce((s, v) => s! + v!, 0) as number) : null
       const netIncomeYoYPct = netIncomeTTM != null && netIncomeTTMPrior != null ? (() => {
         const denom = Math.abs(netIncomeTTMPrior)
@@ -298,6 +302,23 @@ export default function MarketAnalytics() {
 
   const asOfQuarter = lastQuarterDates[0] ? formatQuarter(lastQuarterDates[0]) : 'Latest'
   const regionDisplay = region === 'national' ? 'United States' : region
+
+  // FDIC returns one row per institution per quarter, sorted by assets descending,
+  // and caps a response at 10,000 rows. Nationally that ceiling bites, so the
+  // screen is the largest N institutions rather than all of them — and the peer
+  // percentiles in the profile drawer are relative to exactly this set. Say so.
+  const cohortNote = useMemo(() => {
+    if (screeningTable.length === 0) return null
+    const assets = screeningTable.map((r) => r.totalAssets).filter((v) => Number.isFinite(v) && v > 0)
+    const floor = assets.length ? Math.min(...assets) : null
+    const count = screeningTable.length.toLocaleString('en-US')
+    if (!truncated) {
+      return `Screening all ${count} FDIC-reporting institutions in ${regionDisplay}.`
+    }
+    return `Screening the ${count} largest FDIC-reporting institutions in ${regionDisplay}`
+      + (floor != null ? ` (assets above ${formatMoney(floor)})` : '')
+      + '. Smaller institutions are outside this cohort, and peer percentiles are relative to it.'
+  }, [screeningTable, truncated, regionDisplay])
 
   return (
     <div className="p-6 space-y-6 max-w-screen-xl mx-auto">
@@ -414,6 +435,9 @@ export default function MarketAnalytics() {
             <p className="text-xs text-muted-foreground">
               Bank-level screening focused on NPL (nonaccrual loans in dollars), CRE loans, and CRE concentration. Sort by NPL ($) or CRE Concentration to prioritize.
             </p>
+            {cohortNote && !loading && (
+              <p className="mt-1 text-xs text-muted-foreground">{cohortNote}</p>
+            )}
           </div>
           {!loading && screeningTable.length > 0 && (
             <select

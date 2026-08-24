@@ -179,6 +179,18 @@ construction/multifamily/non-residential loan mix, NPL and noncurrent ratios, RO
 capital. Includes a **cohort summary** and a **target screening list** — used to spot banks under
 balance-sheet pressure whose filing behaviour is worth watching.
 
+**Read the cohort line under the screening list.** When a state is selected, the screen covers every
+FDIC-reporting institution in that state (Florida: all 91). **Nationally it does not** — FDIC caps a
+response at 10,000 rows and returns them largest-first, so the national view is the ~1,113 biggest
+institutions, all above roughly $0.95B in assets, out of ~4,450 that file. Community banks under $1B
+are therefore **absent from the national screen**, and the peer percentiles in the institution drawer
+are relative to whichever cohort is loaded, not to all US banks. The tab states this rather than
+implying a complete screen; the fix is the planned cached data layer, not a bigger page request.
+
+Peer and trend figures need **eight quarters** of history (a trailing-twelve-month figure against the
+one before it), and FDIC publishes a quarter months after it closes — as of Aug 2026 the newest data
+available was Q1 2026. That is why the query reaches back 27 months.
+
 #### Clean Transactions (`/clean-events`)
 The verified `LOAN_TRANSFER` dataset, one row per confirmed transfer, with document-derived names,
 parent companies, loan amount and consideration. Filter by assignor, assignee, type and date. Each
@@ -298,6 +310,12 @@ amo-dashboard/
 │   ├── auth.ts         single-password HMAC cookie gate
 │   ├── cache.ts        in-memory TTL response cache
 │   └── fdic.ts         FDIC API proxy + transformation
+├── shared/
+│   └── fdic-window.ts  the FDIC quarter window — one contract, server + client
+├── script/
+│   ├── build.ts               vite (client) + esbuild (server bundle)
+│   ├── check-metric-directions.ts   guardrail (see §6.6)
+│   └── check-fdic-window.ts         guardrail (see §6.6)
 ├── collector/
 │   ├── collect_live.py            Miami-Dade portal collector
 │   ├── broward_collect.py         Broward SFTP index collector
@@ -531,15 +549,33 @@ a writer that forgot to carry the `county` column. It is asserted rather than tr
 **TypeScript-side gates** — these need no database and run in about a second:
 
 ```bash
-npm run check          # tsc + the metric-direction guardrail
-npm run check:metrics  # just the guardrail
+npm run check              # tsc + both guardrails below
+npm run check:metrics      # just the metric-direction guardrail
+npm run check:fdic-window  # just the FDIC window guardrail
 ```
 
 | Check | Asserts |
 |---|---|
 | `script/check-metric-directions.ts` | Every risk metric points the way it claims to: each peer threshold table's colours agree with its declared `direction`, a bank that is worst on all four metrics colours red on all four, and the CRE/capital scale gets redder as concentration rises. Includes a **negative control** — it feeds itself a deliberately inverted table and fails if it does not catch it |
+| `script/check-fdic-window.ts` | The FDIC query window is wide enough for the metrics computed from it — the 27-month window must yield at least 8 **published** quarters, simulated across 24 dates spanning a year so the result does not depend on today. Models FDIC's publication lag explicitly. **Negative controls: both 18 and 24 months must still fail** |
 
-That guardrail exists because of a real class of bug found in the sibling FDIC tool (24 Aug 2026):
+The window guardrail exists because of a second bug in the same family, and AMO **did** have this one
+(24 Aug 2026). Year-over-year metrics compare the newest four quarters against the four behind them,
+so they need eight — but the query window was 18 months, which returns five. The precondition was
+unsatisfiable, so `netIncomeYoYPct` was `null` for every institution in every region from the day it
+shipped, and the **NI YoY %** column rendered `—` everywhere. Nothing threw, and a column of
+em-dashes is indistinguishable from an upstream FDIC gap, which is why it lasted.
+
+Two things make it worth a permanent check. First, the fix is coupled: FDIC returns one row per
+institution **per quarter** and caps a response at 10,000 rows sorted by assets descending, so
+widening the window to 27 months without also raising the row limit would have cut the national
+cohort from ~1,000 institutions to ~561 and pushed the asset floor from $1.07B to $2.23B — buying the
+metric by quietly shrinking the screen. Second, the obvious width is wrong: `8 × 3 = 24` months
+returns only seven quarters when today falls just after a quarter close, so the guardrail rejects 24
+as well as 18. The window now lives in **`shared/fdic-window.ts`** as a contract imported by both the
+server that builds the query and the client that slices quarters out of it.
+
+The metric-direction guardrail exists because of a related bug found in the sibling FDIC tool (24 Aug 2026):
 **CET1 and CRE-to-capital point in opposite directions but look identical at a call site.** Higher
 CET1 is safer; higher CRE-to-capital is riskier. Colour logic copy-pasted from one onto the other
 inverts silently — the safest banks render as the most stressed and a "most exposed" ranking returns
@@ -559,6 +595,13 @@ at startup inside `registerRoutes`. If you add a query over a document table, it
 county-scoped — use `countyPredicate()` for named parameters or `countyFilter()` for positional ones.
 better-sqlite3 refuses to mix named and positional parameters in one statement, which is why both
 helpers exist.
+
+**The `@shared/*` path alias works in the client but NOT in the server bundle.** It is declared in
+`tsconfig.json` and `vite.config.ts`, so an aliased import inside `server/` typechecks cleanly and
+then fails `npm run build` — `script/build.ts` bundles the server with esbuild, which is given no
+alias configuration. Server code must import shared modules **relatively** (`../shared/…`), as
+`server/fdic.ts` does. Worth confirming any new shared import actually landed in the bundle rather
+than trusting `tsc`.
 
 **`aom_events_clean` rows are unpacked positionally** in `normalize.py` (`entries[0][8]` and
 similar). The `county` column is appended **last** in the source query on purpose. Inserting a column
@@ -808,15 +851,46 @@ endpoints healthy across all three county scopes.
 | Per-county document links | 🟢 Deployed |
 | Endpoint county scoping | 🟢 Deployed — all document endpoints |
 | Coverage-gap detection + banner | 🟢 Deployed 11 Aug 2026 |
-| Collection-health warning (Broward) | 🟢 Reworked 24 Aug 2026 — per-run heartbeat (`broward_runs`) replaced the last-new-data metric, which false-alarmed every Monday. Split into "job stopped" vs "images at risk". **Pending deploy** |
+| Collection-health warning (Broward) | 🟢 Reworked **and deployed** 24 Aug 2026 — per-run heartbeat (`broward_runs`) replaced the last-new-data metric, which false-alarmed every Monday. Split into "job stopped" vs "images at risk". Cron now polls at 15:30/19:30/23:30 UTC |
 | County audit — all pages/endpoints | 🟢 Complete 11 Aug 2026 |
 | Repo hygiene — WAL files untracked | 🟢 Resolved 11 Aug 2026 — droplet `git status` clean |
 | Entity normalization / duplicate manager | 🟢 Deployed 6 Aug 2026 |
-| FDIC analytics | 🟢 Live — audited 24 Aug 2026 for the CET1/CRE direction inversion found in the sibling tool; **clean**. Peer-ranking logic consolidated into `client/src/lib/peer-metrics.ts` with a direction guardrail. Composite opportunity/earnings/vulnerability scores are still hardcoded to `0` and unused |
+| FDIC analytics | 🟡 Live, **one fix pending deploy** (24 Aug 2026). Audited for the CET1/CRE direction inversion found in the sibling tool — **clean**; peer-ranking logic consolidated into `client/src/lib/peer-metrics.ts` behind a direction guardrail. A **real** bug was found and fixed: the 18-month query window could not satisfy the 8-quarter year-over-year comparison, so **NI YoY % was blank for every institution since it shipped** — window now 27 months and row limit raised together, verified live (0 → 990 of 1,215 national). National coverage remains asset-truncated by design (~1,113 of ~4,450; the tab now says so). Composite opportunity/earnings/vulnerability scores are still hardcoded to `0` and unused — AMO has no composite ranking |
 | Deal Intelligence page | ⚫ **Retired 11 Aug 2026** — page and its 8 endpoints removed together |
 | Automated backups | 🟢 **Live off-box 17 Aug 2026** — nightly verified snapshot → DigitalOcean Spaces (`amo-dashboard-backups-ec`, NYC3). Restore verified from the bucket copy |
 
 ### 7.4 Known gaps and open items
+
+**−3. ✅ FIXED 24 Aug 2026 (pending deploy) — the FDIC "NI YoY %" column had never worked, and the
+national screen is narrower than it looks.**
+
+Two findings in the FDIC tab, from auditing a sibling tool's bug report against this codebase.
+
+**The bug we had.** Year-over-year net income compares the newest four quarters against the four
+behind them, so it needs **eight quarters** of history. The query window was **18 months, which
+returns five.** The condition could never be met, so the field was `null` for every institution in
+every region from the day it shipped and the **NI YoY %** column rendered `—` in the screening table,
+the institution drawer and the comparison table. Nothing errored; a column of em-dashes reads exactly
+like an upstream FDIC gap. Window is now **27 months**, sized to survive the worst case (just after a
+quarter close, given FDIC's publication lag) and asserted by `script/check-fdic-window.ts`. Verified
+against live FDIC data, both scopes: **0 → 990 of 1,215 institutions nationally (81%)** and **81 of 91
+in Florida (89%)**.
+
+The fix was coupled and would have backfired if done halfway: FDIC returns one row per institution
+**per quarter** against a hard 10,000-row ceiling, sorted largest-first, so widening the window alone
+would have dropped the national cohort from ~1,000 institutions to ~561 and raised the asset floor
+from $1.07B to $2.23B — paying for the metric with half the screen. The row limit moved at the same
+time.
+
+**The gap we are keeping, deliberately.** Even at the maximum page size the national view covers
+**~1,113 of ~4,450 FDIC-reporting institutions**, everything above roughly **$0.95B** in assets.
+Community banks under $1B — precisely the CRE-concentrated cohort this tool exists to surface — are
+**invisible on the national screen**, and peer percentiles are relative to whatever cohort is loaded.
+State-scoped views are unaffected (Florida returns all 91). This was measured and accepted rather
+than fixed: full coverage means paging ~40,600 rows, about 20 seconds and ~15 MB, past the data-cache
+ceiling. The proper fix is the planned cached data layer. In the meantime **the tab states the cohort
+it actually screened** instead of implying a complete one — the honest disclosure is the deliverable
+here, not a partial fix.
 
 **−2. ✅ RESOLVED 24 Aug 2026 — the "Broward collection may have stopped" alarm was crying wolf every
 Monday. The job was healthy; the banner was measuring the wrong thing.**
@@ -1042,7 +1116,9 @@ The script defaults to **preview mode** — writes the HTML + both CSVs to
 
 | Risk | Impact | Mitigation in place |
 |---|---|---|
-| Broward image feed missed for >10 days | **Permanent, unrecoverable data loss** | Daily cron + retention report every run; ~10-day buffer; **Overview shows a red banner if no images harvested in 48h** (added 11 Aug 2026) |
+| Broward image feed missed for >10 days | **Permanent, unrecoverable data loss** | Cron polls three times daily (15:30/19:30/23:30 UTC) so a moving publication time cannot outrun it; `flock` prevents overlap; ~10-day buffer. The Overview keys on the **per-run heartbeat** in `broward_runs` — red for "job stopped or failed", separately red for "images pending on the feed". Reworked 24 Aug 2026; the previous 48h-since-last-harvest rule false-alarmed every Monday |
+| An alarm that fires on a healthy system | The reader learns to dismiss it, so the **real** alert is ignored too | Liveness is measured from the job's own recorded runs, never inferred from when upstream data last arrived — upstream sources have their own calendars (Broward publishes business days only, ~3 days behind). "Never run" is deliberately **not** treated as a stoppage |
+| A derived metric's input window cannot satisfy its own precondition | The field is `null` **forever**, renders as `—`, and is indistinguishable from missing upstream data. Cost AMO a permanently blank NI YoY column; cost the sibling tool a silently redistributed score weight | `script/check-fdic-window.ts` asserts the window yields enough published quarters, with 18mo and 24mo as negative controls. The window is a single shared constant (`shared/fdic-window.ts`) imported by both the query builder and its consumer, so the two cannot drift |
 | A deploy silently fails | Production keeps running old code while checks look fine | `git pull` prints `Updating <old>..<new>` AFTER an abort — **verify by effect** (`git log --oneline -1` on the droplet, or grep `dist/index.cjs`), not by output. Bit us 11 Aug 2026 |
 | PM2 restarted mid-normalize | Dashboard shows zeros for up to 7 days | Nightly wrapper restarts only on success; documented in `ROLLBACK.md` and here |
 | A new writer forgets the `county` column | Rows **silently relabelled Miami-Dade**, no error anywhere | `check_county_isolation.py` asserts it — has already caught this three times |

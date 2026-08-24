@@ -3,6 +3,11 @@
  * Proxies FDIC financials server-side to avoid CORS and keep transformation logic centralized.
  */
 
+// Relative, not the "@shared" alias: the alias is configured for Vite and tsc
+// but not for the esbuild server bundle, so an aliased import here would
+// typecheck and then fail `npm run build`.
+import { fdicWindowStart } from '../shared/fdic-window'
+
 const FDIC_BASE_URL = 'https://banks.data.fdic.gov'
 const FDIC_FALLBACK_URL = 'https://api.fdic.gov/banks'
 const FDIC_FINANCIALS_ENDPOINT = '/api/financials'
@@ -159,10 +164,7 @@ function transformFinancialData(rawData: any[]): BankFinancialData[] {
 }
 
 function buildRecentQuartersFilter(): string {
-  const d = new Date()
-  d.setMonth(d.getMonth() - 18)
-  const startDate = d.toISOString().slice(0, 7) + '-01'
-  return `[${startDate} TO *]`
+  return `[${fdicWindowStart()} TO *]`
 }
 
 async function fetchFromFDIC(url: string): Promise<any[]> {
@@ -189,17 +191,40 @@ async function fetchFromFDIC(url: string): Promise<any[]> {
   }
 }
 
+/**
+ * The row limit is coupled to the width of the trend window, because FDIC bills
+ * one row per institution *per quarter*. Nationally, 27 months is ~40,600 rows
+ * against a hard 10,000-row page ceiling, and the response is sorted by ASSET
+ * DESC — so whatever the limit is, it silently becomes an asset floor.
+ *
+ * Measured against the live API on 2026-08-24:
+ *
+ *   window  limit    quarters  institutions  asset floor
+ *   18mo    5,000     5          1,000        $1.07B   (the old behaviour)
+ *   27mo    5,000     9            561        $2.23B   (widening alone: worse)
+ *   27mo   10,000     9          1,113        $0.95B   (both together)
+ *
+ * Widening the window without raising the limit would have cut the national
+ * cohort nearly in half to buy the YoY metrics, so the two move together.
+ *
+ * This is still a truncated screen, not a complete one: ~4,450 institutions
+ * file, and the ones under $1B — the CRE-concentrated community banks this tool
+ * exists to surface — remain invisible nationally. Full coverage needs paging
+ * ~40,600 rows, which is a cached-data-layer problem, not a limit problem. The
+ * UI states the cohort it actually screened rather than implying completeness.
+ */
 export async function fetchFDICFinancials(
   state?: string,
-  limit = 5000
-): Promise<{ data: BankFinancialData[]; error?: string }> {
+  limit = FDIC_PAGE_SIZE
+): Promise<{ data: BankFinancialData[]; error?: string; truncated?: boolean }> {
   try {
     const filters: string[] = [`REPDTE:${buildRecentQuartersFilter()}`]
     if (state) filters.push(`STNAME:"${state.toUpperCase()}"`)
 
+    const effectiveLimit = Math.min(limit, FDIC_PAGE_SIZE)
     const params = new URLSearchParams({
       format: 'json',
-      limit: String(Math.min(limit, FDIC_PAGE_SIZE)),
+      limit: String(effectiveLimit),
       filters: filters.join(' AND '),
       fields: FDIC_FIELDS.join(','),
       sort_by: 'ASSET',
@@ -215,7 +240,9 @@ export async function fetchFDICFinancials(
     for (const url of urls) {
       try {
         const raw = await fetchFromFDIC(url)
-        return { data: transformFinancialData(raw) }
+        // A full page means FDIC had more rows to give. Reported so the UI can
+        // say which cohort it screened instead of implying it screened all of it.
+        return { data: transformFinancialData(raw), truncated: raw.length >= effectiveLimit }
       } catch (err) {
         lastErr = err instanceof Error ? err.message : String(err)
       }

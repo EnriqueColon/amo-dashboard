@@ -4,9 +4,9 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
-## 2026-08-24 — Broward "collection stopped" was a FALSE ALARM (banner fixed); FDIC direction audit clean. NOT deployed.
+## 2026-08-24 — Broward "collection stopped" was a FALSE ALARM (banner fixed); FDIC direction audit clean; FDIC trend window was too narrow for its own metric (fixed).
 
-Two unrelated threads. Nothing was lost in either. All changes local — **needs `git pull` + `npm run build` + `pm2 restart amo-dashboard` + one crontab edit.**
+Three threads. Nothing was lost in any. Threads 1–2 are **deployed** (pushed through `6effeea`, built, `pm2 restart`, crontab replaced with `30 15,19,23 * * *`). Thread 3 is **local and NOT deployed** — needs `git pull` + `npm run build` + `pm2 restart amo-dashboard` (no crontab or DB change).
 
 ### Thread 1 — the Broward alarm was measuring the wrong thing
 User reported the Overview banner: "collection may have stopped — no images harvested in 2 days … last ran 2026-08-22 12:30:40". **The job never stopped.** It ran 08-23 and 08-24 at 12:30, both clean, both ending "✅ every day currently on the feed has been harvested". Every day that has aged off the feed reached `complete`; 08-05 rolled off today fully harvested.
@@ -40,10 +40,40 @@ Sibling tool had CET1 logic (lower = worse, so it inverts) copy-pasted onto CRE-
 
 `tsc` clean; both guardrails green.
 
+### Thread 3 — the FDIC trend window could not satisfy the metric computed from it
+Sibling tool also reported: "Net Income YoY compares quarters 4–7 against 0–3, but the query window was 18 months and returned only five quarters, so the condition was unsatisfiable." **AMO had exactly this, same numbers.** `server/fdic.ts` `buildRecentQuartersFilter()` used `setMonth(-18)`; `MarketAnalytics.tsx` sliced 8 quarters and required `niPrior4.length === 4`. Verified against the live API, not by reading: an 18-month window returns **5** distinct REPDTEs (20260331…20250331). So `hasAll8` was **never true** — `netIncomeYoYPct` was null for every institution in every region since it shipped, and the "NI YoY %" column (screening table, profile drawer, comparison table) rendered `—` forever.
+
+Unlike the sibling tool there was **no silent weight redistribution**, because AMO has no composite score to weight (see Thread 2) — the only symptom was three columns of em-dashes, which reads exactly like an upstream FDIC gap. That is why it survived.
+
+**The trap in the obvious fix.** FDIC bills one row per institution *per quarter* and caps a response at 10,000 rows, sorted `ASSET DESC` — so the row limit silently *is* an asset floor. Measured live:
+
+| window | limit | quarters | institutions | asset floor |
+|---|---|---|---|---|
+| 18mo | 5,000 | 5 | 1,000 | $1.07B (old behaviour) |
+| 27mo | 5,000 | 9 | **561** | **$2.23B** (widening alone — worse) |
+| 27mo | 10,000 | 9 | 1,113 | $0.95B (shipped) |
+
+Widening the window alone would have **nearly halved the national cohort** to buy the YoY metric. Window and limit have to move together; the reasoning is written into the function's docblock so the next person doesn't re-derive it.
+
+**Built:**
+- **`shared/fdic-window.ts`** — the window is a *contract* between the server that builds the REPDTE filter and the client that slices quarters out of it, so it now lives in one place: `TTM_QUARTERS=4`, `TREND_QUARTERS=8`, `PUBLICATION_LAG_QUARTERS=1`, `TREND_WINDOW_MONTHS=(8+1)*3=27`. Both sides import it; the client's `slice(0,8)`/`slice(4,8)` magic numbers are gone.
+- Server imports it **relatively**, not via `@shared` — that alias is configured in `vite.config.ts` and `tsconfig.json` but **not in the esbuild server bundle** in `script/build.ts`, so an aliased import typechecks and then breaks `npm run build`. No server file had ever imported `@shared`, so there was no convention to follow. Verified `dist/index.cjs` inlines it with no dangling require.
+- Limit default `5000` → `FDIC_PAGE_SIZE` (10,000). Server now returns **`truncated`** (`raw.length >= effectiveLimit`); `MarketAnalytics` renders a cohort line under the Target Screening List stating the count and asset floor, and that peer percentiles are relative to that set. Per the user's explicit call, **pagination was NOT attempted** — full national coverage is ~40,600 rows / ~20s / ~15MB, past the data-cache ceiling; that is the cached-data-layer job.
+- **`script/check-fdic-window.ts`**, wired into `npm run check` (+ `check:fdic-window`). Offline and deterministic: simulates 24 "today" values across a year and asserts the window yields ≥ `TREND_QUARTERS` *published* quarters, modelling FDIC's publication lag (asserts the model reproduces the observed "newest REPDTE on 2026-08-24 was 20260331"). **Negative controls: 18mo AND 24mo must both still fail.** 24 matters — the naive `8 × 3` returns only 7 quarters when today falls just after a quarter close, so it would silently reintroduce the bug. 36mo must pass, so the check isn't rejecting everything.
+
+**Verified on live FDIC data, both scopes** (ran the real `fetchFDICFinancials` path, replicated the client's computation): NI YoY went from **0 institutions** to **990 / 1,215 (81%) national** and **81 / 91 (89%) Florida**, values plausible (JPMorgan −4.5%, BankUnited +16.2%). National institution count 1,215 matches the sibling tool's figure exactly, confirming the same query.
+
+**Lesson (same shape as Thread 1):** a metric whose input window cannot satisfy its own precondition fails *silently and permanently*, and renders identically to missing upstream data. Neither a type checker nor a passing page can catch it. The window/metric relationship has to be asserted, and the assertion has to model the upstream publication lag or it will approve a width that is one quarter short.
+
+### Not present in AMO (checked, so nobody re-checks)
+- **`metricRange` min/max normalisation flattening the Opportunity Score** (the sibling's headline: 1 → 108 institutions ≥ 70). **No such code exists.** AMO has no composite scoring at all — `opportunityScore`/`earningsScore`/`vulnerabilityScore` are declared in two type defs and assigned literal `0` in exactly one place, never read, ranked, or rendered. Nothing to un-zero and nothing to normalise; the drawer shows real *measured* fields, not scores. **If a composite is ever built, this and the Thread 2 direction risk both go live at once.**
+- **The map colouring inversion.** There is **no map** — no geographic dependency (only `@jridgewell/trace-mapping`, a sourcemap util) and no choropleth surface; the `Map` hits in the pages are `new Map()`. That specific symptom has nowhere to appear here.
+
 ### Open / next session
-1. **DEPLOY, and the crontab edit is the part that is easy to forget.** Replace `30 12 * * *` with `30 15,19,23 * * *` (keep `BROWARD_INGEST_INDEX=1` on each line) — without it the new heartbeat still only writes once a day at the wrong hour, and `broward_stale`'s 26h threshold is fine but the drift is not fixed.
-2. **08-19 is unharvested right now** (published 08-24 14:28, after that day's 12:30 run). On the feed until ~09-04, so the first post-deploy run collects it. Verify `docs_pending` returns to 0.
+1. **DEPLOY THREAD 3:** `git pull` + `npm run build` + `pm2 restart amo-dashboard`. No crontab or schema change. Threads 1–2 are already live.
+2. **08-19 was unharvested as of midday** (published 08-24 14:28, after that day's 12:30 run). On the feed until ~09-04. First run under the new schedule was **19:30 UTC**; confirm it banked 08-19 and `docs_pending` is 0. `broward_runs` was still empty at deploy time, which is expected, not a fault — never-run is deliberately not "stale".
 3. Unchanged from before: leaked GitHub PAT in `.git/config` (oldest open item), the Broward bulk image order (954-831-4000), AIT collection timeouts, the 2026-08-20 Reporting/Excel work already deployed.
+4. **National FDIC coverage is still truncated by design** — ~1,113 of ~4,450 institutions, floor ~$0.95B. Community banks under $1B, the CRE-concentrated cohort this tool exists to find, remain invisible nationally. State scope is unaffected (Florida returns all 91). The UI now says so instead of implying a complete screen. Real fix is the Phase 1 cached data layer.
 
 ---
 
