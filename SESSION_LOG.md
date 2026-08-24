@@ -4,6 +4,49 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-08-24 — Broward "collection stopped" was a FALSE ALARM (banner fixed); FDIC direction audit clean. NOT deployed.
+
+Two unrelated threads. Nothing was lost in either. All changes local — **needs `git pull` + `npm run build` + `pm2 restart amo-dashboard` + one crontab edit.**
+
+### Thread 1 — the Broward alarm was measuring the wrong thing
+User reported the Overview banner: "collection may have stopped — no images harvested in 2 days … last ran 2026-08-22 12:30:40". **The job never stopped.** It ran 08-23 and 08-24 at 12:30, both clean, both ending "✅ every day currently on the feed has been harvested". Every day that has aged off the feed reached `complete`; 08-05 rolled off today fully harvested.
+
+**Why it fired.** `browardLastHarvest` = `MAX(broward_images.harvested_at)` > 48h. That measures when data last ARRIVED, and Broward publishes **business days only, ~3 business days behind**. Sat 08-22 was the last harvest; Sun+Mon runs correctly found nothing new; 51h elapsed → red. **Guaranteed to fire every Monday.** The banner's own code comment claimed "harvested_at measures OUR job, not the county's schedule" — it does the opposite.
+
+**The real defect it was masking.** Read the feed's file mtimes directly: all 10 days then on the feed landed **14:27–15:28 UTC** (outliers 20:29, 20:52), e.g. 08-19's index at 08-24 14:28 and img.zip at 14:50. Cron ran **12:30 UTC** against a comment citing an observed window of "10:27–11:01 UTC". So for ≥2 weeks the harvester arrived ~2h BEFORE each drop and collected it on the *following* day's run — working, but spending a day of the 10-day margin and letting the weekend gap reach 48h.
+
+**Built:**
+- `run_broward_daily.sh`: schedule → **`30 15,19,23 * * *`** (three polls beat guessing a moving publication time; a no-op run is ~free — 0 index rows, harvester skips complete days, extraction 0 pending / $0). Added `flock` (paramiko sets a connect timeout but no read timeout, so a stalled ranged read on a ~400MB zip can hang for hours); a skipped run exits 0, not 1. Rewrote the stale schedule comment with the measured mtimes.
+- `broward_images.py`: `show_status()` now RETURNS a summary; new `record_run()` writes **`broward_runs`** (started/finished/status/detail/feed range/days_on_feed/days_pending/docs_pending/oldest_pending) with `busy_timeout=30000` — a lost lock race would turn a good run into a false alarm, same lesson as `run_backup.sh`'s `record()`. New flags `--record-run ok|failed --run-started --run-detail`, and the record path owns its error handling so an unreachable feed still lands a row saying why.
+- `server/db.ts`: defensive `CREATE TABLE broward_runs`. `server/routes.ts`: `browardLastRun`; `broward_stale` = no run in **26h** OR last run failed; **`broward_at_risk` = `docs_pending > 0`** — the only condition here that becomes permanent. Never-run is deliberately NOT stale (missing evidence ≠ alarm). `broward_last_harvest` kept as banner context only.
+- `Dashboard.tsx`: two banners. "images at risk" (names the count, the oldest pending day, the feed range) ranks above "job stopped" (which now says nothing is lost yet).
+- `collector/tests/check_broward_heartbeat.py` — **green**. Stubs SFTP, no network. Asserts a quiet run reads healthy (the false-alarm case), a partly-harvested feed reports `docs_pending`/`oldest_pending`, and a failed run still leaves a row with NULL counts rather than a misleading 0.
+
+**Lesson:** an alarm that fires predictably on a healthy system is worse than none — it trains the reader to dismiss the real one. "No new data" ≠ "not running" whenever the upstream source has its own calendar.
+
+### Thread 2 — FDIC direction-inversion audit (prompted by the same bug found in the sibling tool)
+Sibling tool had CET1 logic (lower = worse, so it inverts) copy-pasted onto CRE-to-capital (higher = worse), so its map coloured the least concentrated banks as most stressed and "top banks" listed the safest. **AMO does not have this bug.** Evidence:
+- Every `getCreCapitalColor` call site (4 in `MarketAnalytics.tsx`, 5 in `InstitutionProfileDrawer.tsx`) receives a CRE-to-capital ratio. The CET1 value lives on a **confusingly adjacent field** — row `capitalRatio` (= `cet1Ratio ?? leverageRatio`) vs `capitalRatios` (the CRE-to-capital set) — and is never passed to a colour scale, only rendered as text.
+- All four peer threshold tables already agreed with their `direction`.
+- The composite `opportunityScore`/`earningsScore`/`vulnerabilityScore` are **hardcoded to 0** and never ranked or displayed; `getScoreColor`/`getVulnerabilityFillHex` are dead code. So the "top banks ranked backwards" symptom cannot occur here — there is no composite ranking yet. **If one is ever built, that is the moment this risk becomes live.**
+
+**Found and fixed the other two problems they described, which ARE present:**
+1. **Quadratic cohort work.** `ComparisonTable`'s peer rows rebuilt the entire cohort array *inside the per-bank cell renderer* → metrics × compared-banks × cohort-size every render (a national cohort is thousands of banks, rescanned per column, for numbers identical in every column). Hoisted into one `useMemo`.
+2. **The three copies had already drifted** — `ComparisonTable` was silently **missing Net Income**, which the chart and the single-bank list both show. Consolidating is what exposed it, exactly as in the sibling tool.
+
+**Built:** new pure module **`client/src/lib/peer-metrics.ts`** (no React, so it is testable) holding the one metric set, threshold tables, `percentileRank`, `buildPeerCohort`, `peerPercentile`. All three surfaces now iterate it. New **`script/check-metric-directions.ts`** wired into **`npm run check`** (now `tsc && tsx script/...`; also `check:types` / `check:metrics`) — asserts each table's colours agree with its declared direction, that a bank worst on all four metrics colours red on all four (and best → green on all four), that the CRE/capital scale rises with concentration, and that a CET1-shaped value would land in the top red band so it must never be passed there. **Includes a negative control**: it feeds itself a deliberately inverted table in memory and fails if it does not catch it — a check only ever shown correct input has not been shown to detect anything.
+
+**Fixture bug worth remembering:** the first end-to-end fixture gave the "healthy" bank the LOWEST net income, so it correctly scored 25th pct / "Below Average" and the test failed. Both extremes must be consistent across all four metrics or the test proves nothing about direction.
+
+`tsc` clean; both guardrails green.
+
+### Open / next session
+1. **DEPLOY, and the crontab edit is the part that is easy to forget.** Replace `30 12 * * *` with `30 15,19,23 * * *` (keep `BROWARD_INGEST_INDEX=1` on each line) — without it the new heartbeat still only writes once a day at the wrong hour, and `broward_stale`'s 26h threshold is fine but the drift is not fixed.
+2. **08-19 is unharvested right now** (published 08-24 14:28, after that day's 12:30 run). On the feed until ~09-04, so the first post-deploy run collects it. Verify `docs_pending` returns to 0.
+3. Unchanged from before: leaked GitHub PAT in `.git/config` (oldest open item), the Broward bulk image order (954-831-4000), AIT collection timeouts, the 2026-08-20 Reporting/Excel work already deployed.
+
+---
+
 ## 2026-08-23 (Sun night) — INCIDENT: two weeks of documents indexed but never extracted
 
 **User spotted it in production: every Reporting row since ~2026-08-15 had blank amounts/property.** Root cause: `run_weekly.sh` never sourced `/opt/amo-dashboard/.env` — cron gives no environment, so the last two Friday runs (08-14, 08-21) collected fine, then `extract_pdfs.py` died on `OPENAI_API_KEY is not set` and `set -e` silently skipped extract+normalize+enrich. The 08-15→08-17 repair backfill masked it by fixing everything recorded earlier. Facility tick (which DOES source .env) kept stamping new docs `status='OK'` facility-only/no-raw_json — 177 of 206 blank rows since 08-15 carry that signature, so "status=OK" looked healthy while nothing had amounts (0/206).

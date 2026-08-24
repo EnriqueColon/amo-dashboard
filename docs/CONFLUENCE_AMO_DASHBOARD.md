@@ -1,6 +1,6 @@
 # AMO Tracker — Mortgage Assignment Intelligence Dashboard
 
-> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 23 Aug 2026
+> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 24 Aug 2026
 > **Production URL:** `http://165.22.35.75:5000` (single shared password)
 > **Repository:** `amo-dashboard` (`origin/main`)
 
@@ -460,7 +460,7 @@ All installed via `crontab -e` on the droplet.
 |---|---|---|
 | `*/20 * * * *` | `run_facility_tick.sh` | One tick of the OpenAI Batch state machine: poll in-flight jobs, ingest finished ones, top back up to 4 concurrent batches of 500 documents. Resume-safe. |
 | `30 8 * * *` | `run_nightly_normalize.sh` | Rebuild derived tables, then `pm2 restart` to clear the cache. **Skips the restart if normalize fails**, so a failure leaves the last good data serving. |
-| `30 12 * * *` | `run_broward_daily.sh` (`BROWARD_INGEST_INDEX=1`) | Broward index → images → retention report. **Time-critical.** |
+| `30 15,19,23 * * *` | `run_broward_daily.sh` (`BROWARD_INGEST_INDEX=1`) | Broward index → images → extraction → retention report + heartbeat. **Time-critical.** Runs three times a day on purpose — see "Broward's publication time moves" below. Holds a `flock` so runs cannot overlap; a skipped run exits 0. |
 | `0 6 * * 5` | `run_weekly.sh` | Miami-Dade: collect last 10 days → extract PDFs → normalize → enrich. Sources `/opt/amo-dashboard/.env` itself and **aborts loudly up front if `OPENAI_API_KEY` is missing** (fix `2441222`, 23 Aug 2026 — cron provides no environment; before the fix the run half-succeeded: collection worked, extraction silently died, see §7.4). |
 | `15 3 * * *` | `run_backup.sh` | Verified snapshot of the database + Broward images → local rotation (7 kept) → DigitalOcean Spaces. Records every run in `backup_runs`; the Overview banner reads it. |
 
@@ -477,6 +477,20 @@ afterwards means scraping the AcclaimWeb portal one document at a time, behind a
 session state and Cloudflare bot management. Treat any `PENDING` day in the retention report as an
 active incident. The ~10-day window means several consecutive failures are still recoverable; a
 fortnight of silence is not.
+
+**1a. Broward's publication time moves, and a single cron entry chasing it falls behind silently.**
+The job originally ran once daily at 12:30 UTC against an observed landing window of 10:27–11:01 UTC.
+By 24 Aug 2026 the feed's own file mtimes showed every one of the ten days then on the feed landing
+between **14:27 and 15:28 UTC**, with outliers at 20:29 and 20:52. So the 12:30 run had been arriving
+about two hours *before* each day's drop for at least two weeks, picking it up on the following day's
+run instead — working, but spending a day of the safety margin for nothing. Hence three runs a day
+(15:30 / 19:30 / 23:30 UTC) rather than a re-tuned single time. A run that finds nothing new is
+almost free: the index inserts 0 rows, the harvester skips complete days, extraction reports 0
+pending and spends $0.
+
+Also remember: **Broward publishes on business days only and runs ~3 business days behind.** A
+Monday with no new images is normal, not a fault — the weekend produced nothing to publish. This is
+why liveness is measured per-run in `broward_runs`, not from when data last arrived (see §7.4).
 
 **2. Never restart PM2 while `normalize.py` is running.**
 `aom_events_clean` is dropped at the start of the run and reads **zero rows** until a single commit at
@@ -508,10 +522,30 @@ AMO_DB_PATH=./prod_snapshot.db collector/.venv/bin/python3 collector/tests/check
 | `check_canonicalize_baseline.py` | Name canonicalization output has not drifted (baseline in `canonicalize_baseline.tsv`) |
 | `check_entity_names_parity.py` | The shared address book reproduces the legacy normalize functions exactly |
 | `check_alias_scope.py` | Alias scoping rules behave — note aliases are applied **after** suffix stripping |
+| `check_broward_heartbeat.py` | The Broward daily job's heartbeat separates "ran and found nothing new" (normal every weekend) from "stopped running". Stubs the SFTP layer — no network needed |
 | `diff_name_systems.py`, `show_merge_proposals.py` | Diagnostics for reviewing name-matching decisions |
 
 `check_county_isolation.py` exists because the same bug has now been caught **three separate times**:
 a writer that forgot to carry the `county` column. It is asserted rather than trusted for that reason.
+
+**TypeScript-side gates** — these need no database and run in about a second:
+
+```bash
+npm run check          # tsc + the metric-direction guardrail
+npm run check:metrics  # just the guardrail
+```
+
+| Check | Asserts |
+|---|---|
+| `script/check-metric-directions.ts` | Every risk metric points the way it claims to: each peer threshold table's colours agree with its declared `direction`, a bank that is worst on all four metrics colours red on all four, and the CRE/capital scale gets redder as concentration rises. Includes a **negative control** — it feeds itself a deliberately inverted table and fails if it does not catch it |
+
+That guardrail exists because of a real class of bug found in the sibling FDIC tool (24 Aug 2026):
+**CET1 and CRE-to-capital point in opposite directions but look identical at a call site.** Higher
+CET1 is safer; higher CRE-to-capital is riskier. Colour logic copy-pasted from one onto the other
+inverts silently — the safest banks render as the most stressed and a "most exposed" ranking returns
+the least exposed. Nothing throws and every number on screen is individually correct; only the
+colours and the ordering lie. AMO was audited and found **clean**, and the direction rules are now
+asserted rather than re-derived at each display site.
 
 ### 6.7 Working on the code — things to know first
 
@@ -723,7 +757,7 @@ confirmed. Commit messages are written as statements of what changed and why
 
 ---
 
-## 7. Current status — as of 23 Aug 2026
+## 7. Current status — as of 24 Aug 2026
 
 ### 7.1 Overall
 
@@ -774,15 +808,47 @@ endpoints healthy across all three county scopes.
 | Per-county document links | 🟢 Deployed |
 | Endpoint county scoping | 🟢 Deployed — all document endpoints |
 | Coverage-gap detection + banner | 🟢 Deployed 11 Aug 2026 |
-| Collection-health warning (Broward) | 🟢 Deployed 11 Aug 2026 |
+| Collection-health warning (Broward) | 🟢 Reworked 24 Aug 2026 — per-run heartbeat (`broward_runs`) replaced the last-new-data metric, which false-alarmed every Monday. Split into "job stopped" vs "images at risk". **Pending deploy** |
 | County audit — all pages/endpoints | 🟢 Complete 11 Aug 2026 |
 | Repo hygiene — WAL files untracked | 🟢 Resolved 11 Aug 2026 — droplet `git status` clean |
 | Entity normalization / duplicate manager | 🟢 Deployed 6 Aug 2026 |
-| FDIC analytics | 🟢 Live |
+| FDIC analytics | 🟢 Live — audited 24 Aug 2026 for the CET1/CRE direction inversion found in the sibling tool; **clean**. Peer-ranking logic consolidated into `client/src/lib/peer-metrics.ts` with a direction guardrail. Composite opportunity/earnings/vulnerability scores are still hardcoded to `0` and unused |
 | Deal Intelligence page | ⚫ **Retired 11 Aug 2026** — page and its 8 endpoints removed together |
 | Automated backups | 🟢 **Live off-box 17 Aug 2026** — nightly verified snapshot → DigitalOcean Spaces (`amo-dashboard-backups-ec`, NYC3). Restore verified from the bucket copy |
 
 ### 7.4 Known gaps and open items
+
+**−2. ✅ RESOLVED 24 Aug 2026 — the "Broward collection may have stopped" alarm was crying wolf every
+Monday. The job was healthy; the banner was measuring the wrong thing.**
+
+Reported as an incident ("no images harvested in 2 days … those images cannot be recovered"). It was
+a false alarm, and nothing was lost — every day that has aged off the feed reached `complete`.
+
+**Why it fired.** The banner keyed on `MAX(broward_images.harvested_at)`, i.e. when new data last
+*arrived*, and treated >48h as a stoppage. But Broward publishes **business days only, ~3 business
+days behind**, so a weekend guarantees more than 48 hours with no new rows while the job runs
+perfectly. Saturday's harvest was the last one; Sunday and Monday's runs correctly found nothing new;
+the clock crossed 48h and went red. **Structurally guaranteed to fire every Monday.**
+
+**The real defect underneath.** Broward's publication time had drifted from ~10:30 UTC to ~14:28 UTC
+while the cron still ran at 12:30 UTC, so the harvester had been running about two hours *ahead* of
+each day's drop for two weeks and collecting it a day late. Recoverable, but it burned a day of the
+ten-day margin and it is what let the weekend gap reach 48h in the first place.
+
+**Fixes.**
+- Schedule is now **three runs a day** (15:30 / 19:30 / 23:30 UTC) instead of one, so publication-time
+  drift stops mattering. `flock` added, since a hung SFTP read could otherwise pile up runs.
+- New **`broward_runs` heartbeat** table, written by every run with its status and the pending-day
+  picture. Liveness now measures *the job*, not the county's publishing calendar.
+- The Overview shows **two separate banners** for two different responses:
+  *the job has not run / last run failed* (nothing lost yet, ~10 business days of slack) versus
+  *N images are on the feed unharvested* — the only condition here that becomes permanent, and the
+  one that was never surfaced before.
+- Guardrail `collector/tests/check_broward_heartbeat.py` asserts a quiet run reads healthy.
+
+**The lesson, which generalises:** an alarm that fires predictably on a healthy system is worse than
+no alarm, because it teaches the reader to dismiss the one that matters. "No new data" and "not
+running" are different questions whenever the upstream source has its own schedule.
 
 **−1. 🚨 NEW 23 Aug 2026 — the weekly extract step ran keyless for two weeks (fixed; catch-up run).**
 User spotted blank amounts/property on every Reporting row recorded after ~15 Aug. Cause:
