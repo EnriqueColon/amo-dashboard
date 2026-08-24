@@ -13,6 +13,14 @@ import {
   formatMultiple as formatMultipleMetric,
 } from "@/lib/metrics"
 import { getCreCapitalColor } from "@/lib/score-colors"
+// Peer ranking, its metric set and its direction rules live in one pure module
+// so all three surfaces below share them and a guardrail can assert them.
+import {
+  buildPeerCohort,
+  getPeerInterpretation,
+  peerPercentile,
+  PEER_META,
+} from "@/lib/peer-metrics"
 import { DefTerm } from "@/components/DefTerm"
 
 function formatDeltaPp(value: number | null | undefined, decimals = 2): string {
@@ -52,73 +60,6 @@ function formatDecimalPercent(value: number | undefined): string {
 function formatRatio(value: number | null | undefined): string {
   if (value === undefined || value === null || !Number.isFinite(value)) return "—"
   return formatMultipleMetric(value)
-}
-
-function percentileRank(value: number, sortedValues: number[]): number {
-  if (sortedValues.length === 0) return 0
-  const below = sortedValues.filter((v) => v < value).length
-  return Math.round((below / sortedValues.length) * 100)
-}
-
-// ── Peer metric interpretation config ────────────────────────────────────────
-// direction: 'high-risk' = high percentile means MORE stress/exposure (bad for bank, good PE target)
-//            'high-good' = high percentile means stronger performance (good for bank, bad PE target)
-type PeerMetricMeta = {
-  direction: 'high-risk' | 'high-good'
-  thresholds: Array<{ min: number; label: string; colorClass: string }>
-  hint: string // shown below label in the section header
-}
-
-const PEER_META: Record<string, PeerMetricMeta> = {
-  'CRE / Assets': {
-    direction: 'high-risk',
-    hint: 'High percentile = more CRE-concentrated than peers → elevated exposure',
-    thresholds: [
-      { min: 75, label: 'High Exposure',   colorClass: 'bg-red-50 text-red-600 border-red-200' },
-      { min: 50, label: 'Moderate',        colorClass: 'bg-amber-50 text-amber-600 border-amber-200' },
-      { min: 25, label: 'Below Average',   colorClass: 'bg-slate-50 text-slate-500 border-slate-200' },
-      { min: 0,  label: 'Low Exposure',    colorClass: 'bg-green-50 text-green-600 border-green-200' },
-    ],
-  },
-  'NPL Ratio': {
-    direction: 'high-risk',
-    hint: 'High percentile = more problem loans than peers → increased credit stress',
-    thresholds: [
-      { min: 75, label: 'Elevated Stress',  colorClass: 'bg-red-50 text-red-600 border-red-200' },
-      { min: 50, label: 'Above Average',    colorClass: 'bg-amber-50 text-amber-600 border-amber-200' },
-      { min: 25, label: 'Below Average',    colorClass: 'bg-slate-50 text-slate-500 border-slate-200' },
-      { min: 0,  label: 'Clean Book',       colorClass: 'bg-green-50 text-green-600 border-green-200' },
-    ],
-  },
-  'Net Income': {
-    direction: 'high-good',
-    hint: 'High percentile = more profitable than peers → less likely to sell at discount',
-    thresholds: [
-      { min: 75, label: 'Top Performer',   colorClass: 'bg-green-50 text-green-600 border-green-200' },
-      { min: 50, label: 'Above Average',   colorClass: 'bg-slate-50 text-slate-500 border-slate-200' },
-      { min: 25, label: 'Below Average',   colorClass: 'bg-amber-50 text-amber-600 border-amber-200' },
-      { min: 0,  label: 'Underperformer', colorClass: 'bg-red-50 text-red-600 border-red-200' },
-    ],
-  },
-  'NIM': {
-    direction: 'high-good',
-    hint: 'High percentile = wider net interest margin than peers → healthier spread income',
-    thresholds: [
-      { min: 75, label: 'High Margin',     colorClass: 'bg-green-50 text-green-600 border-green-200' },
-      { min: 50, label: 'Average',         colorClass: 'bg-slate-50 text-slate-500 border-slate-200' },
-      { min: 25, label: 'Thin Margin',     colorClass: 'bg-amber-50 text-amber-600 border-amber-200' },
-      { min: 0,  label: 'Compressed',      colorClass: 'bg-red-50 text-red-600 border-red-200' },
-    ],
-  },
-}
-
-function getPeerInterpretation(metric: string, pct: number) {
-  const meta = PEER_META[metric]
-  if (!meta) return null
-  for (const t of meta.thresholds) {
-    if (pct >= t.min) return { label: t.label, colorClass: t.colorClass }
-  }
-  return null
 }
 
 function PercentileBadge({ metric, pct }: { metric: string; pct: number }) {
@@ -232,15 +173,12 @@ export function InstitutionProfileDrawer({
     const nim = rowForCopy.nimLatest != null ? rowForCopy.nimLatest.toFixed(2) : "—"
     const earningsBuffer = rowForCopy.earningsBufferPct != null ? rowForCopy.earningsBufferPct.toFixed(1) : "—"
 
-    const creAssetsValues = cohort.map((r) => r.creConcentration).filter((v): v is number => v != null && Number.isFinite(v))
-    const nplValues = cohort.map((r) => r.nplRatio).filter((v): v is number => v != null && Number.isFinite(v))
-    const netIncomeValues = cohort.map((r) => r.netIncomeTTM).filter((v): v is number => v != null && Number.isFinite(v))
-    const nimValues = cohort.map((r) => r.nimLatest).filter((v): v is number => v != null && Number.isFinite(v))
-
-    const creAssetsPct = rowForCopy.creConcentration != null ? percentileRank(rowForCopy.creConcentration, creAssetsValues) : "—"
-    const nplPct = rowForCopy.nplRatio != null ? percentileRank(rowForCopy.nplRatio, nplValues) : "—"
-    const netIncomePct = rowForCopy.netIncomeTTM != null ? percentileRank(rowForCopy.netIncomeTTM, netIncomeValues) : "—"
-    const nimPct = rowForCopy.nimLatest != null ? percentileRank(rowForCopy.nimLatest, nimValues) : "—"
+    const peerLines = buildPeerCohort(cohort).map((metric) => {
+      const pct = peerPercentile(rowForCopy, metric)
+      if (pct == null) return `${metric.label}: —`
+      const label = getPeerInterpretation(metric.label, pct)?.label ?? ""
+      return `${metric.label}: ${pct}th pct. — ${label} (${metric.hint})`
+    })
 
     const lines = [
       `${rowForCopy.name} — Institution Snapshot (${asOfQuarter})`,
@@ -255,10 +193,7 @@ export function InstitutionProfileDrawer({
       "", "Earnings:", "",
       `ROA: ${roa}%`, `Net Income (TTM): ${netIncomeTTM}`, `NIM: ${nim}%`, `Earnings Buffer: ${earningsBuffer}%`,
       "", "Peer Positioning (vs. selected cohort):", "",
-      `CRE / Assets: ${creAssetsPct === "—" ? "—" : `${creAssetsPct}th pct. — ${getPeerInterpretation('CRE / Assets', creAssetsPct as number)?.label ?? ""} (↑ high = more concentrated)`}`,
-      `NPL Ratio: ${nplPct === "—" ? "—" : `${nplPct}th pct. — ${getPeerInterpretation('NPL Ratio', nplPct as number)?.label ?? ""} (↑ high = more stressed)`}`,
-      `Net Income: ${netIncomePct === "—" ? "—" : `${netIncomePct}th pct. — ${getPeerInterpretation('Net Income', netIncomePct as number)?.label ?? ""} (↑ high = more profitable)`}`,
-      `NIM: ${nimPct === "—" ? "—" : `${nimPct}th pct. — ${getPeerInterpretation('NIM', nimPct as number)?.label ?? ""} (↑ high = wider margin)`}`,
+      ...peerLines,
     ]
     return lines.join("\n")
   }, [rowForCopy, cohort, asOfQuarter])
@@ -375,16 +310,11 @@ export function InstitutionProfileDrawer({
                     </p>
                     <div className="space-y-2 text-sm text-slate-700">
                       {(() => {
-                        const creVals = cohort.map((r) => r.creConcentration).filter((v): v is number => v != null && Number.isFinite(v))
-                        const nplVals = cohort.map((r) => r.nplRatio).filter((v): v is number => v != null && Number.isFinite(v))
-                        const niVals  = cohort.map((r) => r.netIncomeTTM).filter((v): v is number => v != null && Number.isFinite(v))
-                        const nimVals = cohort.map((r) => r.nimLatest).filter((v): v is number => v != null && Number.isFinite(v))
-                        const rows2 = [
-                          { label: 'CRE / Assets', hint: PEER_META['CRE / Assets'].hint, pct: rowForCopy.creConcentration != null ? percentileRank(rowForCopy.creConcentration, creVals) : null },
-                          { label: 'NPL Ratio',    hint: PEER_META['NPL Ratio'].hint,    pct: rowForCopy.nplRatio != null      ? percentileRank(rowForCopy.nplRatio, nplVals) : null },
-                          { label: 'Net Income',   hint: PEER_META['Net Income'].hint,   pct: rowForCopy.netIncomeTTM != null  ? percentileRank(rowForCopy.netIncomeTTM, niVals) : null },
-                          { label: 'NIM',          hint: PEER_META['NIM'].hint,          pct: rowForCopy.nimLatest != null     ? percentileRank(rowForCopy.nimLatest, nimVals) : null },
-                        ]
+                        const rows2 = buildPeerCohort(cohort).map((metric) => ({
+                          label: metric.label,
+                          hint: metric.hint,
+                          pct: peerPercentile(rowForCopy, metric),
+                        }))
                         return rows2.map(({ label, hint, pct }) => (
                           <div key={label} className="rounded-md bg-slate-50 border border-slate-100 px-3 py-2">
                             <div className="flex items-center justify-between">
@@ -419,21 +349,9 @@ function PeerPositioningComparisonChart({ rows, cohort }: { rows: InstitutionPro
   })), [rows])
 
   const chartData = useMemo(() => {
-    const creAssetsValues = cohort.map((r) => r.creConcentration).filter((v): v is number => v != null && Number.isFinite(v))
-    const nplValues = cohort.map((r) => r.nplRatio).filter((v): v is number => v != null && Number.isFinite(v))
-    const netIncomeValues = cohort.map((r) => r.netIncomeTTM).filter((v): v is number => v != null && Number.isFinite(v))
-    const nimValues = cohort.map((r) => r.nimLatest).filter((v): v is number => v != null && Number.isFinite(v))
-
-    const metricRows: Array<{ metric: string; valueForRow: (r: InstitutionProfileRow) => number | null }> = [
-      { metric: "CRE / Assets", valueForRow: (r) => r.creConcentration != null ? percentileRank(r.creConcentration, creAssetsValues) : null },
-      { metric: "NPL Ratio", valueForRow: (r) => r.nplRatio != null ? percentileRank(r.nplRatio, nplValues) : null },
-      { metric: "Net Income", valueForRow: (r) => r.netIncomeTTM != null ? percentileRank(r.netIncomeTTM, netIncomeValues) : null },
-      { metric: "NIM", valueForRow: (r) => r.nimLatest != null ? percentileRank(r.nimLatest, nimValues) : null },
-    ]
-
-    return metricRows.map(({ metric, valueForRow }) => {
-      const out: Record<string, string | number | null> = { metric }
-      chartSeries.forEach((series) => { out[series.key] = valueForRow(series.row) })
+    return buildPeerCohort(cohort).map((metric) => {
+      const out: Record<string, string | number | null> = { metric: metric.label }
+      chartSeries.forEach((series) => { out[series.key] = peerPercentile(series.row, metric) })
       return out
     })
   }, [cohort, chartSeries])
@@ -591,6 +509,9 @@ function ComparisonTable({ rows, cohort, formatAssets, formatQuarter, formatDeci
   getCreCapitalColor: (v: number | undefined) => string
   onRemove?: (id: string, reportDate?: string) => void
 }) {
+  // Once per cohort, not once per cell. See buildPeerCohort.
+  const peerCohort = useMemo(() => buildPeerCohort(cohort), [cohort])
+
   const metricKeys: Array<{ key: string; fn: (r: InstitutionProfileRow) => string; section?: string }> = [
     { section: "Report", key: "Report", fn: (r) => formatQuarter(r.reportDate) },
     { section: "Location", key: "City, State", fn: (r) => `${r.city ?? "—"}, ${r.state ?? "—"}` },
@@ -615,9 +536,19 @@ function ComparisonTable({ rows, cohort, formatAssets, formatQuarter, formatDeci
     { key: "Net Income (TTM)", fn: (r) => r.netIncomeTTM != null ? formatMoney(r.netIncomeTTM) : "—" },
     { key: "NIM", fn: (r) => r.nimLatest != null ? r.nimLatest.toFixed(2) + "%" : "—" },
     { key: "Earnings Buffer", fn: (r) => r.earningsBufferPct != null ? r.earningsBufferPct.toFixed(1) + "%" : "—" },
-    { section: "Peer Positioning", key: "CRE / Assets", fn: (r) => { const pct = r.creConcentration != null ? percentileRank(r.creConcentration, cohort.map((c) => c.creConcentration).filter((v): v is number => v != null && Number.isFinite(v))) : null; if (pct == null) return "—"; const i = getPeerInterpretation('CRE / Assets', pct); return `${pct}th pct. — ${i?.label ?? ""}`; } },
-    { key: "NPL Ratio", fn: (r) => { const pct = r.nplRatio != null ? percentileRank(r.nplRatio, cohort.map((c) => c.nplRatio).filter((v): v is number => v != null && Number.isFinite(v))) : null; if (pct == null) return "—"; const i = getPeerInterpretation('NPL Ratio', pct); return `${pct}th pct. — ${i?.label ?? ""}`; } },
-    { key: "NIM", fn: (r) => { const pct = r.nimLatest != null ? percentileRank(r.nimLatest, cohort.map((c) => c.nimLatest).filter((v): v is number => v != null && Number.isFinite(v))) : null; if (pct == null) return "—"; const i = getPeerInterpretation('NIM', pct); return `${pct}th pct. — ${i?.label ?? ""}`; } },
+    // Peer rows come from the shared metric set, so this table can no longer
+    // drift from the chart and the single-bank list above it — it had already
+    // lost Net Income that way. The cohort arrays are built once here rather
+    // than inside each cell renderer.
+    ...peerCohort.map((metric, i) => ({
+      section: i === 0 ? "Peer Positioning" : undefined,
+      key: metric.label,
+      fn: (r: InstitutionProfileRow) => {
+        const pct = peerPercentile(r, metric)
+        if (pct == null) return "—"
+        return `${pct}th pct. — ${getPeerInterpretation(metric.label, pct)?.label ?? ""}`
+      },
+    })),
   ]
 
   let currentSection = ""
