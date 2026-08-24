@@ -1,6 +1,6 @@
 # AMO Tracker — Mortgage Assignment Intelligence Dashboard
 
-> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 20 Aug 2026
+> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 23 Aug 2026
 > **Production URL:** `http://165.22.35.75:5000` (single shared password)
 > **Repository:** `amo-dashboard` (`origin/main`)
 
@@ -461,7 +461,7 @@ All installed via `crontab -e` on the droplet.
 | `*/20 * * * *` | `run_facility_tick.sh` | One tick of the OpenAI Batch state machine: poll in-flight jobs, ingest finished ones, top back up to 4 concurrent batches of 500 documents. Resume-safe. |
 | `30 8 * * *` | `run_nightly_normalize.sh` | Rebuild derived tables, then `pm2 restart` to clear the cache. **Skips the restart if normalize fails**, so a failure leaves the last good data serving. |
 | `30 12 * * *` | `run_broward_daily.sh` (`BROWARD_INGEST_INDEX=1`) | Broward index → images → retention report. **Time-critical.** |
-| `0 6 * * 5` | `run_weekly.sh` | Miami-Dade: collect last 10 days → extract PDFs → normalize → enrich. |
+| `0 6 * * 5` | `run_weekly.sh` | Miami-Dade: collect last 10 days → extract PDFs → normalize → enrich. Sources `/opt/amo-dashboard/.env` itself and **aborts loudly up front if `OPENAI_API_KEY` is missing** (fix `2441222`, 23 Aug 2026 — cron provides no environment; before the fix the run half-succeeded: collection worked, extraction silently died, see §7.4). |
 | `15 3 * * *` | `run_backup.sh` | Verified snapshot of the database + Broward images → local rotation (7 kept) → DigitalOcean Spaces. Records every run in `backup_runs`; the Overview banner reads it. |
 
 **Not yet installed:** a weekly emailed report (`server/scripts/sendWeeklyReport.ts`), planned to run
@@ -723,7 +723,7 @@ confirmed. Commit messages are written as statements of what changed and why
 
 ---
 
-## 7. Current status — as of 11 Aug 2026
+## 7. Current status — as of 23 Aug 2026
 
 ### 7.1 Overall
 
@@ -763,7 +763,8 @@ endpoints healthy across all three county scopes.
 
 | Component | Status |
 |---|---|
-| Miami-Dade collection (weekly cron) | 🟢 Live |
+| Miami-Dade collection (weekly cron) | 🟢 Live — but its **extract step ran keyless and silently did nothing on 14 & 21 Aug** (see §7.4 item −1); fixed 23 Aug, catch-up extraction run |
+| AIT (Assignment of Interest) collection | 🔴 **Broken** — every AIT chunk timed out in both the 14 & 21 Aug weekly runs; 0 AIT rows collected since at least 14 Aug. AMO + ASG unaffected. Not yet investigated |
 | Broward index + images + extraction (daily cron) | 🟢 Live — 42,559 index rows, 658 images, 589 extracted |
 | PDF extraction — Miami-Dade | 🟢 Live — **repair backfill complete 17 Aug 2026**, 49,838 documents re-read |
 | PDF extraction — Broward | 🟡 Live **daily**, but coverage thin — 589 of 42,559 documents |
@@ -782,6 +783,21 @@ endpoints healthy across all three county scopes.
 | Automated backups | 🟢 **Live off-box 17 Aug 2026** — nightly verified snapshot → DigitalOcean Spaces (`amo-dashboard-backups-ec`, NYC3). Restore verified from the bucket copy |
 
 ### 7.4 Known gaps and open items
+
+**−1. 🚨 NEW 23 Aug 2026 — the weekly extract step ran keyless for two weeks (fixed; catch-up run).**
+User spotted blank amounts/property on every Reporting row recorded after ~15 Aug. Cause:
+`run_weekly.sh` never sourced `/opt/amo-dashboard/.env`, and cron provides no environment — so the
+14 Aug and 21 Aug runs collected documents, then `extract_pdfs.py` died on
+`OPENAI_API_KEY is not set` and `set -e` skipped extract/normalize/enrich. It hid because (a) the
+15–17 Aug repair backfill fixed everything recorded *earlier*, and (b) the facility tick kept
+stamping new documents `status='OK'` (facility-fields-only, no `raw_json`), so the table looked
+extracted while 0 of 206 recent clean rows had a loan amount. **Fix `2441222`:** the script now
+sources `.env` and aborts loudly up front if the key is missing — a skipped week is obvious, a
+half-run hid for two weeks. Recovery: manual `extract_pdfs.py --limit 1500 --workers 8` catch-up
+(pending selection keys on `raw_json IS NULL`, so it claims exactly the missed documents), then the
+nightly normalize + cache bust surfaces the fields. Same detection path as item 0: **the only
+visible symptom was the Reporting page**, again. In the same cron log, the AIT collection timeouts
+(component table above) were found — separate issue, still open.
 
 **0. 🚨 70% of Miami-Dade was never fully extracted — found and being repaired 15 Aug 2026.**
 The single largest data problem found to date, and it was invisible from every angle except the UI.
