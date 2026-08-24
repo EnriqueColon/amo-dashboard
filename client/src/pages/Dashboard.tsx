@@ -111,8 +111,18 @@ export default function Dashboard() {
   // Pipeline liveness. Only shown when Broward is in scope — it is Broward's
   // harvester that has a hard deadline, since its SFTP feed drops each day
   // after ~10 and cron failures on the droplet are silent.
+  //
+  // Two separate conditions, deliberately not merged into one banner:
+  //   harvestStale  the job itself has not run (or failed). Nothing lost yet.
+  //   imagesAtRisk  days on the feed are unharvested and WILL age out. This is
+  //                 the one that becomes permanent, so it outranks staleness.
+  // "The job ran and found nothing new" is normal — Broward publishes business
+  // days only, ~3 business days behind — and sets neither. Keying the alarm on
+  // when data last landed made this banner fire every Monday.
   const health = raw?.collection_health;
-  const harvestStale = !!health?.broward_stale && county !== 'MIAMI-DADE';
+  const browardInScope = county !== 'MIAMI-DADE';
+  const harvestStale = !!health?.broward_stale && browardInScope;
+  const imagesAtRisk = !!health?.broward_at_risk && browardInScope;
 
   // Backup health. NOT county-scoped — there is one database and one backup job
   // covering both counties, so this shows under every scope.
@@ -157,6 +167,30 @@ export default function Dashboard() {
         </div>
       )}
 
+      {imagesAtRisk && (
+        <div
+          data-testid="images-at-risk-banner"
+          className="flex items-start gap-2 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2.5 text-xs text-foreground"
+        >
+          <AlertCircle size={14} className="mt-0.5 shrink-0 text-red-500" />
+          <span>
+            <span className="font-medium">
+              {health.broward_docs_pending} Broward document image
+              {health.broward_docs_pending === 1 ? '' : 's'} on the feed have not been harvested
+              {health.broward_days_pending > 1 && <> across {health.broward_days_pending} days</>}.
+            </span>{' '}
+            {health.broward_oldest_pending && (
+              <>The oldest is {health.broward_oldest_pending}, and it is the closest to aging out. </>
+            )}
+            The feed retains about ten business days
+            {health.broward_feed_range && <> (currently {health.broward_feed_range})</>}; after that
+            these images are gone from the free channel and only recoverable by bulk order from
+            Broward RTT. Run{' '}
+            <code className="font-mono">collector/run_broward_daily.sh</code> on the droplet.
+          </span>
+        </div>
+      )}
+
       {harvestStale && (
         <div
           data-testid="harvest-stale-banner"
@@ -165,12 +199,16 @@ export default function Dashboard() {
           <AlertCircle size={14} className="mt-0.5 shrink-0 text-red-500" />
           <span>
             <span className="font-medium">
-              Broward collection may have stopped — no images harvested in{' '}
-              {Math.floor((health.broward_hours_since ?? 0) / 24)} days.
+              {health.broward_run_status === 'failed'
+                ? 'The Broward daily job failed on its last run.'
+                : `The Broward daily job has not run in ${health.broward_hours_since_run} hours.`}
             </span>{' '}
-            The daily job last ran {health.broward_last_harvest}. Broward's feed drops each day
-            after about ten, and those images cannot be recovered from the free channel afterwards.
-            Check <code className="font-mono">collector/broward_daily.log</code> on the droplet.
+            It last completed {health.broward_last_run}
+            {health.broward_run_detail && <> — {health.broward_run_detail}</>}. Nothing is lost yet:
+            the feed retains about ten business days
+            {health.broward_feed_range && <> (currently {health.broward_feed_range})</>}, so a fixed
+            job still catches up. Check{' '}
+            <code className="font-mono">collector/broward_daily.log</code> on the droplet.
           </span>
         </div>
       )}

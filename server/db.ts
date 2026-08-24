@@ -202,6 +202,30 @@ export function getDb(): Database.Database {
       );
     `);
 
+    // Written by collector/run_broward_daily.sh (via broward_images.py
+    // --record-run), read here for the Broward liveness signal on /api/stats.
+    //
+    // This table is the heartbeat of the daily job. It exists because liveness
+    // used to be inferred from MAX(broward_images.harvested_at) — when data last
+    // ARRIVED — and Broward publishes business days only, ~3 business days
+    // behind, so a perfectly healthy job goes quiet every weekend and looked
+    // dead. `docs_pending` is the number that can become a permanent loss.
+    _db.exec(`
+      CREATE TABLE IF NOT EXISTS broward_runs (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        started_at     TEXT,
+        finished_at    TEXT,
+        status         TEXT,
+        detail         TEXT,
+        feed_first     TEXT,
+        feed_last      TEXT,
+        days_on_feed   INTEGER,
+        days_pending   INTEGER,
+        docs_pending   INTEGER,
+        oldest_pending TEXT
+      );
+    `);
+
     // Written by collector/run_backup.sh, read here only for the backup-health
     // signal on /api/stats. Declared defensively for the same reason as
     // broward_images above: the server has to start on a database no backup has

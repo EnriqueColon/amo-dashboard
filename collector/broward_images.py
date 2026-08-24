@@ -38,7 +38,7 @@ import re
 import struct
 import sys
 import zlib
-from datetime import datetime
+from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(__file__))
 from database import get_conn  # noqa: E402
@@ -157,6 +157,62 @@ def record_harvest(cfn: str, rec_date: str, pages: int,
             '(cfn, rec_date, page_count, bytes_on_disk, source_zip) '
             'VALUES (?,?,?,?,?)', (cfn, rec_date, pages, nbytes, source))
         conn.commit()
+    finally:
+        conn.close()
+
+
+def record_run(status: str, started_at: str, detail: str,
+               summary: dict | None) -> None:
+    """Heartbeat for the daily job: 'this ran', separate from 'this found data'.
+
+    The distinction is the whole point of this table. Liveness used to be
+    inferred from MAX(broward_images.harvested_at), which measures when new data
+    last ARRIVED — and Broward publishes on business days only, ~3 business days
+    behind. So a healthy job over a weekend writes no rows for >48h and looked
+    exactly like a job that had died. That false alarm fired every Monday, which
+    is worse than no alarm: it trains the reader to dismiss the banner that is
+    supposed to catch real, permanent image loss.
+
+    busy_timeout is not optional. This writes to the live database while the app
+    and the other crons are using it, and the nightly normalize commits its whole
+    rebuild in one transaction. Without it the INSERT loses a lock race and the
+    run reports as never having happened — turning a successful run into a false
+    alarm, which is the exact failure this table exists to prevent. Same lesson
+    as record() in run_backup.sh.
+    """
+    conn = get_conn()
+    try:
+        conn.execute('PRAGMA busy_timeout = 30000')
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS broward_runs (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                started_at     TEXT,
+                finished_at    TEXT,
+                status         TEXT,
+                detail         TEXT,
+                feed_first     TEXT,
+                feed_last      TEXT,
+                days_on_feed   INTEGER,
+                days_pending   INTEGER,
+                docs_pending   INTEGER,
+                oldest_pending TEXT
+            )
+        """)
+        s = summary or {}
+        conn.execute(
+            "INSERT INTO broward_runs (started_at, finished_at, status, detail, "
+            "feed_first, feed_last, days_on_feed, days_pending, docs_pending, "
+            "oldest_pending) VALUES (?, datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?)",
+            (started_at, status, detail or None,
+             s.get('feed_first'), s.get('feed_last'), s.get('days_on_feed'),
+             s.get('days_pending'), s.get('docs_pending'), s.get('oldest_pending')))
+        conn.commit()
+        log.info(f'run recorded: status={status} '
+                 f'days_pending={s.get("days_pending")} '
+                 f'docs_pending={s.get("docs_pending")}')
+    except Exception as exc:  # noqa: BLE001 - never fail the run over bookkeeping
+        log.error(f'could not record this run in broward_runs: {exc} — '
+                  f'the Overview will report Broward collection as stopped')
     finally:
         conn.close()
 
@@ -319,17 +375,26 @@ def available_zips(sftp) -> list[tuple[str, str]]:
 
 
 def show_status(sftp, from_feed: bool = False,
-                doc_types: set[str] | None = None) -> None:
+                doc_types: set[str] | None = None) -> dict | None:
+    """Print the retention report and return it as a summary for record_run().
+
+    The returned numbers are the ones that actually matter for monitoring:
+    `docs_pending` is images still on the feed and not yet on our disk, i.e. the
+    only quantity here that can become a permanent loss. Everything else on this
+    page is recoverable.
+    """
     zips = available_zips(sftp)
     if not zips:
         log.warning('no img.zip files on the feed')
-        return
+        return None
 
     log.info(f'Feed retains {len(zips)} day(s): {zips[0][0]} → {zips[-1][0]}')
     log.info('')
     log.info(f'  date        {"on feed" if from_feed else "indexed"}  harvested  status')
 
     at_risk = 0
+    days_pending = 0
+    oldest_pending = None
     for rec_date, _ in zips:
         wanted = resolve_wanted(sftp, rec_date, from_feed,
                                 doc_types or set(DOC_TYPES))
@@ -341,6 +406,9 @@ def show_status(sftp, from_feed: bool = False,
         else:
             state = f'{len(wanted - have)} PENDING'
             at_risk += len(wanted - have)
+            days_pending += 1
+            # zips is sorted, so the first pending day is the closest to aging out.
+            oldest_pending = oldest_pending or rec_date
         log.info(f'  {rec_date}   {len(wanted):>6}   {len(have):>8}  {state}')
 
     log.info('')
@@ -349,6 +417,15 @@ def show_status(sftp, from_feed: bool = False,
                     f'this feed after ~10 days and are then portal-scrape only.')
     else:
         log.info('✅ every day currently on the feed has been harvested')
+
+    return {
+        'feed_first':     zips[0][0],
+        'feed_last':      zips[-1][0],
+        'days_on_feed':   len(zips),
+        'days_pending':   days_pending,
+        'docs_pending':   at_risk,
+        'oldest_pending': oldest_pending,
+    }
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────
@@ -370,7 +447,21 @@ def main() -> int:
     ap.add_argument('--doc-types', default=None,
                     help='comma-separated Broward doc type codes '
                          f'(default: {",".join(sorted(DOC_TYPES))})')
+    # Heartbeat. Used by run_broward_daily.sh, which knows whether the earlier
+    # steps succeeded; this script knows the feed picture. One row carries both,
+    # so the Overview can tell "the job ran and found nothing new" (normal, every
+    # weekend) apart from "the job stopped running" (permanent image loss).
+    ap.add_argument('--record-run', choices=('ok', 'failed'), default=None,
+                    help='record this run in broward_runs (use with --status)')
+    ap.add_argument('--run-started', default=None,
+                    help='ISO timestamp the overall daily job started')
+    ap.add_argument('--run-detail', default='',
+                    help='which step(s) failed, for the Overview to display')
     args = ap.parse_args()
+
+    if args.record_run and not args.status:
+        ap.error('--record-run requires --status: the recorded summary IS the '
+                 'status report, so the two are computed in one pass')
 
     doc_types = ({t.strip().upper() for t in args.doc_types.split(',')}
                  if args.doc_types else set(DOC_TYPES))
@@ -380,6 +471,28 @@ def main() -> int:
 
     os.makedirs(IMAGE_DIR, exist_ok=True)
     ensure_schema()
+
+    # The status+heartbeat path owns its own error handling: a feed it cannot
+    # reach is itself a reportable outcome, and losing the heartbeat to an
+    # exception would make a job that ran and failed indistinguishable from one
+    # that never started. Both need a row; only the detail differs.
+    if args.record_run:
+        started = args.run_started or datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+        status, detail, summary = args.record_run, args.run_detail, None
+        try:
+            log.info(f'Connecting to {FTP_USER}@{FTP_HOST}:{FTP_PORT}')
+            client, sftp = connect()
+            try:
+                summary = show_status(sftp, args.from_feed, doc_types)
+            finally:
+                sftp.close()
+                client.close()
+        except Exception as exc:  # noqa: BLE001
+            log.error(f'status check failed: {exc}')
+            status = 'failed'
+            detail = f'{detail}; feed unreachable: {exc}'.lstrip('; ')
+        record_run(status, started, detail, summary)
+        return 0 if status == 'ok' else 1
 
     log.info(f'Connecting to {FTP_USER}@{FTP_HOST}:{FTP_PORT}')
     client, sftp = connect()

@@ -166,17 +166,34 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     // detection below: a county's date range can look continuous while hiding
     // months with no data at all, which reads as a market collapse rather than
     // as data we never collected.
-    // When the Broward daily job last actually harvested anything.
+    // ── Broward pipeline liveness ────────────────────────────────────────────
+    // Two DIFFERENT questions, which were conflated until 2026-08-24 and produced
+    // a banner that cried wolf every Monday:
     //
-    // Deliberately NOT "newest filing date": Broward publishes ~3 business days
-    // behind, so the newest rec_date is always several days old even when the
-    // pipeline is perfectly healthy, and it would be useless as a liveness
-    // signal. harvested_at measures OUR job, not the county's schedule.
+    //   1. Is the job still running?      → browardLastRun (below)
+    //   2. Are images about to be lost?   → docs_pending on that same row
+    //
+    // Neither can be answered from `broward_images`. That table only gains rows
+    // when the county publishes something new, and Broward publishes on BUSINESS
+    // DAYS ONLY, ~3 business days behind. So a healthy job writes nothing all
+    // weekend, and MAX(harvested_at) crosses any 48h threshold every Monday
+    // without anything being wrong. It measures the county's schedule, not ours.
     //
     // This matters because cron failures on the droplet are silent — there is
     // no MAILTO and no mail transport — and the SFTP feed drops each day after
     // ~10 days. A job that quietly stops costs images permanently, so the
-    // liveness signal has to appear somewhere the user actually looks.
+    // liveness signal has to appear somewhere the user actually looks, and it has
+    // to be trustworthy enough that they do not learn to ignore it.
+    browardLastRun:      db.prepare(`
+      SELECT finished_at, status, detail, days_pending, docs_pending,
+             oldest_pending, feed_first, feed_last,
+             CAST((julianday('now') - julianday(finished_at)) * 24 AS INTEGER) AS hours_since
+      FROM broward_runs
+      ORDER BY id DESC LIMIT 1
+    `),
+    // Kept as context for the banner, never as the alarm trigger. "Last new
+    // images landed 3 days ago" is useful to a reader diagnosing a problem; it
+    // just is not evidence of one.
     browardLastHarvest:  db.prepare(`
       SELECT MAX(harvested_at) AS last_harvest,
              CAST((julianday('now') - julianday(MAX(harvested_at))) * 24 AS INTEGER) AS hours_since
@@ -320,15 +337,48 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const all_gaps = findCoverageGaps(stmts.monthsByCounty.all() as any[]);
     const coverage_gaps = county ? all_gaps.filter(g => g.county === county) : all_gaps;
 
-    // Pipeline liveness. Threshold is 48h: the job runs daily, so one missed run
-    // is a blip and two is a pattern. The feed drops days after ~10, which is
-    // the real deadline — flagging at 48h leaves ample room to notice and fix
-    // before anything is lost.
+    // Pipeline liveness — see the comment on browardLastRun above for why this
+    // is measured per-RUN and not from when images last landed.
+    //
+    // Two independent flags, because they call for two different responses:
+    //
+    //   broward_stale   the job is not running (or its last run failed). Nothing
+    //                   is lost YET — the feed holds ~10 business days — but the
+    //                   clock is running. Threshold 26h: the schedule is several
+    //                   runs a day, so 26h means even a once-daily fallback has
+    //                   missed its slot. Tight enough to catch a real stoppage
+    //                   with days of margin, loose enough never to fire on a
+    //                   normal weekend, which is the bug this replaces.
+    //
+    //   broward_at_risk specific images are on the feed, unharvested, and will
+    //                   age out. This is the only condition here that becomes
+    //                   PERMANENT — the yearly exports are index-only and the
+    //                   portal is Cloudflare-gated, so an aged-out day is a phone
+    //                   call to Broward RTT, not a re-run.
+    //
+    // A run that found nothing new is explicitly healthy and sets neither.
+    const br = stmts.browardLastRun.get() as any;
     const bh = stmts.browardLastHarvest.get() as any;
     const collection_health = {
+      broward_last_run:     br?.finished_at ?? null,
+      broward_run_status:   br?.status ?? null,
+      broward_run_detail:   br?.detail || null,
+      broward_hours_since_run: br?.hours_since ?? null,
+      broward_feed_range:   br?.feed_first ? `${br.feed_first} → ${br.feed_last}` : null,
+      broward_docs_pending: br?.docs_pending ?? null,
+      broward_days_pending: br?.days_pending ?? null,
+      broward_oldest_pending: br?.oldest_pending ?? null,
+      // Context only, not a trigger.
       broward_last_harvest: bh?.last_harvest ?? null,
       broward_hours_since:  bh?.hours_since ?? null,
-      broward_stale: bh?.last_harvest != null && (bh.hours_since ?? 0) > 48,
+      // Never-run is deliberately NOT stale: on a database the heartbeat has
+      // never written to (a fresh restore, or before this ships) there is no
+      // evidence either way, and inventing an alarm from missing evidence is how
+      // the previous version lost the user's trust. The at-risk signal below
+      // still works, because it comes from the run row when there is one.
+      broward_stale: br?.finished_at != null &&
+                     ((br.hours_since ?? 0) > 26 || br.status === 'failed'),
+      broward_at_risk: (br?.docs_pending ?? 0) > 0,
     };
 
     // Backup health. Same 48h threshold and the same reasoning as above — the
