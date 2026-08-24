@@ -4,6 +4,18 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-08-23 (Sun night) — INCIDENT: two weeks of documents indexed but never extracted
+
+**User spotted it in production: every Reporting row since ~2026-08-15 had blank amounts/property.** Root cause: `run_weekly.sh` never sourced `/opt/amo-dashboard/.env` — cron gives no environment, so the last two Friday runs (08-14, 08-21) collected fine, then `extract_pdfs.py` died on `OPENAI_API_KEY is not set` and `set -e` silently skipped extract+normalize+enrich. The 08-15→08-17 repair backfill masked it by fixing everything recorded earlier. Facility tick (which DOES source .env) kept stamping new docs `status='OK'` facility-only/no-raw_json — 177 of 206 blank rows since 08-15 carry that signature, so "status=OK" looked healthy while nothing had amounts (0/206).
+
+**Diagnosis chain that worked:** clean rows blank → px.status all OK but loan_amount 0/206 → raw_json IS NULL on 177 (two-writers trap from 08-15) → cron.log tail showed `OPENAI_API_KEY is not set` right after "Collection complete" in both weekly runs.
+
+**Fix `2441222` (pushed, needs droplet git pull):** run_weekly.sh now sources .env like the tick, and FAILS LOUDLY up front if the key is missing instead of half-succeeding. Recovery = pull + one manual `extract_pdfs.py --limit 1500` catch-up run (pending selection keys on `raw_json IS NULL`, so it claims exactly the missed docs); nightly 08:30 normalize + cache bust surfaces the amounts.
+
+**Separate NEW issue spotted in the same log: AIT collection is fully broken** — every ASSIGNMENT OF INTEREST chunk timed out ("Timeout 45000ms waiting for response") in both weekly runs. AMO and ASG collect fine, so it's specific to that doc type's portal query. Zero AIT rows collected since at least 08-14. Not yet investigated.
+
+---
+
 ## ▶ CURRENT STATE — as of 2026-08-17 (read this first)
 
 **Both counties are live end to end.** Broward went from nothing to fully integrated between
