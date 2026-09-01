@@ -4,6 +4,22 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-09-01 — Email: SMTP still blocked, Graph transport built; Aug-23 extraction gap confirmed healed
+
+**Status question from the user ("is the email ready to go?"). Answer: everything except the network path.** Content approved, code deployed, app password installed — but DO's outbound SMTP block is still in force: `nc -zv smtp-mail.outlook.com 587` times out on all 8 IPv4 addresses (IPv6 "unreachable" is just no v6 route, ignore). `nc -zv graph.microsoft.com 443` **succeeds**.
+
+**Built + pushed `e853307`:** `server/email/graphMailer.ts` — app-only client-credentials token, `sendViaGraph`, and `verifyGraphAccess` (token + mailbox read, sends nothing). `sendWeeklyReport.ts` gained transport selection (auto → graph when `GRAPH_CLIENT_ID` set, else smtp; `REPORT_TRANSPORT` forces) and a **`--check`** flag. SMTP path untouched in case DO relents. Attachment guard under Graph's ~4MB request cap; 403 handler names the likely consent/ApplicationAccessPolicy cause. `tsc` clean; both missing-credential paths verified to produce actionable errors, not stack noise.
+
+**Blocked ONLY on Azure app registration** (tenant/client id + secret, APPLICATION `Mail.Send` admin-consented → `/opt/amo-dashboard/.env`). Needs an M365 admin if the user isn't one. Recommend an ApplicationAccessPolicy — app-only Mail.Send otherwise grants send-as for every mailbox in the tenant. DO support ticket remains a parallel option; still unknown whether one was ever filed.
+
+**Two things verified on live production while here:**
+- Droplet preview off live data works: **607 clean events / 222 relationships** for 2026-08-17→09-01. `npx tsx` runs fine on the droplet (devDeps present).
+- **The 2026-08-23 extraction gap healed.** That same window: 640 clean rows, **362 with loan_amount (57%), 380 with property (59%)** — squarely in the historical 40–60% band, so the catch-up run completed and the Friday runs have extracted properly since. No session had recorded the outcome.
+
+**Process note:** the correct status lived in the `amo-email-reports` memory (updated 08-26), NOT in this log — the log's newest email entry was 08-19 and said "blocked on app password", which led to two wrong answers to the user before the memory was read. When a question is about a feature's readiness, read the memory file for it before answering from the log.
+
+---
+
 ## 2026-08-24 — Broward "collection stopped" was a FALSE ALARM (banner fixed); FDIC direction audit clean; FDIC trend window was too narrow for its own metric (fixed).
 
 Three threads. Nothing was lost in any. Threads 1–2 are **deployed** (pushed through `6effeea`, built, `pm2 restart`, crontab replaced with `30 15,19,23 * * *`). Thread 3 is **local and NOT deployed** — needs `git pull` + `npm run build` + `pm2 restart amo-dashboard` (no crontab or DB change).

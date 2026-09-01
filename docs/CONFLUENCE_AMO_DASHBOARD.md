@@ -1,6 +1,6 @@
 # AMO Tracker — Mortgage Assignment Intelligence Dashboard
 
-> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 24 Aug 2026
+> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 1 Sep 2026
 > **Production URL:** `http://165.22.35.75:5000` (single shared password)
 > **Repository:** `amo-dashboard` (`origin/main`)
 
@@ -431,10 +431,14 @@ System dependencies for OCR: `poppler-utils` and `tesseract-ocr`
 | `CLERK_EMAIL` / `CLERK_PASSWORD` | `collect_live.py` | Miami-Dade portal login |
 | `BROWARD_FTP_HOST/PORT/USER/PASS` | `broward_collect.py`, `broward_images.py` | Public credentials, overridable |
 | `DOWNLOAD_WORKERS` | `extract_pdfs.py` | Auto-scales to `cpu_count()`, capped at 4 |
-| `REPORT_SMTP_HOST` | `server/email/mailer.ts` | Default `smtp-mail.outlook.com`. **Not yet set in production** — see §7.4 item 9 |
+| `REPORT_SMTP_HOST` | `server/email/mailer.ts` | Default `smtp-mail.outlook.com`. **Unusable — DO blocks outbound SMTP**; see §7.4 item 9 |
 | `REPORT_SMTP_PORT` | `server/email/mailer.ts` | Default `587` (STARTTLS) |
 | `REPORT_SMTP_USER` | `server/email/mailer.ts`, `sendWeeklyReport.ts` | Default `mktinfo@safeharborcp.com` |
-| `REPORT_SMTP_PASS` | `server/email/mailer.ts` | Outlook **app password** (not the account password); required only for `--send`, unset today |
+| `REPORT_SMTP_PASS` | `server/email/mailer.ts` | Outlook **app password**; installed in production but unusable while DO blocks SMTP |
+| `REPORT_TRANSPORT` | `sendWeeklyReport.ts` | `graph` or `smtp`; defaults to `graph` when `GRAPH_CLIENT_ID` is set |
+| `GRAPH_TENANT_ID` | `server/email/graphMailer.ts` | Azure directory (tenant) ID — **not yet set**, see §7.6 item 4 |
+| `GRAPH_CLIENT_ID` | `server/email/graphMailer.ts` | Azure application (client) ID — **not yet set** |
+| `GRAPH_CLIENT_SECRET` | `server/email/graphMailer.ts` | Azure client secret value — **not yet set** |
 | `REPORT_RECIPIENTS` | `sendWeeklyReport.ts` | Comma-separated; default `andres@safeharborcp.com,david@safeharborcp.com` |
 
 Production values live in `/opt/amo-dashboard/.env`, sourced by every cron wrapper.
@@ -1108,9 +1112,31 @@ via `nodemailer` (`server/email/mailer.ts`, `server/email/report.ts`). Recipient
 
 The script defaults to **preview mode** — writes the HTML + both CSVs to
 `server/scripts/output/` (gitignored) and sends nothing — and only sends for real with an explicit
-`--send` flag, so it cannot fire accidentally. **Blocking on:** an Outlook app password for
-`mktinfo@safeharborcp.com` (§7.6), after which it still needs a real test send, cron wiring next to
-`run_weekly.sh` (§6.5), and a deploy — none of that has happened yet.
+`--send` flag, so it cannot fire accidentally.
+
+**Status 1 Sep 2026 — content approved, code deployed, app password installed, and the SMTP path is
+nonetheless dead.** DigitalOcean blocks outbound SMTP account-wide from this droplet: ports 587 and
+465 time out to every `smtp-mail.outlook.com` address (re-verified 1 Sep), while `ufw` is inactive,
+`iptables` OUTPUT is ACCEPT, and 443 egress works — so it is DO's anti-spam policy, not droplet
+config. `nodemailer`'s `transport.verify()` simply hangs.
+
+**The shipped answer is Microsoft Graph over HTTPS 443** (`server/email/graphMailer.ts`, commit
+`e853307`), which sidesteps the port block while still sending from the same Microsoft mailbox — no
+third-party vendor, consistent with the original decision. `nc -zv graph.microsoft.com 443` succeeds
+from the droplet. Auth is the app-only client-credentials flow. The transport auto-selects Graph
+when `GRAPH_CLIENT_ID` is set and falls back to SMTP otherwise; `REPORT_TRANSPORT=graph|smtp` forces
+either. The SMTP path is retained in case DO ever lifts the block. A **`--check`** flag acquires a
+token and reads the sending mailbox **without sending anything**, so the Azure setup can be
+validated before mail reaches a real recipient.
+
+**Now blocking on:** Azure app registration values (§7.6 item 4) — `GRAPH_TENANT_ID`,
+`GRAPH_CLIENT_ID`, `GRAPH_CLIENT_SECRET` in `/opt/amo-dashboard/.env`, with **application-level**
+(not delegated) `Mail.Send` admin-consented. After that: `--check`, one `--send` to the owner's own
+address, then the real recipients, then cron wiring next to `run_weekly.sh` (§6.5).
+
+Note the report content itself is confirmed real — a 1 Sep droplet preview off live data returned
+607 clean events / 222 relationships for the 17 Aug–1 Sep window, and that window's extraction is
+healthy (640 rows, 57% carrying loan amounts).
 
 ### 7.5 Risk register
 
@@ -1147,11 +1173,20 @@ The script defaults to **preview mode** — writes the HTML + both CSVs to
    this is done, which does not address the risk it exists for. Create a Space, generate a Spaces
    access key, and add the six lines in §7.4 item 8a to `/opt/amo-dashboard/.env`. ~$5/month.
    The amber banner on the Overview clears once the first upload succeeds.
-4. 📧 **Generate an Outlook app password for `mktinfo@safeharborcp.com`** so the weekly emailed
-   report (§7.4 item 9) can go live: account.microsoft.com → Security → Advanced security options →
-   App passwords. Send the generated password so it can be added to `REPORT_SMTP_PASS` in
-   `/opt/amo-dashboard/.env` — it is not the account's normal login password. Also confirm the
-   report's local preview (layout/content) is approved before the first real test send.
+4. 📧 **Register an Azure app so the weekly emailed report can send** (§7.4 item 9). The app
+   password was installed and the content approved, but DigitalOcean blocks outbound SMTP from the
+   droplet, so that path cannot work regardless. The Graph transport is built and deployed; it needs
+   an app registration on the `safeharborcp.com` tenant: Azure portal → App registrations → New
+   registration; from **Overview** take the Directory (tenant) ID and Application (client) ID; from
+   **Certificates & secrets** create a client secret and take its *value*; under **API permissions**
+   add Microsoft Graph → **Application permissions** → `Mail.Send` (plus `User.Read.All` for the
+   `--check` mailbox probe) and click **Grant admin consent**. Requires an M365 administrator.
+   Add all three to `/opt/amo-dashboard/.env` as `GRAPH_TENANT_ID`, `GRAPH_CLIENT_ID`,
+   `GRAPH_CLIENT_SECRET` — never pass secrets through chat.
+   **Recommended hardening:** app-only `Mail.Send` permits send-as for *every* mailbox in the
+   tenant; scope it to the one sender with an Exchange `ApplicationAccessPolicy`.
+   *Parallel option, if preferred:* a DigitalOcean support ticket asking them to lift the SMTP block
+   (framed as one authenticated internal report per week) would revive the simpler SMTP path.
 
 **Engineering:**
 
