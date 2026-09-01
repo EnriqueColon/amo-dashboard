@@ -1,11 +1,18 @@
 // Weekly emailed report — clean AMO events + lending relationships, rolling 15-day window.
 //
 // Usage:
-//   tsx server/scripts/sendWeeklyReport.ts            preview only, writes local files, sends nothing
-//   tsx server/scripts/sendWeeklyReport.ts --send      actually sends via Outlook SMTP
+//   tsx server/scripts/sendWeeklyReport.ts             preview only, writes local files, sends nothing
+//   tsx server/scripts/sendWeeklyReport.ts --check     verify Graph credentials only, sends nothing
+//   tsx server/scripts/sendWeeklyReport.ts --send      actually sends
 //
-// Env (only required for --send): REPORT_SMTP_USER, REPORT_SMTP_PASS (Outlook app password),
-// REPORT_RECIPIENTS (comma-separated). See CLAUDE.md for the droplet cron wiring.
+// TRANSPORT: defaults to Microsoft Graph (HTTPS 443) when GRAPH_CLIENT_ID is set, because
+// DigitalOcean blocks outbound SMTP account-wide from this droplet (ports 587/465 time out;
+// re-verified 2026-09-01). Force either path with REPORT_TRANSPORT=graph|smtp.
+//
+// Env (only required for --send):
+//   graph: GRAPH_TENANT_ID, GRAPH_CLIENT_ID, GRAPH_CLIENT_SECRET
+//   smtp:  REPORT_SMTP_PASS (Outlook app password)
+//   both:  REPORT_SMTP_USER (sending mailbox), REPORT_RECIPIENTS (comma-separated)
 // REPORT_START_DATE / REPORT_END_DATE (YYYY-MM-DD) override the rolling 15-day window —
 // useful for previewing against a dev DB whose data lags today, or regenerating a past week.
 import fs from 'fs';
@@ -14,13 +21,30 @@ import { subDays, format } from 'date-fns';
 import { getDb } from '../db';
 import { buildWeeklyReport } from '../email/report';
 import { createReportTransport } from '../email/mailer';
+import { sendViaGraph, verifyGraphAccess } from '../email/graphMailer';
 
 const SEND = process.argv.includes('--send');
+const CHECK = process.argv.includes('--check');
 const SENDER = process.env.REPORT_SMTP_USER || 'mktinfo@safeharborcp.com';
 const RECIPIENTS = (process.env.REPORT_RECIPIENTS || 'andres@safeharborcp.com,david@safeharborcp.com')
   .split(',').map(s => s.trim()).filter(Boolean);
+const TRANSPORT = (process.env.REPORT_TRANSPORT || (process.env.GRAPH_CLIENT_ID ? 'graph' : 'smtp')).toLowerCase();
 
 async function main() {
+  // Credential check runs before any report work — it exists to validate the
+  // Azure setup without putting mail in front of a real recipient.
+  if (CHECK) {
+    console.log(`Transport: ${TRANSPORT}`);
+    if (TRANSPORT !== 'graph') {
+      console.log('--check only applies to the Graph transport. Set GRAPH_CLIENT_ID or REPORT_TRANSPORT=graph.');
+      return;
+    }
+    const mailbox = await verifyGraphAccess(SENDER);
+    console.log(`✅ Graph credentials work and mailbox ${mailbox} is reachable. Nothing was sent.`);
+    console.log('Next: a --send run with REPORT_RECIPIENTS set to your own address.');
+    return;
+  }
+
   const endDate = process.env.REPORT_END_DATE || format(new Date(), 'yyyy-MM-dd');
   const startDate = process.env.REPORT_START_DATE || format(subDays(new Date(endDate), 15), 'yyyy-MM-dd');
 
@@ -52,18 +76,26 @@ async function main() {
     return;
   }
 
+  const attachments = [
+    { filename: `clean-events-${endDate}.csv`, content: report.cleanCsv },
+    { filename: `lending-relationships-${endDate}.csv`, content: report.facilityCsv },
+  ];
+
+  if (TRANSPORT === 'graph') {
+    await sendViaGraph({ from: SENDER, to: RECIPIENTS, subject, html: report.html, attachments });
+    console.log(`Sent via Microsoft Graph to ${RECIPIENTS.join(', ')}`);
+    return;
+  }
+
   const transport = createReportTransport();
   const info = await transport.sendMail({
     from: `"AMO Dashboard" <${SENDER}>`,
     to: RECIPIENTS.join(', '),
     subject,
     html: report.html,
-    attachments: [
-      { filename: `clean-events-${endDate}.csv`, content: report.cleanCsv },
-      { filename: `lending-relationships-${endDate}.csv`, content: report.facilityCsv },
-    ],
+    attachments,
   });
-  console.log(`Sent to ${RECIPIENTS.join(', ')} — messageId ${info.messageId}`);
+  console.log(`Sent via SMTP to ${RECIPIENTS.join(', ')} — messageId ${info.messageId}`);
 }
 
 main().catch(err => {
