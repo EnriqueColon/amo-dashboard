@@ -1190,6 +1190,19 @@ healthy (640 rows, 57% carrying loan amounts).
 
 **Engineering:**
 
+4a. **Owner-set priorities for the next working session (1 Sep 2026), not yet started.**
+   (i) **Confirm full document coverage** — AMO, assignments of loans, assignments of collateral —
+   starting with the fact that **AIT (Assignment of Interest) collection has been failing on
+   portal timeouts since ~14 Aug 2026** (zero rows collected; AMO and ASG unaffected), then auditing
+   the clerk's doc-type list against the three types we request.
+   (ii) **Verify those documents classify correctly** (`doc_category`: LOAN_TRANSFER / COLLATERAL /
+   RENTS_LEASES / OTHER), bearing in mind any extraction-prompt change must re-pass
+   `verify_integration.py` at 21/21.
+   (iii) **Exclude Wilmington Savings, MERS, Fannie Mae and Freddie Mac from the Reporting tab** as a
+   display filter only — the underlying rows stay in the database. Needs a canonical-name exclusion
+   list matching either side of a transaction; `entity_type` will not work, since Wilmington Savings
+   is a `BANK` while the others are `GSE`/`MERS`.
+
 5. **Real cron-failure alerting.** The dashboard now warns when Broward collection stalls *and* when
    backups stop succeeding, but both only help someone who opens it. There is still no `MAILTO` and
    no uptime ping on the droplet. A mail transport now exists (`server/email/mailer.ts`, built for

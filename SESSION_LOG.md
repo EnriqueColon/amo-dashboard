@@ -4,6 +4,27 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## ⏭ NEXT SESSION — user-directed priorities (set 2026-09-01, explicitly NOT started)
+
+User's words: *"We need to make sure we are pulling all documents AOM, Assignments of loans, assignments of collateral and we are able to classify them. On the reporting tab, we need to take out Wilmington Savings, MERS, Fannie and Freddie Mac transaction - keep the data in the back end."*
+
+**1. Full document coverage — are we pulling everything?**
+- Currently collected (`collect_live.py`, three doc types): **AMO** (Assignment of Mortgage), **ASG** (Assignment), **AIT** (Assignment of Interest).
+- 🔴 **AIT collection is BROKEN and has been since at least 2026-08-14** — every AIT chunk fails `Timeout 45000ms exceeded while waiting for event "response"` in the weekly cron while AMO/ASG succeed. Zero AIT rows collected in that time. **Fix this first**: it is the concrete, known gap in "are we pulling all documents."
+- Then audit the clerk portal's full doc-type list against the three we request — confirm there is no fourth code carrying loan/collateral assignments (the user named "assignments of loans" and "assignments of collateral", which may or may not be distinct portal doc types vs. our derived categories).
+
+**2. Classification of those documents**
+- Today `doc_category` comes from the LLM read of each PDF: `LOAN_TRANSFER` / `COLLATERAL` / `RENTS_LEASES` / `OTHER`. So "assignments of collateral" is likely already a category, not a missing doc type — verify coverage and accuracy rather than assuming either way.
+- Related known issue (separate, still open): facility **type** over-labeling — everything in the recent window reads `warehouse_or_revolving_credit_facility`, including obvious consumer HELOCs and a syndicated deal. Both classification questions touch `FACILITY_SYSTEM_PROMPT` / extraction prompts → **any prompt edit requires re-running `collector/research/scripts/verify_integration.py` at 21/21 first.**
+
+**3. Reporting tab — hide Wilmington Savings, MERS, Fannie Mae, Freddie Mac**
+- **Display-only exclusion. Data stays in the DB** (user was explicit). Implement as a filter in the Reporting query/UI, not a delete and not a normalize-time drop.
+- Must match on **canonical** names and cover the entity in EITHER direction (assignor or assignee).
+- Note `entity_type` alone won't do it: Fannie/Freddie are `GSE` and MERS is `MERS`, but **Wilmington Savings is `BANK`** — so a type-based filter would either miss Wilmington or nuke every bank. Needs an explicit canonical-name exclusion list (canonical forms in `normalize.py`: `MERS`, `FANNIE MAE`, `FREDDIE MAC`, `WILMINGTON SAVINGS`).
+- **Confirm with the user before building:** should this be a hard filter or a default-on toggle with a "show all" switch? And should it also apply to the Overview/Entities stats and the emailed report, or the Reporting tab only? (Assume Reporting-tab-only unless told otherwise.)
+
+---
+
 ## 2026-09-01 — Email: SMTP still blocked, Graph transport built; Aug-23 extraction gap confirmed healed
 
 **Status question from the user ("is the email ready to go?"). Answer: everything except the network path.** Content approved, code deployed, app password installed — but DO's outbound SMTP block is still in force: `nc -zv smtp-mail.outlook.com 587` times out on all 8 IPv4 addresses (IPv6 "unreachable" is just no v6 route, ignore). `nc -zv graph.microsoft.com 443` **succeeds**.
