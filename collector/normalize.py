@@ -47,6 +47,50 @@ NORMALIZE_COUNTIES: tuple[str, ...] | None = (
 )
 
 
+# ── Non-assignment doc types ──────────────────────────────────────────────────
+# Document types collected for their party data but which are NOT assignment
+# instruments, and must not reach the analytical tables.
+#
+# FST (UCC financing statements) was added 2026-09-09 for the lending
+# relationships it exposes — secured party ↔ debtor, present on 99% of filings.
+# It is a different instrument: a UCC-1 records a NEW security interest, it does
+# not transfer a mortgage. Two things follow, and both are load-bearing:
+#
+#   1. It stays out of aom_events_clean. Without this, any FST the extractor
+#      happens to label LOAN_TRANSFER would silently land in the Reporting tab
+#      and move numbers the owner already reports on. Measured composition of
+#      the bucket: >25% consumer solar / home-improvement finance (ISPC 359,
+#      GoodLeap 145, Solar Mosaic, Aqua, Palmetto) — noise in an assignment
+#      table by any reading.
+#   2. It stays out of the raw-name signal sweep. That sweep has no
+#      loan-transfer filter and merges suffix signals by canonical name, so a
+#      consumer-finance name landing there can flip assignor_type/assignee_type
+#      on an entity that also trades in mortgage assignments — silently
+#      changing existing rows. This is the same hazard the county scope note
+#      below describes for Broward; see collector/tests/check_doc_type_scope.py,
+#      which asserts both invariants.
+#
+# Extraction is deliberately NOT filtered: the PDFs are read and everything is
+# stored in pdf_extractions, so the data is available to query. Only the
+# derived/analytical tables are gated.
+NON_ASSIGNMENT_DOC_TYPES: tuple[str, ...] = ('FINANCING STATEMENT UCC - FST',)
+
+
+def non_assignment_filter(alias: str = '') -> str:
+    """SQL fragment excluding NON_ASSIGNMENT_DOC_TYPES, for the analytical path.
+
+    Written as NOT IN with a NULL guard rather than `!=` because doc_type is
+    nullable: legacy rows predate the column and are AMO by definition, and
+    `doc_type NOT IN (...)` is NULL — not true — for those, which would drop
+    every one of them from the clean table.
+    """
+    if not NON_ASSIGNMENT_DOC_TYPES:
+        return ''
+    quoted = ', '.join("'" + t.replace("'", "''") + "'" for t in NON_ASSIGNMENT_DOC_TYPES)
+    col = f'{alias}doc_type'
+    return f" AND ({col} IS NULL OR {col} NOT IN ({quoted}))"
+
+
 def county_filter(conn, alias: str = '') -> str:
     """SQL fragment scoping a query to NORMALIZE_COUNTIES, or '' if not applicable.
 
@@ -876,7 +920,7 @@ def build_normalized_tables():
     # of a canonical entity that also trades in Miami-Dade — silently changing
     # assignor_type/assignee_type on existing rows. Widen this when Broward
     # extraction lands and cross-county entity resolution is wanted.
-    scope = county_filter(conn)
+    scope = county_filter(conn) + non_assignment_filter()
     all_raw = conn.execute(
         f"SELECT DISTINCT grantor FROM assignments WHERE grantor IS NOT NULL{scope} "
         "UNION "
@@ -1050,7 +1094,7 @@ def build_normalized_tables():
         FROM assignments a
         LEFT JOIN entity_classifications ec_g ON UPPER(a.grantor)=UPPER(ec_g.name)
         LEFT JOIN entity_classifications ec_a ON UPPER(a.grantee)=UPPER(ec_a.name)
-        WHERE 1=1""" + county_filter(conn, 'a.') + """
+        WHERE 1=1""" + county_filter(conn, 'a.') + non_assignment_filter('a.') + """
     """).fetchall()
 
     print(f"  Loaded {len(rows)} raw rows")

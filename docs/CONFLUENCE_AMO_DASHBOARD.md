@@ -1,6 +1,6 @@
 # AMO Tracker — Mortgage Assignment Intelligence Dashboard
 
-> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 1 Sep 2026
+> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 9 Sep 2026
 > **Production URL:** `http://165.22.35.75:5000` (single shared password)
 > **Repository:** `amo-dashboard` (`origin/main`)
 
@@ -79,6 +79,39 @@ Understanding five terms makes the whole dashboard readable.
 
 `LOAN_TRANSFER` · `RENTS_LEASES` · `COLLATERAL` · `OTHER`
 Only `LOAN_TRANSFER` reaches the clean transaction tables.
+
+**"Assignment of collateral" is a category, not a document type.** The county has no such filing
+type — those documents are recorded as ordinary `ASG`/`AMO` filings and the extractor identifies
+them by reading the PDF. **19,123 documents currently carry `COLLATERAL`.**
+
+### Which document types we collect (audited 8–9 Sep 2026 against the live portal)
+
+The Miami-Dade clerk offers **79** document types. Exactly **three** are assignments, and we
+request all three:
+
+| Type | Code | Status |
+|---|---|---|
+| Assignment of Mortgage | `AMO` | Collected — the core dataset |
+| Assignment | `ASG` | Collected — generic bucket, PDF classification sorts it |
+| Assignment of Interest | `AIT` | Requested, but the county returns **nothing** for it (see below) |
+| Financing Statement UCC | `FST` | **Added 9 Sep 2026** — not an assignment; see below |
+
+So no assignment category was ever missing. Broward folds every assignment into a single code
+(`AST`), already verified as its only assignment code among the 65 present in its feed.
+
+**AIT returns nothing, and never has.** The county answers every AIT search with "no results" — the
+same answer it gives for a day the courthouse was closed. Zero AIT documents have been collected
+since the type was added on 16 Jun 2026. It is **kept in the collector deliberately**, at the
+owner's decision, so that collection begins automatically if the county ever starts using it.
+
+**FST (UCC financing statements) is not an assignment** — a UCC-1 records a *new* security interest
+rather than transferring a mortgage. It is collected for the lending relationships it exposes
+(secured party ↔ debtor, present on **99%** of filings) at roughly **42 filings/day**, comparable
+to ASG. Its composition is mixed: genuine commercial lending (City National Bank of Florida, Popular
+Bank, U.S. Century, BankUnited, Banesco, Bayview) alongside a large volume of consumer solar and
+home-improvement finance (ISPC, GoodLeap, Solar Mosaic — over a quarter of the bucket). **It is
+deliberately excluded from the Reporting tab and from entity classification** so it cannot move the
+assignment numbers the dashboard already reports; the underlying data is still collected and stored.
 
 ### Entity types
 
@@ -545,6 +578,7 @@ AMO_DB_PATH=./prod_snapshot.db collector/.venv/bin/python3 collector/tests/check
 | `check_entity_names_parity.py` | The shared address book reproduces the legacy normalize functions exactly |
 | `check_alias_scope.py` | Alias scoping rules behave — note aliases are applied **after** suffix stripping |
 | `check_broward_heartbeat.py` | The Broward daily job's heartbeat separates "ran and found nothing new" (normal every weekend) from "stopped running". Stubs the SFTP layer — no network needed |
+| `check_doc_type_scope.py` | Non-assignment doc types (`FST`) never reach `aom_events_clean` or the entity signal sweep, while `AMO`/`ASG`/legacy `NULL` rows still do. Runs on an in-memory fixture **plus a negative control** — production had zero FST rows when it was written, so a live-only check would have passed while asserting nothing |
 | `diff_name_systems.py`, `show_merge_proposals.py` | Diagnostics for reviewing name-matching decisions |
 
 `check_county_isolation.py` exists because the same bug has now been caught **three separate times**:
@@ -1154,6 +1188,9 @@ healthy (640 rows, 57% carrying loan amounts).
 | Single droplet, single SQLite file | Total loss on host failure | **Resolved 17 Aug 2026** — nightly verified snapshot to DigitalOcean Spaces (different failure domain from the droplet), 7 archives retained locally, all Broward images mirrored. Restore tested from the bucket copy, counts matched live exactly |
 | Backups run but silently stop working | False confidence — the failure is only discovered when a restore is attempted | Every run records status in `backup_runs`. The Overview shows **red** when the job is absent, errored, or has not run in 48h, and **amber** when it is working but not reaching off-box storage. Snapshots are integrity-checked and row-count-asserted before they may rotate an older one away |
 | Weak default password | Unauthorised access | `AMO_PASSWORD`/`AMO_SECRET` must be set in the production `.env` |
+| A search returns more results than the county will serve | **Documents silently missing on the busiest days.** The portal caps a search at ~500 index rows. The collector splits a date range into smaller chunks until it fits, but it cannot split below a single day — so on 23 days between 11 Jan 2023 and 3 Feb 2026 it stored what it was given and moved on. Those days hold 109–145 documents each against a daily average of 59, consistent with truncation | **Open.** The affected days are recorded as `CAPPED` in `collection_log`, so they are identifiable. Recovering them needs a narrower search axis than date — party name or book range |
+| A collection window fails and is never retried | A one-off failure becomes permanent data loss | **Partly open.** Failed windows *are* retried, but `run_weekly.sh` only looks back 10 days, so a window that fails ages out of retry range within roughly one run. Windows the county reports as genuinely empty stay retry-eligible indefinitely by design |
+| A document type is added to the collector without gating the analytical tables | Non-assignment filings silently inflate the Reporting tab and can flip entity types on existing companies | `normalize.NON_ASSIGNMENT_DOC_TYPES` gates both the clean-events build and the raw-name signal sweep; `check_doc_type_scope.py` asserts it, negative control included |
 
 ### 7.6 Recommended next steps
 
@@ -1190,18 +1227,29 @@ healthy (640 rows, 57% carrying loan amounts).
 
 **Engineering:**
 
-4a. **Owner-set priorities for the next working session (1 Sep 2026), not yet started.**
-   (i) **Confirm full document coverage** — AMO, assignments of loans, assignments of collateral —
-   starting with the fact that **AIT (Assignment of Interest) collection has been failing on
-   portal timeouts since ~14 Aug 2026** (zero rows collected; AMO and ASG unaffected), then auditing
-   the clerk's doc-type list against the three types we request.
-   (ii) **Verify those documents classify correctly** (`doc_category`: LOAN_TRANSFER / COLLATERAL /
-   RENTS_LEASES / OTHER), bearing in mind any extraction-prompt change must re-pass
-   `verify_integration.py` at 21/21.
-   (iii) **Exclude Wilmington Savings, MERS, Fannie Mae and Freddie Mac from the Reporting tab** as a
-   display filter only — the underlying rows stay in the database. Needs a canonical-name exclusion
-   list matching either side of a transaction; `entity_type` will not work, since Wilmington Savings
-   is a `BANK` while the others are `GSE`/`MERS`.
+4a. **Owner-set priorities from 1 Sep 2026 — status as of 9 Sep 2026.**
+   (i) ✅ **Document coverage: ANSWERED.** The clerk offers 79 types, exactly three are assignments,
+   and we request all three (see §3). Nothing was missing. The AIT failure was diagnosed — the county
+   returns no results for that type and never has — and fixed so it no longer stalls each run. UCC
+   financing statements (`FST`) were added as a new source of lending relationships.
+   (ii) ✅ **Classification: mostly answered.** "Assignments of collateral" was never a missing
+   document type — 19,123 documents already carry `COLLATERAL`. **Still open:** facility *type*
+   over-labelling (item 7 below), where nearly everything recent reads
+   `warehouse_or_revolving_credit_facility` including obvious consumer HELOCs. Any extraction-prompt
+   change must re-pass `verify_integration.py` at 21/21.
+   (iii) ⬜ **NOT STARTED — exclude Wilmington Savings, MERS, Fannie Mae and Freddie Mac from the
+   Reporting tab** as a display filter only; the underlying rows stay in the database. Needs a
+   canonical-name exclusion list matching either side of a transaction; `entity_type` will not work,
+   since Wilmington Savings is a `BANK` while the others are `GSE`/`MERS`.
+
+4b. 🔴 **Run the FST extraction backfill — needs an owner decision, not engineering.** FST index
+   collection is built and tested; reading the ~39,000 PDFs behind those filings is a separate,
+   costed job: **~$20 (or ~$10 via the Batch API) and ~25 hours**, using this project's own measured
+   rates. Until it runs, FST filings carry party names, dates and document numbers but no loan
+   amounts, property addresses or collateral descriptions. Note `extract_pdfs.py` defaults to a **$5
+   budget cap**, so a full run must pass `--budget` explicitly or it will stop roughly a quarter of
+   the way through. A cheaper middle option is to extract only the commercial lenders
+   (~6,000 documents, ~$3, ~4 hours) and leave the consumer solar filings unread.
 
 5. **Real cron-failure alerting.** The dashboard now warns when Broward collection stalls *and* when
    backups stop succeeding, but both only help someone who opens it. There is still no `MAILTO` and

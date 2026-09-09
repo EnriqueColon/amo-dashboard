@@ -4,24 +4,146 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
-## ⏭ NEXT SESSION — user-directed priorities (set 2026-09-01, explicitly NOT started)
+## ⏭ NEXT SESSION — what is still open
 
-User's words: *"We need to make sure we are pulling all documents AOM, Assignments of loans, assignments of collateral and we are able to classify them. On the reporting tab, we need to take out Wilmington Savings, MERS, Fannie and Freddie Mac transaction - keep the data in the back end."*
+**1. ✅ Document coverage — ANSWERED 2026-09-08/09.** See the dated entry below. Portal offers 79
+doc types, exactly THREE are assignments, we request all three, plus FST now. AIT root cause found
+and fixed. **Remaining sub-item: the 23 CAPPED days** (below) are still truncated.
 
-**1. Full document coverage — are we pulling everything?**
-- Currently collected (`collect_live.py`, three doc types): **AMO** (Assignment of Mortgage), **ASG** (Assignment), **AIT** (Assignment of Interest).
-- 🔴 **AIT collection is BROKEN and has been since at least 2026-08-14** — every AIT chunk fails `Timeout 45000ms exceeded while waiting for event "response"` in the weekly cron while AMO/ASG succeed. Zero AIT rows collected in that time. **Fix this first**: it is the concrete, known gap in "are we pulling all documents."
-- Then audit the clerk portal's full doc-type list against the three we request — confirm there is no fourth code carrying loan/collateral assignments (the user named "assignments of loans" and "assignments of collateral", which may or may not be distinct portal doc types vs. our derived categories).
+**2. Classification — partly answered.** Collateral assignments were never a missing doc type:
+19,123 documents already carry `doc_category='COLLATERAL'`. **Still open:** facility **type**
+over-labeling — everything recent reads `warehouse_or_revolving_credit_facility`, including obvious
+consumer HELOCs and a syndicated deal. Touches `FACILITY_SYSTEM_PROMPT` → **any prompt edit
+requires re-running `collector/research/scripts/verify_integration.py` at 21/21 first.**
 
-**2. Classification of those documents**
-- Today `doc_category` comes from the LLM read of each PDF: `LOAN_TRANSFER` / `COLLATERAL` / `RENTS_LEASES` / `OTHER`. So "assignments of collateral" is likely already a category, not a missing doc type — verify coverage and accuracy rather than assuming either way.
-- Related known issue (separate, still open): facility **type** over-labeling — everything in the recent window reads `warehouse_or_revolving_credit_facility`, including obvious consumer HELOCs and a syndicated deal. Both classification questions touch `FACILITY_SYSTEM_PROMPT` / extraction prompts → **any prompt edit requires re-running `collector/research/scripts/verify_integration.py` at 21/21 first.**
-
-**3. Reporting tab — hide Wilmington Savings, MERS, Fannie Mae, Freddie Mac**
-- **Display-only exclusion. Data stays in the DB** (user was explicit). Implement as a filter in the Reporting query/UI, not a delete and not a normalize-time drop.
+**3. Reporting tab — hide Wilmington Savings, MERS, Fannie Mae, Freddie Mac. NOT STARTED.**
+- **Display-only exclusion. Data stays in the DB** (user was explicit). Implement as a filter in the
+  Reporting query/UI, not a delete and not a normalize-time drop.
 - Must match on **canonical** names and cover the entity in EITHER direction (assignor or assignee).
-- Note `entity_type` alone won't do it: Fannie/Freddie are `GSE` and MERS is `MERS`, but **Wilmington Savings is `BANK`** — so a type-based filter would either miss Wilmington or nuke every bank. Needs an explicit canonical-name exclusion list (canonical forms in `normalize.py`: `MERS`, `FANNIE MAE`, `FREDDIE MAC`, `WILMINGTON SAVINGS`).
-- **Confirm with the user before building:** should this be a hard filter or a default-on toggle with a "show all" switch? And should it also apply to the Overview/Entities stats and the emailed report, or the Reporting tab only? (Assume Reporting-tab-only unless told otherwise.)
+- `entity_type` alone won't do it: Fannie/Freddie are `GSE` and MERS is `MERS`, but **Wilmington
+  Savings is `BANK`** — a type-based filter would either miss Wilmington or nuke every bank. Needs an
+  explicit canonical-name exclusion list (canonical forms in `normalize.py`: `MERS`, `FANNIE MAE`,
+  `FREDDIE MAC`, `WILMINGTON SAVINGS`).
+- **Confirm before building:** hard filter or default-on toggle with "show all"? Overview/Entities
+  stats and the emailed report too, or Reporting tab only? (Assume Reporting-tab-only unless told.)
+
+**4. 🔴 The FST extraction backfill has NOT been run** — code is deployed-ready but the ~39k-document
+extraction needs the owner's go-ahead (~$20, ~25h). See the entry below for the exact runbook.
+
+---
+
+## 2026-09-09 — Doc-type coverage answered; AIT root cause fixed; FST (UCC) collection added
+
+**The question was "are we pulling all documents?" It is now answered against the LIVE portal, not
+inferred from our own code.**
+
+### Coverage: the clerk offers 79 doc types; exactly THREE are assignments
+`ASSIGNMENT - ASG`, `ASSIGNMENT OF INTEREST - AIT`, `ASSIGNMENT OF MORTGAGE - AMO` — dumped off the
+live `select#documentType`. We request all three, so **no assignment category was ever missing**.
+There is no "assignment of collateral" and no "assignment of securities" doc type; those arrive
+inside ASG/AMO and are identified by reading the PDF (**19,123 docs already classified
+`COLLATERAL`**). Broward folds every assignment into `AST`, already verified as its only assignment
+code among 65.
+
+### AIT: the root cause was never a timeout, and it never worked at all
+The portal searches in **two steps**: `POST /api/home/standardsearch` returns
+`{"isValidSearch":true,"qs":"<token>"}`, then `GET /api/SearchResults/getStandardRecords?qs=` returns
+rows. **For AIT step one answers `{"isValidSearch":false,"qs":null}`**, so step two is never issued
+and `page.expect_response("getStandardRecords")` waited its full 45s and logged a bogus timeout
+ERROR. The same `isValidSearch:false` comes back for a courthouse-closure day with no filings, so it
+means **"no results", not "broken"**.
+
+**AIT has produced ZERO rows since it was added 2026-06-16** — 55 ERROR log rows, 0 OK, 0
+assignments. The previous entry's "broken since 2026-08-14" understated it by two months. Forcing it
+through with `documentType=AIT` (bare code) *does* return `isValidSearch:true`, but the rows come
+back as an unfiltered grab-bag — deeds, mortgages, court papers, **zero actual AIT across five sample
+windows spanning 2023→2026**. That is the filter being dropped, not a workaround.
+
+**Owner decision: KEEP AIT in `DOC_TYPES`** rather than dropping it, so collection starts
+automatically if the county ever activates the type. Fixed instead by watching BOTH responses from
+the moment of the click: a rejected search now returns a new **`EMPTY`** status in ~1s.
+`already_collected()` still only skips `status='OK'`, so EMPTY windows stay retry-eligible **by
+design** — do not "fix" that by marking them collected.
+
+### FST (UCC financing statements) added — a bucket the same size as ASG
+Measured **42.3 filings/day** over 61 real recording days (2,581 rows in the local dev DB from an
+earlier exploration) ≈ 10,600/yr ≈ **~39,000 since 2023**. One-day portal comparison: AMO 86 unique
+docs, ASG 47, **FST 48**.
+
+Read 60 sample PDFs (`collector/research/fst_texts/`, unbiased most-recent sample). It is a **mix**:
+real CRE lending (City National Bank of Florida 41, Popular Bank 21, U.S. Century 20, BankUnited,
+Banesco, Bayview, BNY Mellon, a Wells Fargo CMBS trustee, FS CREIT) alongside heavy consumer
+solar/home-improvement finance (**ISPC 359, GoodLeap 145**, Aqua, Solar Mosaic, Palmetto, Service
+Finance — >25% of the bucket).
+
+**What FST does NOT contain**, both re-checked independently rather than taken from the classifier:
+- **No assignments of collateral/securities (0/60).** A keyword search matches all 60 documents only
+  because the blank UCC form pre-prints "NAME of TOTAL ASSIGNEE of ASSIGNOR S/P". Form boilerplate.
+- **No warehouse / pledged-mortgage-loan filings (0/60).** All 4 keyword hits were false: a condo
+  named "DORAL IMPACT CENTER **WAREHOUSE** CONDOMINIUM", and "promissory notes" inside standard
+  blanket-lien lists.
+
+**An LLM triage scored 48% "relevant" — that number is NOT trustworthy and was discarded.**
+Cross-checking showed it classifying the *same* secured party both ways (GoodLeap relevant 3×,
+irrelevant 2×; Florida City Gas both ways; Cross River both ways). The lender-name counts above come
+from the index and are solid; the percentage was not. *Lesson: cross-tab an LLM triage against a
+stable key before quoting its headline number.*
+
+**Key economic fact: the search index alone carries BOTH party names on 99% of FST filings**
+(2,562/2,581; 54/54 in the live test) with no PDF, no OCR, no LLM, no cost.
+
+### Built (all local, `tsc` + `npm run check` clean, NOT yet deployed)
+- **`collect_live.py`** — `DOC_TYPES` gains FST. `do_search()` rewritten to watch both responses and
+  return `EMPTY` fast; `time` imported; the deliberate no-skip-on-EMPTY choice documented at the call
+  site so it is not "fixed" later.
+- **`normalize.py`** — new `NON_ASSIGNMENT_DOC_TYPES` + `non_assignment_filter(alias)`, applied at
+  **two** sites: the clean-events build and the raw-name signal sweep. The filter is
+  `(col IS NULL OR col NOT IN (...))` — **the NULL guard is load-bearing**: `doc_type NOT IN (...)`
+  is NULL for legacy pre-migration rows, which would silently drop every one of them.
+- **`client/src/pages/CollectionLog.tsx`** — `EMPTY` renders as a grey `MinusCircle`, not a red X.
+  AIT reports EMPTY on every run and a log full of red X's trains the reader to ignore real errors
+  (same lesson as the Broward Monday false alarm).
+- **`collector/tests/check_doc_type_scope.py`** — asserts FST never reaches `aom_events_clean` nor
+  the signal sweep, that AMO/ASG/legacy-NULL rows survive, that aliased and unaliased filters agree,
+  **plus a negative control** that empties the constant and requires the FST row to reappear.
+  Production had 0 FST rows when written, so a live-only check would have passed vacuously.
+
+**Deliberately NOT filtered: extraction.** `extract_pdfs.py` has no doc-type filter, so FST PDFs get
+read and everything lands in `pdf_extractions` — the owner wants the full data. Only the
+derived/analytical tables are gated. **Owner also confirmed: keep FST off the Reporting tab for
+now** ("lets pull in the data in first") — folding it in later is a one-line change to
+`NON_ASSIGNMENT_DOC_TYPES`.
+
+### Verified against the live portal (scratch DB, production untouched)
+    AMO   OK     361 rows → 103 docs
+    ASG   OK      73 rows →  31 docs
+    AIT   EMPTY    0 rows          ← ~4s, was a 45s hang logged as ERROR
+    FST   OK     116 rows →  54 docs, 54/54 with BOTH party names
+Whole 2-day × 4-type run: **39 seconds**. Sample FST parties: 1775 BISCAYNE DEVELOPMENT →
+NATIXIS NEW YORK BRANCH, ORION HIALEAH → SYNOVUS BANK, WHITESHARK AUTO SALES → RBI PRIVATE LENDING.
+Guardrail run against the dev DB's 2,581 real FST rows: none reached `aom_events_clean`.
+
+### Runbook for the extraction backfill (NOT run — needs owner go-ahead)
+Costs from this project's own measured rates ($0.000508/doc for 2 LLM calls, 1,550 docs/hr at 8
+workers; re-measured $0.000241/doc for 1 call this session):
+**index-only ≈ $0 / <1h · selective (~6k CRE-lender docs) ≈ $3 / ~4h · full ~39k ≈ $20 standard or
+~$10 Batch API / ~25h.** `extract_pdfs.py` defaults to `BUDGET_USD=5.0`, so a full run **must** pass
+`--budget` (or `OPENAI_BUDGET_USD`) or it stops a quarter of the way through. Long run → `nohup` +
+`disown`, and `pm2 restart amo-dashboard` after the following `normalize.py`.
+
+### Two gaps found along the way, both still open
+1. **23 single-day windows were silently truncated** at the portal's ~500-row cap (`CAPPED`,
+   2023-01-11 … 2026-02-03). `MIN_CHUNK=1` means the recursive splitter cannot go below one day, so
+   those days stored what they got and nobody knows what was cut. Those days hold 109–145 unique AMO
+   docs against a 2024 daily average of 58.9 — i.e. they sit at the very top of the range, which is
+   consistent with truncation. A backfill needs a **narrower axis than date** (party name or book
+   range). Note the ~500 cap is on *index rows*, not documents: 500 index rows collapsed to ~135
+   unique CFNs.
+2. **`run_weekly.sh` only looks back 10 days**, so any ERROR/CAPPED window ages out of retry range
+   within roughly one run and is never revisited.
+
+**Also: the droplet was 4 commits behind (`6effeea`)** — the FDIC trend-window fix (`09f6cf0`) and
+the Graph mailer (`e853307`) are pushed but NOT live. Deploy needed independently of this work.
 
 ---
 

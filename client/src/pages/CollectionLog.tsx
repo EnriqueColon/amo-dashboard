@@ -1,11 +1,16 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import { Skeleton } from '@/components/ui/skeleton';
-import { CheckCircle, AlertTriangle, XCircle, ClipboardList } from 'lucide-react';
+import { CheckCircle, AlertTriangle, XCircle, MinusCircle, ClipboardList } from 'lucide-react';
 
 function StatusIcon({ status }: { status: string }) {
   if (status === 'OK') return <CheckCircle size={13} className="text-green-400 shrink-0" />;
   if (status === 'CAPPED') return <AlertTriangle size={13} className="text-amber-400 shrink-0" />;
+  // EMPTY is the portal answering "nothing recorded in this window" — a normal
+  // result, not a failure. Painting it red would recreate the alarm-that-always-
+  // fires problem the Broward banner already taught us: AIT reports EMPTY on
+  // every run, and a log full of red X's trains the reader to ignore real errors.
+  if (status === 'EMPTY') return <MinusCircle size={13} className="text-muted-foreground shrink-0" />;
   return <XCircle size={13} className="text-red-400 shrink-0" />;
 }
 

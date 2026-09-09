@@ -17,7 +17,7 @@ Usage:
     python collect_live.py --start 2025-01-01 --end 2026-04-10 --doc-types "ASSIGNMENT - ASG"
 """
 
-import asyncio, json, logging, sys, os
+import asyncio, json, logging, sys, os, time
 from datetime import date, timedelta, datetime
 from typing import Optional
 
@@ -41,10 +41,24 @@ BASE        = "https://onlineservices.miamidadeclerk.gov/officialrecords"
 # Document types covering loan/mortgage transfers. The dedicated AMO type is
 # clean by definition; ASG and AIT are generic buckets that also contain
 # mortgage/note assignments — PDF classification filters out the rest.
+#
+# AIT has returned zero rows since it was added (2026-06-16): the clerk answers
+# every AIT search with isValidSearch:false, the same answer it gives for a day
+# with no filings at all. It is kept here deliberately, at the owner's decision,
+# so that we start collecting automatically if the county ever activates the
+# type — an AIT search now costs ~1s instead of the 45s it used to hang for.
+# See do_search() and SESSION_LOG.md.
+#
+# FST is NOT an assignment. It is collected for the lending relationships it
+# exposes (secured party ↔ debtor, present on 99% of filings) and is excluded
+# from aom_events_clean and from entity-type classification by
+# normalize.NON_ASSIGNMENT_DOC_TYPES — collecting it must not move the
+# assignment numbers the dashboard already reports.
 DOC_TYPES = [
     "ASSIGNMENT OF MORTGAGE - AMO",
     "ASSIGNMENT - ASG",
     "ASSIGNMENT OF INTEREST - AIT",
+    "FINANCING STATEMENT UCC - FST",
 ]
 
 CHUNK_DAYS  = 3          # start conservative; auto-splits if still capped
@@ -116,8 +130,37 @@ async def go_to_search(page: Page):
 async def do_search(page: Page, doc_type: str, df: date, dt: date) -> tuple[list, str]:
     """
     Run one UI search for doc_type in [df, dt].
-    Returns (records, status) where status is 'OK' | 'CAPPED' | 'ERROR'.
+    Returns (records, status) where status is 'OK' | 'CAPPED' | 'EMPTY' | 'ERROR'.
+
+    The portal searches in TWO steps, and knowing that is the whole point of
+    this function's shape:
+
+        POST /api/home/standardsearch   -> {"isValidSearch": true, "qs": "<token>"}
+        GET  /api/SearchResults/getStandardRecords?qs=<token>  -> the rows
+
+    When step one answers `isValidSearch:false` the browser never issues step
+    two. Waiting on getStandardRecords therefore waits forever. That is exactly
+    what happened to every AIT search from 2026-06-16 onward: 45s of nothing,
+    logged as a timeout ERROR, blamed on the network for months. The same
+    `isValidSearch:false` comes back for a date range the county never recorded
+    anything in (a holiday, a closure), so it means "no results", NOT "broken".
+
+    Both responses are therefore watched from the moment of the click, and a
+    rejected search returns EMPTY in about a second.
     """
+    state: dict = {"valid": None, "records": None}
+
+    async def capture(resp):
+        try:
+            if "home/standardsearch" in resp.url:
+                state["valid"] = bool((await resp.json()).get("isValidSearch"))
+            elif "getStandardRecords" in resp.url:
+                state["records"] = await resp.json()
+        except Exception:
+            pass  # a body we cannot read must not kill the search
+
+    handler = lambda r: asyncio.create_task(capture(r))
+
     try:
         await go_to_search(page)
 
@@ -126,16 +169,23 @@ async def do_search(page: Page, doc_type: str, df: date, dt: date) -> tuple[list
         await page.fill("input#dateRangeFrom", ymd(df))
         await page.fill("input#dateRangeTo",   ymd(dt))
 
-        # Click SEARCH and intercept the getStandardRecords response
-        async with page.expect_response(
-            lambda r: "getStandardRecords" in r.url,
-            timeout=45000
-        ) as resp_info:
-            await page.click("button[type='submit'].button-green")
+        page.on("response", handler)
+        await page.click("button[type='submit'].button-green")
 
-        resp    = await resp_info.value
-        data    = await resp.json()
-        models  = data.get("recordingModels", [])
+        deadline = time.monotonic() + 45
+        while time.monotonic() < deadline:
+            if state["records"] is not None:
+                break
+            if state["valid"] is False:
+                log.info(f"  [EMPTY] {doc_type[:24]} {iso(df)}–{iso(dt)}: "
+                         f"portal reports no records for this window")
+                return [], "EMPTY"
+            await asyncio.sleep(0.25)
+
+        if state["records"] is None:
+            raise TimeoutError("no getStandardRecords response within 45s")
+
+        models  = state["records"].get("recordingModels", [])
         count   = len(models)
         status  = "CAPPED" if count >= 499 else "OK"
         log.info(f"  [{status}] {doc_type[:24]} {iso(df)}–{iso(dt)}: {count} rows")
@@ -144,6 +194,11 @@ async def do_search(page: Page, doc_type: str, df: date, dt: date) -> tuple[list
     except Exception as e:
         log.warning(f"  [ERR] {doc_type[:24]} {iso(df)}–{iso(dt)}: {e}")
         return [], "ERROR"
+    finally:
+        try:
+            page.remove_listener("response", handler)
+        except Exception:
+            pass
 
 
 # ── Recursive range collector ─────────────────────────────────────────────────
@@ -169,6 +224,12 @@ async def collect_range(page: Page, doc_type: str, start: date, end: date,
             log.info(f"  [SPLIT] {iso(cur)}–{iso(chunk_end)} → {new_chunk}-day chunks")
             total += await collect_range(page, doc_type, cur, chunk_end, new_chunk)
         else:
+            # EMPTY is logged but deliberately NOT treated as collected:
+            # already_collected() only skips status='OK', so a window the portal
+            # currently reports as empty stays eligible for a later run. That is
+            # the point — if the county ever starts filing AIT, the next run
+            # picks it up instead of skipping a window we once saw empty. The
+            # retry is cheap now that an empty search returns in ~1s.
             inserted = insert_records(records)
             log_collection(iso(cur), iso(chunk_end), len(records), status, doc_type)
             total += inserted
