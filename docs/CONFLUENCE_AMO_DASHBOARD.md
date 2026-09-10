@@ -1,6 +1,6 @@
 # AMO Tracker — Mortgage Assignment Intelligence Dashboard
 
-> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 9 Sep 2026
+> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 10 Sep 2026
 > **Production URL:** `http://165.22.35.75:5000` (single shared password)
 > **Repository:** `amo-dashboard` (`origin/main`)
 
@@ -176,6 +176,19 @@ Sellers / Most Connected leaderboards.
 #### Reporting (`/reporting`)
 The main working surface. A filterable, searchable, paginated table of clean transactions with an
 analytics header, a participant-activity breakdown and a time-series chart.
+- **Four counterparties are hidden here** (since 10 Sep 2026): **MERS, Fannie Mae, Freddie Mac and
+  Wilmington Savings**. They are registry and agency pass-throughs rather than market participants,
+  and they crowded out the transactions this page exists to show — together they touched about
+  **13% of filings** (6,317 of 48,636). Hiding them took the Miami-Dade table from 48,636 rows to
+  **42,319**.
+  **This is a display filter and nothing else.** Every one of those rows is still in the database,
+  and the Overview, Entities, Lending Relationships and emailed report all still count them — so
+  totals on this page will not match totals elsewhere, by design. The filter applies to the table,
+  both exports, the participant panels and the chart, so everything on this page agrees with itself.
+  It is reversible at any time; ask an engineer to edit one list in `server/routes.ts`.
+  *Two deliberate exceptions:* the **entity report** still works for these companies if you name one
+  explicitly — otherwise asking for a MERS report would silently return zeros — and the **chart**
+  has always counted self-assignments while the table never has, so its totals run a little higher.
 - Search by CFN, assignor or assignee.
 - **Review workflow:** mark a row reviewed/unreviewed; the marking is stored server-side and shared
   by everyone.
@@ -1237,10 +1250,9 @@ healthy (640 rows, 57% carrying loan amounts).
    over-labelling (item 7 below), where nearly everything recent reads
    `warehouse_or_revolving_credit_facility` including obvious consumer HELOCs. Any extraction-prompt
    change must re-pass `verify_integration.py` at 21/21.
-   (iii) ⬜ **NOT STARTED — exclude Wilmington Savings, MERS, Fannie Mae and Freddie Mac from the
-   Reporting tab** as a display filter only; the underlying rows stay in the database. Needs a
-   canonical-name exclusion list matching either side of a transaction; `entity_type` will not work,
-   since Wilmington Savings is a `BANK` while the others are `GSE`/`MERS`.
+   (iii) ✅ **DONE 10 Sep 2026 — Wilmington Savings, MERS, Fannie Mae and Freddie Mac are hidden
+   from the Reporting tab.** Display filter only; every row stays in the database and every other
+   page still counts them. See §4.3 for what this changes on screen.
 
 4b. 🔴 **Run the FST extraction backfill — needs an owner decision, not engineering.** FST index
    collection is built and tested; reading the ~39,000 PDFs behind those filings is a separate,

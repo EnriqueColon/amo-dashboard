@@ -32,6 +32,54 @@ extraction needs the owner's go-ahead (~$20, ~25h). See the entry below for the 
 
 ---
 
+## 2026-09-10 — Reporting tab: hide MERS / Fannie / Freddie / Wilmington Savings (DEPLOYED)
+
+Owner request: hide **WILMINGTON SAVINGS, MERS, FANNIE MAE, FREDDIE MAC** from the Reporting view,
+**display-only, data stays in the DB**. (Asked initially for three; MERS added mid-request — the
+1 Sep note had four, so confirm the list rather than inferring it.)
+
+**Impact measured before building: 6,317 of 48,636 non-self-assign rows, ~13%.** Reporting total
+Miami-Dade 48,636 → **42,319**, verified equal to the SQL prediction exactly.
+
+**Built in `server/routes.ts`** — `REPORTING_EXCLUDED_ENTITIES` (canonical names) + two clause forms:
+- `REPORTING_EXCLUDE` — transaction-shaped, excludes if the entity is on EITHER side. Applied at the
+  **five** browse/aggregate endpoints: `/api/reporting`, `/export`, `/export-report`, `/participants`,
+  `/chart`.
+- `REPORTING_EXCLUDE_ENTITY(col)` — single-column form for `entity_nodes`.
+
+**The bug the first pass shipped, caught by testing the API rather than reading the code:** the
+`participants` "Most Active" panel reads **`entity_nodes`**, a different table with no
+`assignor_canon`/`assignee_canon` — so the transaction-shaped clause silently did not apply and all
+four entities still appeared there. Hence the second clause form. *Any new Reporting surface reading
+a different table needs its own exclusion; the transaction clause is not universal.*
+
+**Matched on CANONICAL names** — `normalize.py` folds `FEDERAL NATIONAL MORTGAGE ASSOCIATION`/`FNMA`
+etc. into one form first. `entity_type` would NOT work: Fannie/Freddie are `GSE`, MERS is `MERS`, but
+**Wilmington Savings is `BANK`**, so a type filter misses Wilmington or hides every bank.
+`IS NULL` guards included — `col NOT IN (...)` is NULL, not true, for a NULL col and would silently
+drop those rows. Zero NULLs in those columns today (0/51,093); the guard keeps that safe.
+
+**Verified against `prod_snapshot.db` through the running API, not by reading SQL:**
+    /api/reporting total   42,319  == SQL prediction
+    CSV export             42,319 records, 0 excluded entities present
+    participants           0 excluded in topSellers / topBuyers / mostActive
+    UI                     Most Active now leads US Bank, Nationstar, JPMorgan — MERS gone
+CSV first looked like 42,323 by `wc -l`; that is embedded newlines in address fields, not a
+discrepancy — count CSV with a parser, not line count.
+
+**Deliberately NOT changed:**
+- `/api/reporting/entity-report` — requires the caller to NAME entities. Filtering it would make an
+  explicitly-requested MERS report silently return zeros. **Open question for the owner.**
+- **`/chart` has never filtered `SELF_ASSIGN`** while the table always has, so chart totals run
+  ~2.3k higher (44,653 vs 42,319 post-exclusion). **Pre-existing, unrelated to this change**, left
+  alone rather than silently moving chart numbers during a production deploy. Worth a decision.
+- Overview / Entities / Lending Relationships / emailed report all still count these entities.
+
+Deleting `REPORTING_EXCLUDED_ENTITIES` restores previous behaviour exactly; no `normalize.py` change,
+no schema change, no rebuild needed — the 7-day response cache clears on `pm2 restart`.
+
+---
+
 ## 2026-09-09 — Doc-type coverage answered; AIT root cause fixed; FST (UCC) collection added
 
 **The question was "are we pulling all documents?" It is now answered against the LIVE portal, not

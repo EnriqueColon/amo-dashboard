@@ -1263,6 +1263,52 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   const TARGETS_MATCH = `(assignor_canon IN (SELECT entity FROM target_entities)
                        OR assignee_canon IN (SELECT entity FROM target_entities))`;
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // REPORTING EXCLUSIONS
+  // ═══════════════════════════════════════════════════════════════════════════
+  //
+  // Entities hidden from the Reporting tab at the owner's request (9 Sep 2026).
+  // These are pass-through registry/agency counterparties rather than market
+  // participants, and they crowd out the transactions the report exists to show
+  // — 6,317 of 48,636 rows, about 13%, on the snapshot this was measured against.
+  //
+  // DISPLAY ONLY. Nothing is deleted and normalize.py is untouched: the rows stay
+  // in aom_events_clean and every other surface (Overview, Entities, Lending
+  // Relationships, the emailed report) still counts them. Deleting this constant
+  // restores the previous behaviour exactly.
+  //
+  // Matched on CANONICAL names, which is what makes this reliable — normalize.py
+  // folds "FEDERAL NATIONAL MORTGAGE ASSOCIATION", "FNMA" and the rest into one
+  // form before it ever reaches this table. Matching entity_type instead would
+  // NOT work: Fannie/Freddie are GSE and MERS is MERS, but Wilmington Savings is
+  // a BANK, so a type filter would either miss Wilmington or hide every bank.
+  const REPORTING_EXCLUDED_ENTITIES = [
+    'WILMINGTON SAVINGS',
+    'MERS',
+    'FANNIE MAE',
+    'FREDDIE MAC',
+  ];
+
+  // Excludes a transaction if the entity appears on EITHER side. The IS NULL
+  // guards are load-bearing: `col NOT IN (...)` evaluates to NULL — not true —
+  // when col is NULL, which would silently drop every such row from the report.
+  // No NULLs exist in these columns today; the guard is here so that stays true
+  // if one ever appears.
+  const REPORTING_EXCLUDED_SQL_LIST = REPORTING_EXCLUDED_ENTITIES
+    .map(e => `'${e.replace(/'/g, "''")}'`).join(', ');
+
+  const REPORTING_EXCLUDE =
+    `(assignor_canon IS NULL OR assignor_canon NOT IN (${REPORTING_EXCLUDED_SQL_LIST}))
+     AND (assignee_canon IS NULL OR assignee_canon NOT IN (${REPORTING_EXCLUDED_SQL_LIST}))`;
+
+  // Same exclusion for tables keyed on a single entity column rather than on the
+  // two sides of a transaction — entity_nodes, which backs the "Most Active"
+  // panel. That panel is why this second form exists: it reads a different table
+  // entirely, so the transaction-shaped clause above silently did not apply to it
+  // and all four entities kept appearing there after the first pass.
+  const REPORTING_EXCLUDE_ENTITY = (col: string) =>
+    `(${col} IS NULL OR ${col} NOT IN (${REPORTING_EXCLUDED_SQL_LIST}))`;
+
   // ─── GET /api/targets ─────────────────────────────────────────────────────
   // Watchlist with per-entity activity stats from the clean events table.
   app.get('/api/targets', (_req, res) => {
@@ -1698,6 +1744,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
 
     // Always exclude self-assignments — not true transfers
     clauses.push(`txn_type != 'SELF_ASSIGN'`);
+    clauses.push(REPORTING_EXCLUDE);
     const wc = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
 
     const total = (db.prepare(`SELECT COUNT(*) as n FROM aom_events_clean ${wc}`).get(...params) as any).n;
@@ -1765,6 +1812,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     if (reviewed === 'no')  { clauses.push(`reviewed_at IS NULL`); }
     if (targetsOnly) { clauses.push(TARGETS_MATCH); }
     clauses.push(`txn_type != 'SELF_ASSIGN'`);
+    clauses.push(REPORTING_EXCLUDE);
     const wc = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
 
     const rows = db.prepare(`
@@ -1855,6 +1903,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     if (reviewed === 'no')  { clauses.push(`reviewed_at IS NULL`); }
     if (targetsOnly) { clauses.push(TARGETS_MATCH); }
     clauses.push(`txn_type != 'SELF_ASSIGN'`);
+    clauses.push(REPORTING_EXCLUDE);
     const wc = `WHERE ${clauses.join(' AND ')}`;
 
     const rows = db.prepare(`
@@ -1970,6 +2019,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     if (startDate) { clauses.push(`rec_date >= ?`); params.push(startDate); }
     if (endDate)   { clauses.push(`rec_date <= ?`); params.push(endDate); }
     if (targetsOnly) { clauses.push(TARGETS_MATCH); }
+    clauses.push(REPORTING_EXCLUDE);
 
     const sellerClauses = [...clauses, `assignor_canon IS NOT NULL`, `assignor_canon != 'UNKNOWN'`];
     if (targetsOnly) sellerClauses.push(`assignor_canon IN (SELECT entity FROM target_entities)`);
@@ -2000,7 +2050,8 @@ export async function registerRoutes(httpServer: Server, app: Express) {
              total_vol AS total,
              first_seen, last_seen
       FROM entity_nodes
-      ${targetsOnly ? 'WHERE entity IN (SELECT entity FROM target_entities)' : ''}
+      WHERE ${REPORTING_EXCLUDE_ENTITY('entity')}
+      ${targetsOnly ? 'AND entity IN (SELECT entity FROM target_entities)' : ''}
       ORDER BY total_vol DESC LIMIT 20
     `).all();
 
@@ -2022,6 +2073,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     if (startDate) { dateClauses.push(`rec_date >= ?`); dateParams.push(startDate); }
     if (endDate)   { dateClauses.push(`rec_date <= ?`); dateParams.push(endDate); }
     if (targetsOnly) { dateClauses.push(TARGETS_MATCH); }
+    dateClauses.push(REPORTING_EXCLUDE);
     const dwc = dateClauses.length ? `WHERE ${dateClauses.join(' AND ')}` : '';
 
     if (type === 'monthly') {
