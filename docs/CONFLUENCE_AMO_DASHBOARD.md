@@ -186,9 +186,19 @@ analytics header, a participant-activity breakdown and a time-series chart.
   totals on this page will not match totals elsewhere, by design. The filter applies to the table,
   both exports, the participant panels and the chart, so everything on this page agrees with itself.
   It is reversible at any time; ask an engineer to edit one list in `server/routes.ts`.
-  *Two deliberate exceptions:* the **entity report** still works for these companies if you name one
-  explicitly — otherwise asking for a MERS report would silently return zeros — and the **chart**
-  has always counted self-assignments while the table never has, so its totals run a little higher.
+  *One deliberate exception:* the **entity report** still works for these companies if you name one
+  explicitly — otherwise asking for a MERS report would silently return zeros.
+- **Every number on this page now counts the same rows** (fixed 10 Sep 2026). The charts and the
+  Participant Activity panel had been counting **self-assignments** — filings where a firm assigns
+  to itself — which the transaction table has always excluded. The charts read 39,120 against the
+  table's 36,993, and the participant panels overstated individual firms badly: US Bank showed 1,724
+  transfers out against a true 1,155, because a self-assignment names the same firm on both sides
+  and inflated both of its columns at once.
+  Two visible consequences, both intended: the **Txn Types** chart no longer shows a `SELF_ASSIGN`
+  slice, because no self-assignment is in the reported set; and **Most Active** now counts the
+  filtered period rather than all-time, so it responds to the date filter like everything else and
+  its "first/last activity" dates describe the selected window. Self-assignments are still in the
+  database and still counted on the Overview.
 - Search by CFN, assignor or assignee.
 - **Review workflow:** mark a row reviewed/unreviewed; the marking is stored server-side and shared
   by everyone.

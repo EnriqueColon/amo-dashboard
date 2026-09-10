@@ -1301,13 +1301,12 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     `(assignor_canon IS NULL OR assignor_canon NOT IN (${REPORTING_EXCLUDED_SQL_LIST}))
      AND (assignee_canon IS NULL OR assignee_canon NOT IN (${REPORTING_EXCLUDED_SQL_LIST}))`;
 
-  // Same exclusion for tables keyed on a single entity column rather than on the
-  // two sides of a transaction — entity_nodes, which backs the "Most Active"
-  // panel. That panel is why this second form exists: it reads a different table
-  // entirely, so the transaction-shaped clause above silently did not apply to it
-  // and all four entities kept appearing there after the first pass.
-  const REPORTING_EXCLUDE_ENTITY = (col: string) =>
-    `(${col} IS NULL OR ${col} NOT IN (${REPORTING_EXCLUDED_SQL_LIST}))`;
+  // Every Reporting surface now reads aom_events_clean, so this one clause
+  // covers all of them. It briefly needed a single-column variant for the
+  // "Most Active" panel, which read entity_nodes and therefore silently ignored
+  // the clause above — that panel was rewritten to count the same rows as the
+  // rest of the page, which removed the need for the variant along with the
+  // three-different-numbers-for-one-firm problem it was papering over.
 
   // ─── GET /api/targets ─────────────────────────────────────────────────────
   // Watchlist with per-entity activity stats from the clean events table.
@@ -2020,6 +2019,17 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     if (endDate)   { clauses.push(`rec_date <= ?`); params.push(endDate); }
     if (targetsOnly) { clauses.push(TARGETS_MATCH); }
     clauses.push(REPORTING_EXCLUDE);
+    // Same correction as the charts (10 Sep 2026): these panels counted
+    // self-assignments the table has always dropped. It mattered more here than
+    // anywhere else, because a self-assignment names the SAME entity as both
+    // seller and buyer — so it inflated both of that firm's columns at once.
+    // US Bank read 1,724 transfers out against a true 1,155, overstated by a
+    // third; JPMorgan by a fifth. Rankings mostly survived, the numbers did not.
+    //
+    // NOTE: these panels remain deliberately un-scoped by county — the UI labels
+    // them "not filtered by county" — so they still differ from the table in that
+    // one respect, on purpose.
+    clauses.push(`txn_type != 'SELF_ASSIGN'`);
 
     const sellerClauses = [...clauses, `assignor_canon IS NOT NULL`, `assignor_canon != 'UNKNOWN'`];
     if (targetsOnly) sellerClauses.push(`assignor_canon IN (SELECT entity FROM target_entities)`);
@@ -2043,17 +2053,41 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       GROUP BY assignee_canon ORDER BY transfers_in DESC LIMIT 20
     `).all(...params);
 
+    // Most Active is computed from the same rows as its two sibling tabs
+    // (10 Sep 2026). It used to read entity_nodes.total_vol — a precomputed
+    // lifetime figure counting self-assignments, every county, and transactions
+    // against the entities this page now hides. That made one panel disagree
+    // with itself: US Bank read 6,759 here against 5,094 counted the way the
+    // table counts, so toggling between the three tabs gave three different
+    // numbers for the same firm.
+    //
+    // The tradeoff, accepted deliberately: first_seen/last_seen are now first
+    // and last activity WITHIN THE SELECTED WINDOW, not lifetime, and the panel
+    // now responds to the date filter like everything else on the page.
+    // entity_type still comes off the row, exactly as topSellers/topBuyers take
+    // it, so all three tabs label a firm identically.
     const mostActive = db.prepare(`
-      SELECT entity, entity_type,
-             inbound_vol AS transfers_in,
-             outbound_vol AS transfers_out,
-             total_vol AS total,
-             first_seen, last_seen
-      FROM entity_nodes
-      WHERE ${REPORTING_EXCLUDE_ENTITY('entity')}
-      ${targetsOnly ? 'AND entity IN (SELECT entity FROM target_entities)' : ''}
-      ORDER BY total_vol DESC LIMIT 20
-    `).all();
+      SELECT entity,
+             MAX(entity_type)          AS entity_type,
+             SUM(inb)                  AS transfers_in,
+             SUM(outb)                 AS transfers_out,
+             SUM(inb) + SUM(outb)      AS total,
+             MIN(rec_date)             AS first_seen,
+             MAX(rec_date)             AS last_seen
+      FROM (
+        SELECT assignor_canon AS entity, assignor_type AS entity_type,
+               0 AS inb, 1 AS outb, rec_date
+        FROM aom_events_clean
+        WHERE ${sellerClauses.join(' AND ')}
+        UNION ALL
+        SELECT assignee_canon, assignee_type,
+               1, 0, rec_date
+        FROM aom_events_clean
+        WHERE ${buyerClauses.join(' AND ')}
+      )
+      GROUP BY entity
+      ORDER BY total DESC LIMIT 20
+    `).all(...params, ...params);
 
     res.json({ topSellers, topBuyers, mostActive });
   });
@@ -2074,6 +2108,16 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     if (endDate)   { dateClauses.push(`rec_date <= ?`); dateParams.push(endDate); }
     if (targetsOnly) { dateClauses.push(TARGETS_MATCH); }
     dateClauses.push(REPORTING_EXCLUDE);
+    // The charts describe the same rows the table below them lists, so they take
+    // the table's exclusions — both of them. This one was missing until
+    // 10 Sep 2026: every chart on the page silently counted self-assignments
+    // that the table has always dropped, so the chart read 39,120 against the
+    // table's 36,993 for the same filter. A reader comparing the two had no way
+    // to tell which was wrong.
+    //
+    // Consequence, and it is the correct one: the Txn Types chart no longer has
+    // a SELF_ASSIGN slice, because no self-assignment is in the reported set.
+    dateClauses.push(`txn_type != 'SELF_ASSIGN'`);
     const dwc = dateClauses.length ? `WHERE ${dateClauses.join(' AND ')}` : '';
 
     if (type === 'monthly') {

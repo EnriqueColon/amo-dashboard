@@ -70,10 +70,44 @@ discrepancy — count CSV with a parser, not line count.
 **Deliberately NOT changed:**
 - `/api/reporting/entity-report` — requires the caller to NAME entities. Filtering it would make an
   explicitly-requested MERS report silently return zeros. **Open question for the owner.**
-- **`/chart` has never filtered `SELF_ASSIGN`** while the table always has, so chart totals run
-  ~2.3k higher (44,653 vs 42,319 post-exclusion). **Pre-existing, unrelated to this change**, left
-  alone rather than silently moving chart numbers during a production deploy. Worth a decision.
 - Overview / Entities / Lending Relationships / emailed report all still count these entities.
+- The participant panels remain **un-scoped by county** — the UI labels them "not filtered by
+  county". Left as-is on purpose.
+
+### Second pass, same day — every number on the page now counts the same rows
+
+Owner: *"make sure that the graphs in the reporting tab match what is on the table."* They did not.
+**`/chart` and `/participants` had never filtered `SELF_ASSIGN`** while the table always has — a
+pre-existing gap, not caused by the exclusion work above.
+
+    charts       39,120  ->  36,993   (production, = table exactly)
+    snapshot     42,319  ->  42,319   (verified table == monthly == txn_type sum)
+
+It mattered most in the participant panels, because **a self-assignment names the same entity on
+BOTH sides**, so it inflated a firm's inbound and outbound columns simultaneously:
+`US BANK` 1,724 transfers out vs a true 1,155 (+33%), `JPMORGAN CHASE` +20%. Rankings mostly
+survived; the numbers did not.
+
+**`Most Active` was rebuilt, not just filtered.** It read `entity_nodes.total_vol` — a precomputed
+lifetime figure spanning every county, counting self-assignments and transactions against the now
+hidden entities. One panel therefore disagreed with itself: `US BANK` read **6,759** there against
+**5,094** under its two sibling tabs. It now aggregates `aom_events_clean` over the same
+seller/buyer clauses via a `UNION ALL`, so all three tabs tie out exactly (verified per entity:
+`mostActive.transfers_out == topSellers.transfers_out` and `transfers_in == topBuyers.transfers_in`
+across the top 8). `REPORTING_EXCLUDE_ENTITY` was deleted — nothing reads `entity_nodes` here any
+more, so the single-column clause form had no consumer left.
+
+**Two intended behaviour changes, worth knowing before someone reports them as bugs:**
+1. The **Txn Types** chart no longer has a `SELF_ASSIGN` slice (was 2,127). Correct — no
+   self-assignment is in the reported set.
+2. **Most Active now responds to the date filter** and its `first_seen`/`last_seen` describe the
+   selected window rather than all time. Verified: `US BANK` 5,094 full-range → 899 for 2026-only,
+   `first_seen` moving 2023-01-03 → 2026-01-02.
+
+*Lesson worth keeping: three panels in one UI component were each computed from a different query,
+and two of them from a different table. Whenever a surface gets a new filter, enumerate every query
+behind it — the "Most Active" leak survived the first pass precisely because reading the route file
+top-to-bottom makes the three tabs look like one thing.*
 
 Deleting `REPORTING_EXCLUDED_ENTITIES` restores previous behaviour exactly; no `normalize.py` change,
 no schema change, no rebuild needed — the 7-day response cache clears on `pm2 restart`.
