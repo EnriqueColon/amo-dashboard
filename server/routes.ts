@@ -1370,6 +1370,34 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     return arr.map((e: string) => String(e).trim().toUpperCase()).filter(Boolean).slice(0, 50);
   }
 
+  // ── Document-type filter ───────────────────────────────────────────────────
+  // The client sends a short key; the server owns the county's exact strings.
+  // Worth the indirection because the two counties do not agree on format —
+  // Miami-Dade files "ASSIGNMENT OF MORTGAGE - AMO", Broward files a bare "AST"
+  // — and a UI hard-coding either would break the moment a county renamed one.
+  //
+  // Only assignment types appear here. Non-assignment types never reach
+  // aom_events_clean at all (normalize.NON_ASSIGNMENT_DOC_TYPES), so there is no
+  // key for FST and nothing this filter can do would surface one.
+  const DOC_TYPE_FILTERS: Record<string, { label: string; match: string[] }> = {
+    amo: { label: 'Assignment of Mortgage', match: ['ASSIGNMENT OF MORTGAGE - AMO'] },
+    asg: { label: 'Assignment (generic)',   match: ['ASSIGNMENT - ASG'] },
+    ast: { label: 'Broward Assignment',     match: ['AST'] },
+  };
+
+  function docTypeParam(q: any): string {
+    const key = typeof q.doc_type === 'string' ? q.doc_type.trim().toLowerCase() : '';
+    return key in DOC_TYPE_FILTERS ? key : '';
+  }
+
+  // Pushes the clause for a validated key. Params are bound, not interpolated.
+  function pushDocTypeClause(clauses: string[], params: any[], key: string) {
+    if (!key) return;
+    const match = DOC_TYPE_FILTERS[key].match;
+    clauses.push(`doc_type IN (${match.map(() => '?').join(',')})`);
+    params.push(...match);
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════
   // ENTITY ALIASES (entity-resolution crosswalk: merge duplicate entities)
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1722,6 +1750,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const targetsOnly = req.query.targets === '1';
     const entities  = parseEntities(req.query);
     const entityRole = entityRoleParam(req.query);
+    const docType   = docTypeParam(req.query);
 
     const county    = countyScope(req as any);
     const clauses: string[] = [];
@@ -1744,6 +1773,23 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     // Always exclude self-assignments — not true transfers
     clauses.push(`txn_type != 'SELF_ASSIGN'`);
     clauses.push(REPORTING_EXCLUDE);
+
+    // Counts per document type are computed BEFORE the doc-type clause is added,
+    // so each pill shows what selecting it would return under the OTHER active
+    // filters — rather than every pill but the selected one reading zero.
+    const countsWc = `WHERE ${clauses.join(' AND ')}`;
+    const docTypeRows = db.prepare(`
+      SELECT doc_type, COUNT(*) AS n FROM aom_events_clean ${countsWc} GROUP BY doc_type
+    `).all(...params) as any[];
+    const docTypeCounts: Record<string, number> = { '': 0 };
+    for (const [key, def] of Object.entries(DOC_TYPE_FILTERS)) {
+      docTypeCounts[key] = docTypeRows
+        .filter(r => def.match.includes(r.doc_type))
+        .reduce((s, r) => s + r.n, 0);
+    }
+    docTypeCounts[''] = docTypeRows.reduce((s, r) => s + r.n, 0);
+
+    pushDocTypeClause(clauses, params, docType);
     const wc = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
 
     const total = (db.prepare(`SELECT COUNT(*) as n FROM aom_events_clean ${wc}`).get(...params) as any).n;
@@ -1761,7 +1807,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       ORDER BY rec_date DESC LIMIT ? OFFSET ?
     `).all(...params, limit, offset);
 
-    res.json({ rows, total, pages: Math.ceil(total / limit), page });
+    res.json({ rows, total, pages: Math.ceil(total / limit), page, docTypeCounts });
   });
 
   // ─── PATCH /api/reporting/:cfn/review ────────────────────────────────────
@@ -1793,6 +1839,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const targetsOnly = req.query.targets === '1';
     const entities  = parseEntities(req.query);
     const entityRole = entityRoleParam(req.query);
+    const docType   = docTypeParam(req.query);
     const county    = countyScope(req as any);
 
     const clauses: string[] = [];
@@ -1812,6 +1859,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     if (targetsOnly) { clauses.push(TARGETS_MATCH); }
     clauses.push(`txn_type != 'SELF_ASSIGN'`);
     clauses.push(REPORTING_EXCLUDE);
+    pushDocTypeClause(clauses, params, docType);
     const wc = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
 
     const rows = db.prepare(`
@@ -1884,6 +1932,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const targetsOnly = req.query.targets === '1';
     const entities  = parseEntities(req.query);
     const entityRole = entityRoleParam(req.query);
+    const docType   = docTypeParam(req.query);
     const county    = countyScope(req as any);
 
     const clauses: string[] = [];
@@ -1903,6 +1952,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     if (targetsOnly) { clauses.push(TARGETS_MATCH); }
     clauses.push(`txn_type != 'SELF_ASSIGN'`);
     clauses.push(REPORTING_EXCLUDE);
+    pushDocTypeClause(clauses, params, docType);
     const wc = `WHERE ${clauses.join(' AND ')}`;
 
     const rows = db.prepare(`
@@ -2013,12 +2063,14 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const startDate = typeof req.query.start_date === 'string' ? req.query.start_date : '';
     const endDate   = typeof req.query.end_date === 'string' ? req.query.end_date : '';
     const targetsOnly = req.query.targets === '1';
+    const docType   = docTypeParam(req.query);
     const clauses: string[] = [];
     const params: any[] = [];
     if (startDate) { clauses.push(`rec_date >= ?`); params.push(startDate); }
     if (endDate)   { clauses.push(`rec_date <= ?`); params.push(endDate); }
     if (targetsOnly) { clauses.push(TARGETS_MATCH); }
     clauses.push(REPORTING_EXCLUDE);
+    pushDocTypeClause(clauses, params, docType);
     // Same correction as the charts (10 Sep 2026): these panels counted
     // self-assignments the table has always dropped. It mattered more here than
     // anywhere else, because a self-assignment names the SAME entity as both
@@ -2098,6 +2150,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const startDate = typeof req.query.start_date === 'string' ? req.query.start_date : '';
     const endDate   = typeof req.query.end_date === 'string' ? req.query.end_date : '';
     const targetsOnly = req.query.targets === '1';
+    const docType   = docTypeParam(req.query);
     const county    = countyScope(req as any);
 
     // County joins the shared clause list, so every chart type below inherits it.
@@ -2108,6 +2161,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     if (endDate)   { dateClauses.push(`rec_date <= ?`); dateParams.push(endDate); }
     if (targetsOnly) { dateClauses.push(TARGETS_MATCH); }
     dateClauses.push(REPORTING_EXCLUDE);
+    pushDocTypeClause(dateClauses, dateParams, docType);
     // The charts describe the same rows the table below them lists, so they take
     // the table's exclusions — both of them. This one was missing until
     // 10 Sep 2026: every chart on the page silently counted self-assignments

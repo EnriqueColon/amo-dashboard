@@ -199,6 +199,15 @@ analytics header, a participant-activity breakdown and a time-series chart.
   filtered period rather than all-time, so it responds to the date filter like everything else and
   its "first/last activity" dates describe the selected window. Self-assignments are still in the
   database and still counted on the Overview.
+- **Filter by document type** (added 10 Sep 2026). Four pills under the search box — *All*,
+  *Mortgage (AMO)*, *Generic (ASG)*, *Broward (AST)* — each showing how many filings it holds
+  **under whatever other filters you already have set**. Pick one and the whole page follows: the
+  table, both exports, the charts and the participant panels. A type with nothing in it reads `0`
+  and greys out rather than disappearing, so Broward's AST visibly reads 0 while you are scoped to
+  Miami-Dade instead of silently vanishing.
+  This filters by **the type the county filed the document under**, not by what the document turned
+  out to be on reading. Filtering by the latter — collateral assignments, assignments of rents and
+  leases — is a separate piece of work: those documents are deliberately not in this tab at all.
 - Search by CFN, assignor or assignee.
 - **Review workflow:** mark a row reviewed/unreviewed; the marking is stored server-side and shared
   by everyone.

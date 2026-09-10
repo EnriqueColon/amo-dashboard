@@ -109,6 +109,50 @@ and two of them from a different table. Whenever a surface gets a new filter, en
 behind it — the "Most Active" leak survived the first pass precisely because reading the route file
 top-to-bottom makes the three tabs look like one thing.*
 
+### Third pass, same day — document-type filter on Reporting
+
+Owner: *"add a filtering system that will allow the user to search by document type."* **"Document
+type" is ambiguous in this schema and the two readings are very different work** — asked before
+building, and the owner wants BOTH:
+
+| column | values in `aom_events_clean` | usable as a filter? |
+|---|---|---|
+| `doc_type` (county filing type) | AMO 42,392 · ASG 2,280 · AST 1,175 | **yes** — shipped now |
+| `doc_category` (what the PDF is) | LOAN_TRANSFER 45,841 · NULL 6 | **no** — the table IS the loan-transfer set |
+
+**Shipped: `doc_type` filter.** `DOC_TYPE_FILTERS` in `server/routes.ts` maps short keys
+(`amo`/`asg`/`ast`) → the counties' exact strings, because Miami-Dade files
+`ASSIGNMENT OF MORTGAGE - AMO` while Broward files a bare `AST` and neither belongs in the UI.
+Validated key → bound params, never interpolated. Applied at all five Reporting surfaces.
+
+`/api/reporting` now also returns **`docTypeCounts`**, computed **before** the doc-type clause is
+applied — so each pill shows what selecting it *would* return under the other active filters,
+instead of every unselected pill reading zero. Broward's AST correctly reads 0 in a Miami-Dade scope
+and is dimmed rather than hidden; saying "0" beats making the option disappear.
+
+**Verified through the API against `prod_snapshot.db`:**
+    counts        {'': 42319, amo: 41421, asg: 898, ast: 0}   — sums exactly to the total
+    each filter   api == SQL truth for all three keys
+    chart         table == monthly chart at all/amo/asg
+    CSV           41,421 / 898 records respectively
+    participants  follows the filter (asg → top entity WELLS FARGO 64)
+    UI            clicking ASG drops the table to 898 while the counts stay intact
+AST reads 0 on the snapshot because that Aug-19 copy predates Broward extraction (0 clean Broward
+rows there vs **1,175 in production**) — a snapshot artifact, not a filter bug.
+
+**Gotcha for the next person: a scripted bulk edit of the route file broke it twice** — a duplicated
+`const docType` in the endpoint already edited by hand, and a `pushDocTypeClause` inserted *above*
+the counts query where it would have zeroed every unselected pill. `tsc` caught the first, reading
+the diff caught the second. Edit these five near-identical endpoints one at a time.
+
+**NEXT — the `doc_category` half, NOT started.** 53,263 extracted documents sit outside
+`aom_events_clean` (COLLATERAL 35,360 · OTHER 11,809 · RENTS_LEASES 6,094) — more than the 45,847
+inside it, so this roughly doubles what Reporting can show. **Recommended approach: a sibling table,
+not a widened `aom_events_clean`.** Every other page reads that table, and widening it means finding
+and patching every consumer or their numbers all move — the "Most Active" miss above is the same
+failure at smaller scale. Needs a `normalize.py` change plus a full re-run (~85 min), and should wait
+until the FST extraction finishes so category counts are final.
+
 Deleting `REPORTING_EXCLUDED_ENTITIES` restores previous behaviour exactly; no `normalize.py` change,
 no schema change, no rebuild needed — the 7-day response cache clears on `pm2 restart`.
 

@@ -72,10 +72,21 @@ const CHART_OPTIONS = [
 
 const COLORS = ['#f97316','#3b82f6','#10b981','#8b5cf6','#f59e0b','#ef4444','#06b6d4','#ec4899'];
 
+// Keys are the server's (DOC_TYPE_FILTERS in server/routes.ts), which owns the
+// counties' exact strings. Labels carry the county's own code in parentheses,
+// because that is what a reader sees on the filing itself and in the table's
+// own Type column.
+const DOC_TYPE_OPTIONS: [string, string][] = [
+  ['',    'All'],
+  ['amo', 'Mortgage (AMO)'],
+  ['asg', 'Generic (ASG)'],
+  ['ast', 'Broward (AST)'],
+];
+
 // ── Dynamic chart ─────────────────────────────────────────────────────────────
-function DynamicChart({ startDate, endDate, targetsOnly }: { startDate: string; endDate: string; targetsOnly: boolean }) {
+function DynamicChart({ startDate, endDate, targetsOnly, docType }: { startDate: string; endDate: string; targetsOnly: boolean; docType: string }) {
   const [chartType, setChartType] = useState('monthly');
-  const dateQ = [startDate && `start_date=${startDate}`, endDate && `end_date=${endDate}`, targetsOnly && 'targets=1'].filter(Boolean).join('&');
+  const dateQ = [startDate && `start_date=${startDate}`, endDate && `end_date=${endDate}`, targetsOnly && 'targets=1', docType && `doc_type=${docType}`].filter(Boolean).join('&');
   const { data, isLoading } = useQuery({
     queryKey: ['/api/reporting/chart', chartType, dateQ],
     queryFn: () => apiRequest('GET', `/api/reporting/chart?type=${chartType}${dateQ ? '&' + dateQ : ''}`).then(r => r.json()),
@@ -142,9 +153,9 @@ function DynamicChart({ startDate, endDate, targetsOnly }: { startDate: string; 
 }
 
 // ── Participant stats ─────────────────────────────────────────────────────────
-function ParticipantStats({ startDate, endDate, targetsOnly }: { startDate: string; endDate: string; targetsOnly: boolean }) {
+function ParticipantStats({ startDate, endDate, targetsOnly, docType }: { startDate: string; endDate: string; targetsOnly: boolean; docType: string }) {
   const [tab, setTab] = useState<'sellers' | 'buyers' | 'active'>('active');
-  const dateQ = [startDate && `start_date=${startDate}`, endDate && `end_date=${endDate}`, targetsOnly && 'targets=1'].filter(Boolean).join('&');
+  const dateQ = [startDate && `start_date=${startDate}`, endDate && `end_date=${endDate}`, targetsOnly && 'targets=1', docType && `doc_type=${docType}`].filter(Boolean).join('&');
   const { data, isLoading } = useQuery({
     queryKey: ['/api/reporting/participants', dateQ],
     queryFn: () => apiRequest('GET', `/api/reporting/participants${dateQ ? '?' + dateQ : ''}`).then(r => r.json()),
@@ -470,6 +481,10 @@ export default function Reporting() {
   // '' = both sides; 'assignor' = filings the selection sold/assigned out;
   // 'assignee' = filings it acquired. Applies to the filing tables + CSV export.
   const [entityRole, setEntityRole] = useState('');
+  // '' = every assignment type. Keys match DOC_TYPE_FILTERS on the server, which
+  // owns the county's exact strings — Miami-Dade files "ASSIGNMENT OF MORTGAGE -
+  // AMO" where Broward files a bare "AST", and neither belongs in the UI.
+  const [docType, setDocType] = useState('');
 
   const { data: targets } = useQuery({
     queryKey: ['/api/targets'],
@@ -493,12 +508,23 @@ export default function Reporting() {
   const entitiesQ = entities.map(e => `&entities=${encodeURIComponent(e)}`).join('');
   const roleQ = entities.length > 0 && entityRole ? `&entity_role=${entityRole}` : '';
   // Shared filter fragment (no page/limit/entities) — TransactionsTable adds its own
-  const filterQs = `&search=${encodeURIComponent(applied)}&start_date=${startDate}&end_date=${endDate}&reviewed=${reviewed}${targetsQ}`;
-  const exportQs = `?search=${encodeURIComponent(applied)}&start_date=${startDate}&end_date=${endDate}&reviewed=${reviewed}${targetsQ}${entitiesQ}${roleQ}`;
+  const docTypeQ = docType ? `&doc_type=${docType}` : '';
+  const filterQs = `&search=${encodeURIComponent(applied)}&start_date=${startDate}&end_date=${endDate}&reviewed=${reviewed}${targetsQ}${docTypeQ}`;
+  const exportQs = `?search=${encodeURIComponent(applied)}&start_date=${startDate}&end_date=${endDate}&reviewed=${reviewed}${targetsQ}${docTypeQ}${entitiesQ}${roleQ}`;
+
+  // Per-type counts for the pills. The server computes them BEFORE applying the
+  // doc-type clause, so each pill shows what selecting it would return under the
+  // other active filters instead of every unselected pill reading zero. limit=1
+  // because only the counts are wanted here; the table fetches its own page.
+  const { data: countsData } = useQuery({
+    queryKey: ['/api/reporting/doc-type-counts', filterQs, entitiesQ, roleQ],
+    queryFn: () => apiRequest('GET', `/api/reporting?page=1&limit=1${filterQs}${entitiesQ}${roleQ}`).then(r => r.json()),
+  });
+  const docTypeCounts = countsData?.docTypeCounts as Record<string, number> | undefined;
 
   const applySearch = () => setApplied(search);
-  const clearAll    = () => { setSearch(''); setApplied(''); setStartDate(''); setEndDate(''); setReviewed(''); setTargetsOnly(false); setEntities([]); setEntityRole(''); };
-  const hasFilters  = applied || startDate || endDate || reviewed || targetsOnly || entities.length > 0;
+  const clearAll    = () => { setSearch(''); setApplied(''); setStartDate(''); setEndDate(''); setReviewed(''); setTargetsOnly(false); setEntities([]); setEntityRole(''); setDocType(''); };
+  const hasFilters  = applied || startDate || endDate || reviewed || targetsOnly || entities.length > 0 || docType;
 
   const handleExport = () => {
     window.location.href = `/api/reporting/export-report${exportQs}`;
@@ -583,8 +609,8 @@ export default function Reporting() {
       {/* Market-wide charts (hidden when a specific report is active) */}
       {entities.length === 0 && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <DynamicChart startDate={startDate} endDate={endDate} targetsOnly={targetsOnly} />
-          <ParticipantStats startDate={startDate} endDate={endDate} targetsOnly={targetsOnly} />
+          <DynamicChart startDate={startDate} endDate={endDate} targetsOnly={targetsOnly} docType={docType} />
+          <ParticipantStats startDate={startDate} endDate={endDate} targetsOnly={targetsOnly} docType={docType} />
         </div>
       )}
 
@@ -607,6 +633,22 @@ export default function Reporting() {
               {label}
             </button>
           ))}
+          <span className="text-[11px] text-muted-foreground ml-2">Document:</span>
+          {DOC_TYPE_OPTIONS.map(([val, label]) => {
+            const n = docTypeCounts?.[val];
+            // A type with nothing under the current filters is left clickable but
+            // dimmed and labelled 0 — Broward's AST reads 0 in a Miami-Dade scope,
+            // and saying so is more use than hiding the option and leaving the
+            // reader to wonder where it went.
+            const empty = n === 0;
+            return (
+              <button key={val} onClick={() => setDocType(val)}
+                title={n === undefined ? label : `${label} — ${n.toLocaleString()} filing${n === 1 ? '' : 's'} under the current filters`}
+                className={`h-6 px-2 rounded-full border text-[10px] font-medium transition-colors ${docType === val ? 'bg-primary text-primary-foreground border-primary' : empty ? 'border-border text-muted-foreground/40 hover:text-muted-foreground' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+                {label}{n !== undefined && <span className="ml-1 opacity-60 tabular-nums">{n.toLocaleString()}</span>}
+              </button>
+            );
+          })}
           <span className="text-[11px] text-muted-foreground ml-2">Scope:</span>
           <button onClick={() => setTargetsOnly(v => !v)}
             title={targetCount === 0 ? 'No targets yet — add participants in the Targets tab' : `Filter to your ${targetCount} targeted participant${targetCount === 1 ? '' : 's'}`}
