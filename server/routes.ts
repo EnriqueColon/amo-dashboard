@@ -2296,5 +2296,218 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     res.status(400).json({ error: 'Unknown chart type' });
   });
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // UCC FILINGS  (secured lending — a separate surface from Reporting)
+  // ═══════════════════════════════════════════════════════════════════════════
+  //
+  // Why this is not part of the Reporting tab, in one line: the party columns
+  // mean the opposite thing. An assignment's first party is the institution
+  // SELLING a loan; a UCC financing statement's first party is the BORROWER
+  // pledging collateral. Folding them together put property owners into the
+  // seller rankings, so these filings get their own page with honest headings —
+  // Borrower and Lender.
+  //
+  // Read live from assignments + pdf_extractions rather than a normalized table.
+  // 32,697 rows joined on an indexed key is comfortably fast, it is always
+  // current, and it avoids a fourth derived table to keep in sync.
+  //
+  // Party names are RAW and deliberately un-canonicalized. canonicalize() is
+  // tuned for financial institutions and strips leading numbers, so on this
+  // dataset it collapses "10820 INVESTMENTS LLC", "11140 INVESTMENTS LLC" and
+  // "1260 INVESTMENTS INC" into a single fictional "INVESTMENTS" — UCC borrowers
+  // are overwhelmingly property LLCs named after street numbers. It would merge
+  // unrelated companies. The cost is that "U S BANK NA" and "U S BANK NATIONAL
+  // ASSOCIATION" stay separate; that is the lesser error by a wide margin.
+  const UCC_DOC_TYPE = 'FINANCING STATEMENT UCC - FST';
+
+  const UCC_CATEGORIES: Record<string, string> = {
+    collateral: 'COLLATERAL',
+    other:      'OTHER',
+    loan:       'LOAN_TRANSFER',
+    rents:      'RENTS_LEASES',
+  };
+
+  function uccFilters(q: any) {
+    const clauses = ['a.doc_type = ?'];
+    const params: any[] = [UCC_DOC_TYPE];
+
+    const search = typeof q.search === 'string' ? q.search.trim() : '';
+    if (search) {
+      clauses.push('(UPPER(a.grantor) LIKE UPPER(?) OR UPPER(a.grantee) LIKE UPPER(?) '
+                 + 'OR UPPER(px.assignor_name) LIKE UPPER(?) OR UPPER(px.assignee_name) LIKE UPPER(?) '
+                 + 'OR a.cfn LIKE ? OR UPPER(px.property_address) LIKE UPPER(?))');
+      for (let i = 0; i < 6; i++) params.push(`%${search}%`);
+    }
+    const startDate = typeof q.start_date === 'string' ? q.start_date : '';
+    const endDate   = typeof q.end_date === 'string' ? q.end_date : '';
+    if (startDate) { clauses.push('a.rec_date >= ?'); params.push(startDate); }
+    if (endDate)   { clauses.push('a.rec_date <= ?'); params.push(endDate); }
+
+    const catKey = typeof q.category === 'string' ? q.category.trim().toLowerCase() : '';
+    if (catKey in UCC_CATEGORIES) {
+      clauses.push('px.doc_category = ?');
+      params.push(UCC_CATEGORIES[catKey]);
+    }
+    // The property address is the single most useful field this dataset carries
+    // (84% of filings have one), so it gets its own filter.
+    if (q.has_property === '1') {
+      clauses.push("px.property_address IS NOT NULL AND TRIM(px.property_address) != ''");
+    }
+    // Unread filings have no category and no property. Kept visible by default —
+    // the index row is still evidence a filing exists — but filterable away.
+    if (q.read === '1') clauses.push('px.raw_json IS NOT NULL');
+    // Only filings whose lender was read off the form, where the borrower/lender
+    // direction is trustworthy rather than inherited from the county's index.
+    if (q.confirmed === '1') clauses.push("NULLIF(TRIM(px.assignee_name), '') IS NOT NULL");
+
+    return { where: `WHERE ${clauses.join(' AND ')}`, params };
+  }
+
+  const UCC_FROM = `FROM assignments a LEFT JOIN pdf_extractions px ON px.cfn = a.cfn`;
+
+  // WHICH PARTY IS THE LENDER — the one thing this page must not get wrong.
+  //
+  // The county index does NOT order the two parties consistently for UCC
+  // filings. Measured over the 21,352 filings where both sources are available,
+  // a bank-like name falls in the index's first column 2,851 times against 4,256
+  // in the second — a 1:1.5 split, i.e. the lender is listed first about a third
+  // of the time (AMERANT BANK NA -> HARVEST HOLDINGS LLC is indexed exactly that
+  // way round). Labelling the index columns "Borrower" and "Lender" would have
+  // been confidently wrong on thousands of rows.
+  //
+  // The extractor read the form itself and gets it right: on the same filings a
+  // bank-like name lands in assignor 1,643 times against assignee 6,029 — 1:3.7,
+  // and it agrees with the form on every sample checked by hand. So the PDF wins
+  // and the index is the fallback, applied per side rather than per row because
+  // lender coverage (90%) is much better than borrower coverage (74%).
+  //
+  // roles_confirmed says which rows had the lender read off the document, so the
+  // page can show it and filter on it rather than implying uniform confidence.
+  const UCC_BORROWER = `COALESCE(NULLIF(TRIM(px.assignor_name), ''), a.grantor)`;
+  const UCC_LENDER   = `COALESCE(NULLIF(TRIM(px.assignee_name), ''), a.grantee)`;
+  const UCC_CONFIRMED = `CASE WHEN NULLIF(TRIM(px.assignee_name), '') IS NOT NULL THEN 1 ELSE 0 END`;
+
+  // Grouping key for the "most active" panels. Case and punctuation only:
+  // "Amerant Bank, N.A." and "AMERANT BANK NA" are the same lender. It does NOT
+  // strip leading numbers or corporate suffixes the way canonicalize() does —
+  // that would merge "10820 INVESTMENTS LLC" with "11140 INVESTMENTS LLC".
+  const uccNameKey = (expr: string) =>
+    `UPPER(TRIM(REPLACE(REPLACE(REPLACE(${expr}, '.', ''), ',', ''), '  ', ' ')))`;
+
+  // ─── GET /api/ucc ─────────────────────────────────────────────────────────
+  app.get('/api/ucc', (req, res) => {
+    const page   = Math.max(1, parseInt(req.query.page as string) || 1);
+    const limit  = Math.min(100, parseInt(req.query.limit as string) || 50);
+    const offset = (page - 1) * limit;
+    const { where, params } = uccFilters(req.query);
+
+    const total = (db.prepare(
+      `SELECT COUNT(*) AS n ${UCC_FROM} ${where}`).get(...params) as any).n;
+
+    const rows = db.prepare(`
+      SELECT a.cfn, a.rec_date, a.county, a.rec_book, a.rec_page,
+             ${UCC_BORROWER} AS borrower, ${UCC_LENDER} AS lender,
+             ${UCC_CONFIRMED} AS roles_confirmed,
+             px.property_address, px.folio_parcel, px.loan_amount,
+             px.doc_category, px.doc_title,
+             CASE WHEN px.raw_json IS NULL THEN 0 ELSE 1 END AS is_read
+      ${UCC_FROM} ${where}
+      ORDER BY a.rec_date DESC, a.cfn DESC
+      LIMIT ? OFFSET ?
+    `).all(...params, limit, offset);
+
+    // Headline figures for the filtered set, so the page can state its own
+    // coverage rather than leaving the reader to infer it from blank cells.
+    const summary = db.prepare(`
+      SELECT COUNT(*) AS filings,
+             SUM(CASE WHEN px.property_address IS NOT NULL
+                       AND TRIM(px.property_address) != '' THEN 1 ELSE 0 END) AS with_property,
+             SUM(CASE WHEN px.loan_amount > 0 THEN 1 ELSE 0 END) AS with_amount,
+             SUM(CASE WHEN px.raw_json IS NULL THEN 1 ELSE 0 END) AS unread,
+             SUM(${UCC_CONFIRMED}) AS roles_confirmed,
+             COUNT(DISTINCT ${uccNameKey(UCC_LENDER)}) AS lenders
+      ${UCC_FROM} ${where}
+    `).get(...params);
+
+    res.json({ rows, total, pages: Math.ceil(total / limit), page, summary });
+  });
+
+  // ─── GET /api/ucc/parties ─────────────────────────────────────────────────
+  // Most active lenders and borrowers under the current filters.
+  app.get('/api/ucc/parties', (req, res) => {
+    const { where, params } = uccFilters(req.query);
+    const topLenders = db.prepare(`
+      SELECT MIN(${UCC_LENDER}) AS name, COUNT(*) AS filings,
+             MIN(a.rec_date) AS first_seen, MAX(a.rec_date) AS last_seen
+      ${UCC_FROM} ${where} AND NULLIF(TRIM(${UCC_LENDER}), '') IS NOT NULL
+      GROUP BY ${uccNameKey(UCC_LENDER)} ORDER BY filings DESC LIMIT 20
+    `).all(...params);
+    const topBorrowers = db.prepare(`
+      SELECT MIN(${UCC_BORROWER}) AS name, COUNT(*) AS filings,
+             MIN(a.rec_date) AS first_seen, MAX(a.rec_date) AS last_seen
+      ${UCC_FROM} ${where} AND NULLIF(TRIM(${UCC_BORROWER}), '') IS NOT NULL
+      GROUP BY ${uccNameKey(UCC_BORROWER)} ORDER BY filings DESC LIMIT 20
+    `).all(...params);
+    res.json({ topLenders, topBorrowers });
+  });
+
+  // ─── GET /api/ucc/chart ───────────────────────────────────────────────────
+  app.get('/api/ucc/chart', (req, res) => {
+    const { where, params } = uccFilters(req.query);
+    const rows = db.prepare(`
+      SELECT strftime('%Y-%m', a.rec_date) AS period, COUNT(*) AS count
+      ${UCC_FROM} ${where}
+      GROUP BY period ORDER BY period
+    `).all(...params);
+    res.json(rows);
+  });
+
+  // ─── GET /api/ucc/export ──────────────────────────────────────────────────
+  app.get('/api/ucc/export', (req, res) => {
+    const { where, params } = uccFilters(req.query);
+    const rows = db.prepare(`
+      SELECT a.cfn, a.rec_date, a.county, a.rec_book, a.rec_page,
+             ${UCC_BORROWER} AS borrower, ${UCC_LENDER} AS lender,
+             ${UCC_CONFIRMED} AS roles_confirmed,
+             px.property_address, px.folio_parcel, px.loan_amount,
+             px.doc_category, px.doc_title
+      ${UCC_FROM} ${where}
+      ORDER BY a.rec_date DESC, a.cfn DESC
+    `).all(...params) as any[];
+
+    // Same escape as the Reporting export, carriage return included — a bare \r
+    // in an OCR'd party name ends the record for Excel and splits one filing
+    // into two. See the note on that function.
+    const escape = (v: any) => {
+      if (v === null || v === undefined) return '';
+      const s = String(v);
+      return /[,"\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const docLink = (r: any) => {
+      const c = String(r.county || DEFAULT_COUNTY).toUpperCase();
+      if (c !== 'MIAMI-DADE' || !r.rec_book || !r.rec_page) return '';
+      return 'https://onlineservices.miamidadeclerk.gov/officialrecords/api/DocumentImage/getdocumentimage'
+           + `?redact=false&sBook=${encodeURIComponent(r.rec_book)}`
+           + `&sBookType=O+&sPage=${encodeURIComponent(r.rec_page)}`;
+    };
+
+    const headers = ['CFN', 'Document Link', 'Date', 'Borrower', 'Lender',
+                     'Roles From Document', 'Property Address', 'Folio/Parcel', 'Amount',
+                     'Category', 'Title', 'Book', 'Page', 'County'];
+    const csv = [
+      headers.join(','),
+      ...rows.map(r => [
+        r.cfn, docLink(r), r.rec_date, r.borrower, r.lender,
+        r.roles_confirmed ? 'yes' : 'no', r.property_address, r.folio_parcel, r.loan_amount,
+        r.doc_category, r.doc_title, r.rec_book, r.rec_page, r.county,
+      ].map(escape).join(',')),
+    ].join('\n');
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition',
+      `attachment; filename="ucc-filings-${new Date().toISOString().slice(0, 10)}.csv"`);
+    res.send(csv);
+  });
+
   return httpServer;
 }

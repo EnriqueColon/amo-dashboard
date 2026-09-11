@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'wouter';
-import { BarChart2, FileText, CheckCircle, Shield, Building2, ClipboardList, Menu, X, LineChart, LayoutList, LogOut, Crosshair, Landmark } from 'lucide-react';
+import { BarChart2, FileText, CheckCircle, Shield, Building2, ClipboardList, Menu, X, LineChart, LayoutList, LogOut, Crosshair, Landmark, FileSignature } from 'lucide-react';
 import { useState } from 'react';
 import { useCounty, COUNTY_OPTIONS, type CountyScope } from '@/lib/county';
 
@@ -11,6 +11,7 @@ const NAV = [
   { href: '/clean-events',     icon: CheckCircle,  label: 'Clean Transactions', group: 'analysis' },
   { href: '/private-credit',   icon: Shield,       label: 'Private Credit',     group: 'analysis' },
   { href: '/credit-facilities',icon: Landmark,     label: 'Lending Relationships', group: 'analysis' },
+  { href: '/ucc',              icon: FileSignature,label: 'UCC Filings',        group: 'analysis' },
   { href: '/assignments',      icon: FileText,     label: 'Raw Assignments',    group: 'data' },
   { href: '/entities',         icon: Building2,    label: 'Entities',           group: 'data' },
   { href: '/collection-log',   icon: ClipboardList,label: 'Collection Log',     group: 'data' },

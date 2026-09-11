@@ -173,6 +173,26 @@ private-credit activity), date coverage, monthly assignment volume chart, and th
 Sellers / Most Connected leaderboards.
 *Start here to see whether the data is current — the date range and last-collected date are the fastest health check.*
 
+#### UCC Filings (`/ucc`)
+Secured lending, and a **separate page from Reporting on purpose**. A UCC financing statement
+records a lender taking a security interest against a borrower — it is not a loan changing hands, so
+the parties read **borrower → lender**, the opposite direction to an assignment. Folding the two
+together would have listed property owners among the sellers of loans.
+
+32,759 filings, 2023 to present, Miami-Dade. **84% carry a property address** (27,420), which is what
+makes the page useful: it ties a named lender to a specific property. Only 7% carry an amount, and
+that is structural rather than a gap — a UCC form describes what secures a debt, not its size.
+
+**One caveat is stated on the page itself.** The county's index does not list the two parties in a
+consistent order: the lender is listed first on roughly a third of filings. Where the document has
+been read, the roles come from the form itself and are reliable (90% of filings). The rest are
+marked with an amber warning and their direction may be reversed; the **Roles from document** filter
+narrows to the confirmed ones.
+
+Names appear exactly as filed and are **not** merged into canonical entities. Borrowers here are
+mostly property companies named after street numbers, and the merging rules used elsewhere in the
+tool would combine "10820 Investments LLC" with "11140 Investments LLC".
+
 #### Reporting (`/reporting`)
 The main working surface. A filterable, searchable, paginated table of clean transactions with an
 analytics header, a participant-activity breakdown and a time-series chart.

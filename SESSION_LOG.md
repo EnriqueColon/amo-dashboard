@@ -145,6 +145,47 @@ rows there vs **1,175 in production**) — a snapshot artifact, not a filter bug
 the counts query where it would have zeroed every unselected pill. `tsc` caught the first, reading
 the diff caught the second. Edit these five near-identical endpoints one at a time.
 
+### 2026-09-11 (later) — UCC Filings page, and the party-direction trap it exposed
+
+Built `/ucc`: borrower, lender, property, collateral type, amount. Reads live from
+`assignments ⋈ pdf_extractions` (32,759 rows on an indexed key is fast, always current, and avoids a
+fourth derived table). Endpoints `/api/ucc`, `/api/ucc/parties`, `/api/ucc/chart`, `/api/ucc/export`.
+
+**THE IMPORTANT FINDING — the county index does not order UCC parties consistently.** Nearly shipped
+columns labelled Borrower/Lender straight off `grantor`/`grantee`, which would have been wrong on
+roughly a third of rows. Caught it because a sample row read `FIRSTBANK OF PUERTO RICO → COLD STORAGE
+185TH ST LLC` — a bank as the borrower. Measured, over the 21,352 filings with both sources:
+
+    bank-like name in    first party   second party   ratio
+    county index            2,851         4,256       1 : 1.5   <- noisy
+    PDF extraction          1,643         6,029       1 : 3.7   <- clean
+
+Known lender names sit in the index's `grantor` column **3,256** times against 7,268 in `grantee`.
+The extractor read the form and gets it right even when the index is reversed
+(`AMERANT BANK NA → HARVEST HOLDINGS LLC` in the index; `Harvest Holdings, LLC. → Amerant Bank, N.A.`
+from the PDF). So: **PDF first, index as fallback, applied per side** — lender coverage is 90%,
+borrower 74%, so requiring both would have thrown away good lender data.
+
+The correction moves the headline numbers: GoodLeap 2,526 → **2,764**, ISPC 1,390 → **1,619**,
+Aqua 669 → **917**, City National 499 → **731**. The index-based counts understated real lenders by
+15–45%. `roles_confirmed` is returned per row, shown as an amber marker, filterable via
+**Roles from document**, and exported as its own CSV column. *Same lesson as the Reporting merge
+decision: check which party is which before labelling a column.*
+
+**Names are deliberately NOT canonicalized.** `canonicalize()` strips leading numbers, so on this
+dataset it collapses `10820 INVESTMENTS LLC`, `11140 INVESTMENTS LLC` and `1260 INVESTMENTS INC` into
+one fictional `INVESTMENTS` — UCC borrowers are overwhelmingly property LLCs named after street
+numbers. Grouping for the "most active" panels uses case+punctuation folding only
+(`Amerant Bank, N.A.` = `AMERANT BANK NA`), which cannot merge unrelated firms. Distinct lenders
+12,981 → 8,241 on that basis alone. Cost: `CROSS RIVER BANK` and
+`Cross River Bank and its successors and assigns` stay separate, and display casing is mixed.
+
+**Production normalize run completed** (launched detached, ~1h): `aom_events_clean` 46,051 → 46,081
+(+30 from this morning's newly extracted filings, not from the change), **`aom_events_nonloan`
+28,576** (COLLATERAL 19,272 · RENTS_LEASES 6,105 · OTHER 3,199) with **41,977 correctly skipped as
+not yet read**. `entity_nodes` 18,383 and `credit_facility_events` 625 both **unchanged**, which was
+the whole point of the sibling-table design. Guardrail green on production.
+
 ### 2026-09-11 — the `doc_category` half: sibling table + category filter
 
 Owner set the purpose explicitly: *"who is buying loans and from who… dollar amounts… the collateral
