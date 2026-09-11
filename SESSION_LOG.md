@@ -145,6 +145,35 @@ rows there vs **1,175 in production**) — a snapshot artifact, not a filter bug
 the counts query where it would have zeroed every unselected pill. `tsc` caught the first, reading
 the diff caught the second. Edit these five near-identical endpoints one at a time.
 
+### 2026-09-11 — UCC page: consumer finance hidden by default
+
+Owner, on seeing the page: *"seems to have noise. Eg solar inclusions we don't need to see those."*
+Correct, and it was the noise predicted when this bucket was first sized.
+
+`UCC_NON_CRE_PATTERNS` hides solar/home-improvement financiers and non-lender filing agents and
+utilities. **32,759 → 21,110, i.e. 36%.** Hidden by DEFAULT with a visible toggle; nothing deleted.
+
+**Patterns, not exact names** — the same lender files as `SOLAR MOSAIC LLC`, `Solar Mosaic, Inc` and
+OCR-damaged `op|EPL Energy Services`. Each pattern was checked against live data for false positives:
+every `%ENERGY%` hit is an FPL utility-financing entity, and
+`FIFTH THIRD BANK, N.A., SUCCESSOR BY MERGER WITH DIVIDEND SOLAR FINANCE LLC` is caught while Fifth
+Third's commercial arm is not.
+
+**The first version only checked the lender column and leaked 2,293 filings** — spotted by reading
+the rendered table, where `SERVICE FINANCE COMPANY → GOFF, SABRINA` and `Goodleap, LLC → —` were
+plainly consumer filings with the financier in the BORROWER position. Because the party order is
+unreliable, the match must run against **both** sides. *Generalisable: any party-name filter on this
+dataset has to check both columns, for the same reason the column labels needed the PDF.*
+
+Top lenders with it on, which is the point of the page:
+`CITY NATIONAL BANK OF FLORIDA 731 · RBI PRIVATE LENDING 414 · RBI MORTGAGES 363 · POPULAR BANK 349 ·
+U.S. CENTURY 274 · OCEAN BANK 260 · CROSS RIVER 246 · BANKUNITED 222`.
+
+**Also confirmed here: production DB integrity is `ok`.** A local copy made with `.backup` during
+concurrent writes came out malformed (`idx_pdfx_county already exists`) and briefly looked like
+corruption. `VACUUM INTO` + `md5sum` on both ends is the reliable way to take a copy; the first
+transfer's checksum matched but an earlier partial one did not.
+
 ### 2026-09-11 (later) — UCC Filings page, and the party-direction trap it exposed
 
 Built `/ucc`: borrower, lender, property, collateral type, amount. Reads live from

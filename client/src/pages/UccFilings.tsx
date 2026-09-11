@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Landmark, Search, X, ChevronLeft, ChevronRight, Download,
-  MapPin, TrendingUp, Users, BadgeCheck, AlertTriangle,
+  MapPin, TrendingUp, Users, BadgeCheck, AlertTriangle, Sun,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
@@ -128,6 +128,9 @@ export default function UccFilings() {
   const [category, setCategory]   = useState('');
   const [hasProperty, setHasProperty] = useState(false);
   const [confirmedOnly, setConfirmedOnly] = useState(false);
+  // Consumer solar and home-improvement lending is 29% of the filings and
+  // none of it is commercial real estate, so it starts hidden.
+  const [includeConsumer, setIncludeConsumer] = useState(false);
   const [page, setPage]           = useState(1);
 
   const qs = '?' + [
@@ -137,6 +140,7 @@ export default function UccFilings() {
     category && `category=${category}`,
     hasProperty && 'has_property=1',
     confirmedOnly && 'confirmed=1',
+    includeConsumer && 'include_consumer=1',
   ].filter(Boolean).join('&');
 
   const { data, isLoading } = useQuery({
@@ -150,7 +154,8 @@ export default function UccFilings() {
   const hasFilters = applied || startDate || endDate || category || hasProperty || confirmedOnly;
   const clearAll = () => {
     setSearch(''); setApplied(''); setStartDate(''); setEndDate('');
-    setCategory(''); setHasProperty(false); setConfirmedOnly(false); setPage(1);
+    setCategory(''); setHasProperty(false); setConfirmedOnly(false);
+    setIncludeConsumer(false); setPage(1);
   };
   const applySearch = () => { setApplied(search); setPage(1); };
   const reset = (fn: () => void) => { fn(); setPage(1); };
@@ -172,6 +177,11 @@ export default function UccFilings() {
             This is secured lending, not loans changing hands, so the parties read
             <strong className="text-foreground"> borrower → lender</strong>. Loan sales and
             transfers live on the Reporting tab.
+          </p>
+          <p className="text-[11px] text-muted-foreground mt-1">
+            Consumer solar and home-improvement lenders, filing agents and utilities are
+            <strong className="text-foreground"> hidden by default</strong> — 36% of filings, none of
+            it commercial real estate. Toggle them back with the control below.
           </p>
           <p className="text-[11px] text-muted-foreground mt-1.5 max-w-3xl flex items-start gap-1.5">
             <AlertTriangle size={11} className="text-amber-500 shrink-0 mt-0.5" />
@@ -235,6 +245,11 @@ export default function UccFilings() {
             title="Only filings where we extracted a property address"
             className={`h-6 px-2 rounded-full border text-[10px] font-medium transition-colors inline-flex items-center gap-1 ml-2 ${hasProperty ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}>
             <MapPin size={9} />Has a property
+          </button>
+          <button onClick={() => reset(() => setIncludeConsumer(v => !v))}
+            title="Solar, home-improvement and other consumer lenders — plus filing agents and utilities — are hidden by default. They are 36% of all filings and none of it is commercial real estate. Matched on either party, since the county's party order is unreliable."
+            className={`h-6 px-2 rounded-full border text-[10px] font-medium transition-colors inline-flex items-center gap-1 ${includeConsumer ? 'bg-amber-500 text-white border-amber-500' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+            <Sun size={9} />{includeConsumer ? 'Consumer finance shown' : 'Consumer finance hidden'}
           </button>
           <button onClick={() => reset(() => setConfirmedOnly(v => !v))}
             title="Only filings where the lender was read off the document itself. The county's index does not order the two parties consistently, so on the rest the direction comes from the index and may be reversed."

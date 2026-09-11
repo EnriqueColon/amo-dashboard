@@ -189,6 +189,14 @@ been read, the roles come from the form itself and are reliable (90% of filings)
 marked with an amber warning and their direction may be reversed; the **Roles from document** filter
 narrows to the confirmed ones.
 
+**Consumer lending is hidden by default.** Solar and home-improvement financiers (GoodLeap, ISPC,
+Aqua Finance, Sunnova, Solar Mosaic, Palmetto/Lightreach, Service Finance), plus filing agents and
+utilities that are not lenders at all (Lien Solutions, Florida City Gas, FPL), account for **36% of
+all filings** — 32,759 drops to 21,110 — and none of it is commercial real estate. One toggle brings
+them back; nothing is deleted. The match runs against **both** parties rather than just the lender,
+because the county's party order is unreliable and 2,293 of these filings record the finance company
+as the borrower.
+
 Names appear exactly as filed and are **not** merged into canonical entities. Borrowers here are
 mostly property companies named after street numbers, and the merging rules used elsewhere in the
 tool would combine "10820 Investments LLC" with "11140 Investments LLC".

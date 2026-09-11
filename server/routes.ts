@@ -2320,6 +2320,32 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   // ASSOCIATION" stay separate; that is the lesser error by a wide margin.
   const UCC_DOC_TYPE = 'FINANCING STATEMENT UCC - FST';
 
+  // ── Consumer finance and non-lenders ──────────────────────────────────────
+  // 36% of UCC filings in Miami-Dade are consumer solar and home-improvement
+  // lending, plus filing agents and utilities that are not lenders at all.
+  // Real volumes: GoodLeap 2,764 · ISPC 1,619 · Aqua 917 · Sunnova 914 ·
+  // Palmetto/Lightreach 470 · Solar Mosaic 544 · Lien Solutions 259 ·
+  // Florida City Gas 200. None of it is commercial real-estate lending, which is
+  // what this tool exists to track, so it is hidden by default and restorable
+  // with one toggle — nothing is deleted and the filings stay in the database.
+  //
+  // Matched on PATTERNS rather than exact names deliberately: the same lender
+  // appears as "SOLAR MOSAIC LLC", "Solar Mosaic, Inc", and OCR damage like
+  // "op|EPL Energy Services". Every pattern was checked against the live data for
+  // false positives — every ENERGY hit is an FPL utility-financing entity, and
+  // "FIFTH THIRD BANK, N.A., SUCCESSOR BY MERGER WITH DIVIDEND SOLAR FINANCE"
+  // is caught while Fifth Third's commercial arm is not.
+  const UCC_NON_CRE_PATTERNS = [
+    // solar and home-improvement consumer finance
+    '%SOLAR%', '%SUNNOVA%', '%GOODLEAP%', '%SUNRUN%', '%LIGHTREACH%',
+    '%SUNLIGHT%', '%DIVIDEND%', '%GREENSKY%', '%ENERGY%',
+    'ISPC%', '%AQUA FINANCE%', '%FOUNDATION FINANCE%', '%SERVICE FINANCE%',
+    '%MARLETTE%',
+    // filing agents and utilities — representatives, not the lender
+    '%LIEN SOLUTIONS%', '%CT CORPORATION%', '%CORPORATION SERVICE%',
+    '%FLORIDA CITY GAS%', '%PIVOTAL UTILITY%', '%FPL%', '%TECO%',
+  ];
+
   const UCC_CATEGORIES: Record<string, string> = {
     collateral: 'COLLATERAL',
     other:      'OTHER',
@@ -2359,6 +2385,26 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     // Only filings whose lender was read off the form, where the borrower/lender
     // direction is trustworthy rather than inherited from the county's index.
     if (q.confirmed === '1') clauses.push("NULLIF(TRIM(px.assignee_name), '') IS NOT NULL");
+
+    // Consumer finance is hidden unless explicitly asked for. Opt-IN rather than
+    // opt-out because the commercial lending picture is the point of the page
+    // and the consumer volume buries it — GoodLeap alone files more than the
+    // four largest banks combined.
+    if (q.include_consumer !== '1') {
+      // BOTH sides are checked, not just the lender. The party order is not
+      // reliable (see UCC_BORROWER/UCC_LENDER), so a consumer financier lands in
+      // the borrower column often enough to matter: 2,293 filings would
+      // otherwise leak through, e.g. "SERVICE FINANCE COMPANY -> GOFF, SABRINA".
+      // A name from this list on either side means the filing is consumer
+      // finance regardless of which way round it was recorded.
+      const lender   = `COALESCE(NULLIF(TRIM(px.assignee_name), ''), a.grantee)`;
+      const borrower = `COALESCE(NULLIF(TRIM(px.assignor_name), ''), a.grantor)`;
+      const side = (expr: string) =>
+        '(' + UCC_NON_CRE_PATTERNS.map(() => `UPPER(${expr}) NOT LIKE ?`).join(' AND ')
+            + ` OR ${expr} IS NULL)`;
+      clauses.push(`${side(lender)} AND ${side(borrower)}`);
+      params.push(...UCC_NON_CRE_PATTERNS, ...UCC_NON_CRE_PATTERNS);
+    }
 
     return { where: `WHERE ${clauses.join(' AND ')}`, params };
   }
