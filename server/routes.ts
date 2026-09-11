@@ -2344,6 +2344,14 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     // filing agents and utilities — representatives, not the lender
     '%LIEN SOLUTIONS%', '%CT CORPORATION%', '%CORPORATION SERVICE%',
     '%FLORIDA CITY GAS%', '%PIVOTAL UTILITY%', '%FPL%', '%TECO%',
+    // Owner's call, 2026-09-11. Banks by charter, but not commercial real-estate
+    // lenders in this market: Cross River fronts consumer origination (it files
+    // as "c/o Sunlight Financial" and "c/o Marlette Servicing" here), Climate
+    // First is solar-focused, and Florida Housing Finance is a state affordable-
+    // housing agency rather than a market participant. The patterns also pick up
+    // their OCR variants — "and its successors and assians", "FLORIDA HOUSING
+    // FINANCE AGENCY" — which exact names would have missed.
+    '%CROSS RIVER%', '%CLIMATE FIRST%', '%FLORIDA HOUSING FINANCE%',
   ];
 
   const UCC_CATEGORIES: Record<string, string> = {
@@ -2437,8 +2445,22 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   // "Amerant Bank, N.A." and "AMERANT BANK NA" are the same lender. It does NOT
   // strip leading numbers or corporate suffixes the way canonicalize() does —
   // that would merge "10820 INVESTMENTS LLC" with "11140 INVESTMENTS LLC".
-  const uccNameKey = (expr: string) =>
-    `UPPER(TRIM(REPLACE(REPLACE(REPLACE(${expr}, '.', ''), ',', ''), '  ', ' ')))`;
+  // Trailing legal boilerplate is also stripped. "RBI MORTGAGES LLC" and "RBI
+  // MORTGAGES LLC, A FLORIDA LIMITED LIABILITY COMPANY" are one lender filing
+  // under two spellings, and leaving them split put the same firm at #3 with 363
+  // and #14 with 157 instead of #2 with 520. Checked against the live data: every
+  // key this merges has exactly two variants and all are the same company — and
+  // it does NOT confuse "RBI MORTGAGES" with "REI MORTGAGES", which stay
+  // separate keys. Unlike canonicalize() it removes only these fixed trailing
+  // phrases, never leading numbers or the corporate form itself.
+  const uccNameKey = (expr: string) => `
+    TRIM(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
+      UPPER(TRIM(REPLACE(REPLACE(REPLACE(${expr}, '.', ''), ',', ''), '  ', ' '))),
+      ' AND ITS SUCCESSORS AND ASSIGNS', ''),
+      ' AND ITS SUCCESSORS AND ASSIGNEES', ''),
+      ' A FLORIDA LIMITED LIABILITY COMPANY', ''),
+      ' A DELAWARE LIMITED LIABILITY COMPANY', ''),
+      ' A FLORIDA CORPORATION', ''))`;
 
   // ─── GET /api/ucc ─────────────────────────────────────────────────────────
   app.get('/api/ucc', (req, res) => {

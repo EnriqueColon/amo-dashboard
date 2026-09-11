@@ -147,6 +147,20 @@ the diff caught the second. Edit these five near-identical endpoints one at a ti
 
 ### 2026-09-11 — UCC page: consumer finance hidden by default
 
+**Owner added three more, 2026-09-11:** Cross River Bank, Climate First Bank, Florida Housing
+Finance Corporation. Banks by charter but not CRE lenders here — Cross River files as
+`c/o Sunlight Financial` and `c/o Marlette Servicing`, which is consumer origination. Patterns also
+catch OCR variants (`and its successors and assians`, `FLORIDA HOUSING FINANCE AGENCY`).
+**21,110 → 20,305 (38% of the original 32,759).**
+
+**Grouping key improved at the same time.** `RBI MORTGAGES LLC` and `RBI MORTGAGES LLC, A FLORIDA
+LIMITED LIABILITY COMPANY` were one lender counted twice — #3 with 363 and #14 with 157 instead of
+**#2 with 520**. `uccNameKey` now also strips fixed trailing legal phrases
+(`AND ITS SUCCESSORS AND ASSIGNS`, `A FLORIDA LIMITED LIABILITY COMPANY`, …). Verified against live
+data: every key it merges has exactly two variants, all the same company, and `RBI MORTGAGES` vs
+`REI MORTGAGES` correctly stay separate. Still nothing like `canonicalize()` — no leading numbers,
+no corporate form stripped.
+
 Owner, on seeing the page: *"seems to have noise. Eg solar inclusions we don't need to see those."*
 Correct, and it was the noise predicted when this bucket was first sized.
 
