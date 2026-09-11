@@ -50,6 +50,50 @@ export function getDb(): Database.Database {
         txn_type TEXT,
         rec_book TEXT, rec_page TEXT, total_parties INTEGER
       );
+      -- Sibling of aom_events_clean holding assignment filings that are not
+      -- loan transfers (collateral assignments, rents and leases). normalize.py
+      -- drops and rebuilds it with the full column set; this defensive stub
+      -- only has to exist so the Reporting queries do not fail on a database
+      -- that has not been normalized since the feature shipped.
+      CREATE TABLE IF NOT EXISTS aom_events_nonloan (
+        cfn TEXT PRIMARY KEY, rec_date TEXT,
+        assignor TEXT, assignee TEXT,
+        assignor_canon TEXT, assignee_canon TEXT,
+        assignor_type TEXT, assignee_type TEXT,
+        txn_type TEXT,
+        rec_book TEXT, rec_page TEXT, total_parties INTEGER,
+        doc_type TEXT, doc_category TEXT, doc_title TEXT,
+        pdf_assignor TEXT, pdf_assignee TEXT,
+        assignor_parent TEXT, assignee_parent TEXT,
+        property_address TEXT, loan_amount REAL, consideration_amount REAL,
+        folio_parcel TEXT, sponsor_address TEXT, signatory_officer TEXT,
+        classification TEXT, reviewed_by TEXT, reviewed_at TEXT,
+        county TEXT
+      );
+      -- Read-only union of the two, so a Reporting query can point its FROM at
+      -- one name instead of every endpoint growing a UNION. Columns are listed
+      -- explicitly rather than SELECT *: the two tables agree today, and naming
+      -- them means a future column added to one and not the other fails loudly
+      -- here instead of silently shifting values between columns.
+      -- Nothing outside the Reporting tab reads this view.
+      CREATE VIEW IF NOT EXISTS aom_events_all AS
+        SELECT cfn, rec_date, assignor, assignee, assignor_canon, assignee_canon,
+               assignor_type, assignee_type, txn_type, rec_book, rec_page,
+               total_parties, doc_type, doc_category, doc_title,
+               pdf_assignor, pdf_assignee, assignor_parent, assignee_parent,
+               property_address, loan_amount, consideration_amount,
+               folio_parcel, sponsor_address, signatory_officer,
+               classification, reviewed_by, reviewed_at, county
+        FROM aom_events_clean
+        UNION ALL
+        SELECT cfn, rec_date, assignor, assignee, assignor_canon, assignee_canon,
+               assignor_type, assignee_type, txn_type, rec_book, rec_page,
+               total_parties, doc_type, doc_category, doc_title,
+               pdf_assignor, pdf_assignee, assignor_parent, assignee_parent,
+               property_address, loan_amount, consideration_amount,
+               folio_parcel, sponsor_address, signatory_officer,
+               classification, reviewed_by, reviewed_at, county
+        FROM aom_events_nonloan;
       CREATE TABLE IF NOT EXISTS entity_relationships (
         source_entity TEXT, target_entity TEXT,
         transaction_count INTEGER DEFAULT 0,

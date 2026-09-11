@@ -83,10 +83,22 @@ const DOC_TYPE_OPTIONS: [string, string][] = [
   ['ast', 'Broward (AST)'],
 ];
 
+// What the document turned out to BE once its PDF was read — as opposed to the
+// type above, which is what the county filed it under. Default is loan
+// transfers, which is what this tab has always shown; the rest are opt-in.
+// Keys match CATEGORY_FILTERS on the server.
+const CATEGORY_OPTIONS: [string, string][] = [
+  ['',           'Loan transfers'],
+  ['collateral', 'Collateral'],
+  ['rents',      'Rents & leases'],
+  ['other',      'Other'],
+  ['all',        'All documents'],
+];
+
 // ── Dynamic chart ─────────────────────────────────────────────────────────────
-function DynamicChart({ startDate, endDate, targetsOnly, docType }: { startDate: string; endDate: string; targetsOnly: boolean; docType: string }) {
+function DynamicChart({ startDate, endDate, targetsOnly, docType, category }: { startDate: string; endDate: string; targetsOnly: boolean; docType: string; category: string }) {
   const [chartType, setChartType] = useState('monthly');
-  const dateQ = [startDate && `start_date=${startDate}`, endDate && `end_date=${endDate}`, targetsOnly && 'targets=1', docType && `doc_type=${docType}`].filter(Boolean).join('&');
+  const dateQ = [startDate && `start_date=${startDate}`, endDate && `end_date=${endDate}`, targetsOnly && 'targets=1', docType && `doc_type=${docType}`, category && `category=${category}`].filter(Boolean).join('&');
   const { data, isLoading } = useQuery({
     queryKey: ['/api/reporting/chart', chartType, dateQ],
     queryFn: () => apiRequest('GET', `/api/reporting/chart?type=${chartType}${dateQ ? '&' + dateQ : ''}`).then(r => r.json()),
@@ -153,9 +165,9 @@ function DynamicChart({ startDate, endDate, targetsOnly, docType }: { startDate:
 }
 
 // ── Participant stats ─────────────────────────────────────────────────────────
-function ParticipantStats({ startDate, endDate, targetsOnly, docType }: { startDate: string; endDate: string; targetsOnly: boolean; docType: string }) {
+function ParticipantStats({ startDate, endDate, targetsOnly, docType, category }: { startDate: string; endDate: string; targetsOnly: boolean; docType: string; category: string }) {
   const [tab, setTab] = useState<'sellers' | 'buyers' | 'active'>('active');
-  const dateQ = [startDate && `start_date=${startDate}`, endDate && `end_date=${endDate}`, targetsOnly && 'targets=1', docType && `doc_type=${docType}`].filter(Boolean).join('&');
+  const dateQ = [startDate && `start_date=${startDate}`, endDate && `end_date=${endDate}`, targetsOnly && 'targets=1', docType && `doc_type=${docType}`, category && `category=${category}`].filter(Boolean).join('&');
   const { data, isLoading } = useQuery({
     queryKey: ['/api/reporting/participants', dateQ],
     queryFn: () => apiRequest('GET', `/api/reporting/participants${dateQ ? '?' + dateQ : ''}`).then(r => r.json()),
@@ -485,6 +497,9 @@ export default function Reporting() {
   // owns the county's exact strings — Miami-Dade files "ASSIGNMENT OF MORTGAGE -
   // AMO" where Broward files a bare "AST", and neither belongs in the UI.
   const [docType, setDocType] = useState('');
+  // '' = loan transfers, the tab's long-standing contents. Everything else
+  // reads the sibling table built by normalize.py.
+  const [category, setCategory] = useState('');
 
   const { data: targets } = useQuery({
     queryKey: ['/api/targets'],
@@ -509,8 +524,9 @@ export default function Reporting() {
   const roleQ = entities.length > 0 && entityRole ? `&entity_role=${entityRole}` : '';
   // Shared filter fragment (no page/limit/entities) — TransactionsTable adds its own
   const docTypeQ = docType ? `&doc_type=${docType}` : '';
-  const filterQs = `&search=${encodeURIComponent(applied)}&start_date=${startDate}&end_date=${endDate}&reviewed=${reviewed}${targetsQ}${docTypeQ}`;
-  const exportQs = `?search=${encodeURIComponent(applied)}&start_date=${startDate}&end_date=${endDate}&reviewed=${reviewed}${targetsQ}${docTypeQ}${entitiesQ}${roleQ}`;
+  const categoryQ = category ? `&category=${category}` : '';
+  const filterQs = `&search=${encodeURIComponent(applied)}&start_date=${startDate}&end_date=${endDate}&reviewed=${reviewed}${targetsQ}${docTypeQ}${categoryQ}`;
+  const exportQs = `?search=${encodeURIComponent(applied)}&start_date=${startDate}&end_date=${endDate}&reviewed=${reviewed}${targetsQ}${docTypeQ}${categoryQ}${entitiesQ}${roleQ}`;
 
   // Per-type counts for the pills. The server computes them BEFORE applying the
   // doc-type clause, so each pill shows what selecting it would return under the
@@ -523,8 +539,8 @@ export default function Reporting() {
   const docTypeCounts = countsData?.docTypeCounts as Record<string, number> | undefined;
 
   const applySearch = () => setApplied(search);
-  const clearAll    = () => { setSearch(''); setApplied(''); setStartDate(''); setEndDate(''); setReviewed(''); setTargetsOnly(false); setEntities([]); setEntityRole(''); setDocType(''); };
-  const hasFilters  = applied || startDate || endDate || reviewed || targetsOnly || entities.length > 0 || docType;
+  const clearAll    = () => { setSearch(''); setApplied(''); setStartDate(''); setEndDate(''); setReviewed(''); setTargetsOnly(false); setEntities([]); setEntityRole(''); setDocType(''); setCategory(''); };
+  const hasFilters  = applied || startDate || endDate || reviewed || targetsOnly || entities.length > 0 || docType || category;
 
   const handleExport = () => {
     window.location.href = `/api/reporting/export-report${exportQs}`;
@@ -609,8 +625,8 @@ export default function Reporting() {
       {/* Market-wide charts (hidden when a specific report is active) */}
       {entities.length === 0 && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <DynamicChart startDate={startDate} endDate={endDate} targetsOnly={targetsOnly} docType={docType} />
-          <ParticipantStats startDate={startDate} endDate={endDate} targetsOnly={targetsOnly} docType={docType} />
+          <DynamicChart startDate={startDate} endDate={endDate} targetsOnly={targetsOnly} docType={docType} category={category} />
+          <ParticipantStats startDate={startDate} endDate={endDate} targetsOnly={targetsOnly} docType={docType} category={category} />
         </div>
       )}
 
@@ -630,6 +646,16 @@ export default function Reporting() {
           {[['', 'All'], ['no', 'Pending'], ['yes', 'Reviewed']].map(([val, label]) => (
             <button key={val} onClick={() => setReviewed(val)}
               className={`h-6 px-2 rounded-full border text-[10px] font-medium transition-colors ${reviewed === val ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+              {label}
+            </button>
+          ))}
+          <span className="text-[11px] text-muted-foreground ml-2">Shows:</span>
+          {CATEGORY_OPTIONS.map(([val, label]) => (
+            <button key={val || 'loan'} onClick={() => setCategory(val)}
+              title={val === '' ? 'Filings where a loan changed hands — what this tab has always shown'
+                    : val === 'all' ? 'Every assignment document we have read, whatever it turned out to be'
+                    : `Assignment filings the extractor read as ${label.toLowerCase()}`}
+              className={`h-6 px-2 rounded-full border text-[10px] font-medium transition-colors ${category === val ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}>
               {label}
             </button>
           ))}

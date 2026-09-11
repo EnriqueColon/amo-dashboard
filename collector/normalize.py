@@ -941,16 +941,21 @@ def build_normalized_tables():
     print("Building aom_events_clean...")
 
     # Preserve manual review marks (set via the Reporting UI) across the rebuild
+    # Collected from BOTH tables: a filing can be reviewed from the Reporting tab
+    # whichever category it sits under, and both tables are dropped below. Taking
+    # marks from the clean table alone silently discarded every review made on a
+    # collateral or rents-and-leases filing on the next nightly run.
     review_rows = []
-    try:
-        review_rows = conn.execute("""
-            SELECT cfn, classification, reviewed_by, reviewed_at FROM aom_events_clean
-            WHERE reviewed_at IS NOT NULL OR classification IS NOT NULL
-        """).fetchall()
-        if review_rows:
-            print(f"  Preserving {len(review_rows)} manual review marks")
-    except sqlite3.OperationalError:
-        pass  # first run, or review columns not present yet
+    for _table in ('aom_events_clean', 'aom_events_nonloan'):
+        try:
+            review_rows += conn.execute(f"""
+                SELECT cfn, classification, reviewed_by, reviewed_at FROM {_table}
+                WHERE reviewed_at IS NOT NULL OR classification IS NOT NULL
+            """).fetchall()
+        except sqlite3.OperationalError:
+            pass  # first run, or the table/columns do not exist yet
+    if review_rows:
+        print(f"  Preserving {len(review_rows)} manual review marks")
 
     conn.executescript("""
         DROP TABLE IF EXISTS aom_events_clean;
@@ -991,6 +996,60 @@ def build_normalized_tables():
             -- Miami-Dade filter with no error anywhere.
             county               TEXT
         );
+    """)
+
+    # Sibling table: assignment filings that are NOT loan transfers — collateral
+    # assignments, assignments of rents and leases, and the rest. Identical
+    # schema on purpose, so the Reporting query can read either one or UNION
+    # both without a column map.
+    #
+    # A SEPARATE TABLE rather than a widened aom_events_clean, deliberately:
+    # the Overview, Entities, Lending Relationships, the emailed report and the
+    # entity graph all read that table, and widening it would mean finding and
+    # patching every one of them or watching every published number move. A
+    # consumer that has never heard of this table physically cannot be affected
+    # by it. UCC filings are excluded from BOTH tables — see
+    # NON_ASSIGNMENT_DOC_TYPES for why their party columns do not mean the same
+    # thing.
+    conn.executescript("""
+        DROP TABLE IF EXISTS aom_events_nonloan;
+        CREATE TABLE aom_events_nonloan (
+            cfn                  TEXT PRIMARY KEY,
+            rec_date             TEXT,
+            assignor             TEXT,
+            assignee             TEXT,
+            assignor_canon       TEXT,
+            assignee_canon       TEXT,
+            assignor_type        TEXT,
+            assignee_type        TEXT,
+            txn_type             TEXT,
+            rec_book             TEXT,
+            rec_page             TEXT,
+            total_parties        INTEGER,
+            doc_type             TEXT,
+            doc_category         TEXT,
+            doc_title            TEXT,
+            pdf_assignor         TEXT,
+            pdf_assignee         TEXT,
+            assignor_parent      TEXT,
+            assignee_parent      TEXT,
+            property_address     TEXT,
+            loan_amount          REAL,
+            consideration_amount REAL,
+            folio_parcel         TEXT,
+            sponsor_address      TEXT,
+            signatory_officer    TEXT,
+            classification       TEXT,
+            reviewed_by          TEXT,
+            reviewed_at          TEXT,
+            -- Same trap as the clean table: declare county HERE. The table is
+            -- dropped and recreated each run, and server/db.ts backfills a
+            -- missing county to MIAMI-DADE, which would silently relabel every
+            -- Broward row.
+            county               TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_nonloan_category ON aom_events_nonloan(doc_category);
+        CREATE INDEX IF NOT EXISTS idx_nonloan_date     ON aom_events_nonloan(rec_date);
     """)
 
     # PDF extraction cache (built by extract_pdfs.py; may be empty)
@@ -1107,7 +1166,21 @@ def build_normalized_tables():
 
     AMO_DOC_TYPE = 'ASSIGNMENT OF MORTGAGE - AMO'
     inserts = []
+    # Assignment filings the loan-transfer filter rejects — collateral
+    # assignments, assignments of rents and leases, and the rest. Until
+    # 2026-09-11 these were counted and dropped on the floor; they now go to
+    # aom_events_nonloan so the Reporting tab can filter to them, while
+    # aom_events_clean keeps its exact previous meaning and every page built on
+    # it keeps its exact previous numbers.
+    #
+    # Both sides of these filings are still institutions — a collateral
+    # assignment is a lender pledging a mortgage it owns — so assignor/assignee
+    # mean the same thing here as in the clean table. That is precisely why UCC
+    # filings are NOT in this table: there the first party is the BORROWER, and
+    # mixing the two would put property owners into seller rankings.
+    nonloan_inserts = []
     skipped_non_loan = 0
+    unread_skipped = 0
     for cfn, entries in cfn_groups.items():
         total_parties = entries[0][8]
         doc_type = entries[0][11] or AMO_DOC_TYPE
@@ -1124,9 +1197,27 @@ def build_normalized_tables():
             include = doc_category in (None, 'LOAN_TRANSFER')
         else:
             include = doc_category == 'LOAN_TRANSFER'
+        # A filing only reaches the sibling table once its PDF has actually been
+        # read. An unread document has no doc_category, and filing it under a
+        # category filter would be a lie — it is not "other", it is unknown.
+        #
+        # This is not a rounding error: production holds 41,970 such rows, all
+        # Broward AST filings with neither a book/page nor a harvested image, so
+        # they are unreadable until the bulk image order lands. They already
+        # appear on the Raw Assignments page, which is the right home for
+        # unprocessed index data. Admitting them here would have put more rows
+        # into the Reporting tab than every classified document combined.
+        classified = doc_category is not None
         if not include:
             skipped_non_loan += 1
-            continue
+            if not classified:
+                unread_skipped += 1
+                continue
+            # Read, and genuinely not a loan transfer. Deliberately NOT
+            # `continue`: the row is built exactly as a clean row would be — same
+            # canonicalization, same dominant-party resolution, same extracted
+            # fields — and routed to the sibling table at the bottom of the loop.
+            # Building it separately is how the two tables would drift apart.
 
         grantee_counts: dict = defaultdict(list)
         for e in entries:
@@ -1163,7 +1254,7 @@ def build_normalized_tables():
         assignee_canon = canonicalize(dominant_grantee)
         txn_type = get_txn_type(assignor_canon, assignee_canon, assignor_type, grantee_type)
 
-        inserts.append((
+        (inserts if include else nonloan_inserts).append((
             cfn, rec_date,
             dominant_assignor or 'UNKNOWN', dominant_grantee or 'UNKNOWN',
             assignor_canon, assignee_canon,
@@ -1199,17 +1290,40 @@ def build_normalized_tables():
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     """, inserts)
 
-    # Restore preserved review marks
+    conn.commit()
+
+    conn.executemany("""
+        INSERT OR REPLACE INTO aom_events_nonloan
+        (cfn, rec_date, assignor, assignee, assignor_canon, assignee_canon,
+         assignor_type, assignee_type, txn_type, rec_book, rec_page, total_parties,
+         doc_type, doc_category, doc_title, pdf_assignor, pdf_assignee,
+         assignor_parent, assignee_parent, property_address,
+         loan_amount, consideration_amount,
+         folio_parcel, sponsor_address, signatory_officer, county)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    """, nonloan_inserts)
+
+    # Restore preserved review marks, now that BOTH tables are populated. Each
+    # CFN matches in exactly one of them; the other UPDATE is a no-op. Doing this
+    # before the sibling insert would have dropped every mark on a non-loan row.
     if review_rows:
-        conn.executemany("""
-            UPDATE aom_events_clean
-            SET classification = ?, reviewed_by = ?, reviewed_at = ?
-            WHERE cfn = ?
-        """, [(c, rb, ra, cfn) for cfn, c, rb, ra in review_rows])
+        for _table in ('aom_events_clean', 'aom_events_nonloan'):
+            conn.executemany(f"""
+                UPDATE {_table}
+                SET classification = ?, reviewed_by = ?, reviewed_at = ?
+                WHERE cfn = ?
+            """, [(c, rb, ra, cfn) for cfn, c, rb, ra in review_rows])
     conn.commit()
 
     n = conn.execute("SELECT COUNT(*) FROM aom_events_clean").fetchone()[0]
-    print(f"  aom_events_clean: {n} rows ({skipped_non_loan} non-loan-transfer filings excluded)")
+    n_other = conn.execute("SELECT COUNT(*) FROM aom_events_nonloan").fetchone()[0]
+    print(f"  aom_events_clean:   {n} rows (loan transfers)")
+    print(f"  aom_events_nonloan: {n_other} rows of {skipped_non_loan} non-loan-transfer "
+          f"filings ({unread_skipped} skipped as not yet read)")
+    for cat, cnt in conn.execute(
+            "SELECT COALESCE(doc_category,'(none)'), COUNT(*) FROM aom_events_nonloan "
+            "GROUP BY 1 ORDER BY 2 DESC"):
+        print(f"      {cat:<16} {cnt}")
 
     # ── Credit facility events ─────────────────────────────────────────────
     # Independent of the aom_events_clean loan-transfer filter above — a

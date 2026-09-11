@@ -145,7 +145,71 @@ rows there vs **1,175 in production**) — a snapshot artifact, not a filter bug
 the counts query where it would have zeroed every unselected pill. `tsc` caught the first, reading
 the diff caught the second. Edit these five near-identical endpoints one at a time.
 
-**NEXT — the `doc_category` half, NOT started.** 53,263 extracted documents sit outside
+### 2026-09-11 — the `doc_category` half: sibling table + category filter
+
+Owner set the purpose explicitly: *"who is buying loans and from who… dollar amounts… the collateral
+or property… what competitors are doing, and who is lending, and selling loans to who."* That
+settled the FST question — **two surfaces, not one** — on evidence, not taste:
+
+**The same two columns mean opposite things in the two sources.** In an assignment the first party
+is the institution SELLING the loan (`COMMUNITY LOAN SERVICING → NATIONSTAR`). In a UCC filing it is
+the BORROWER (`JAJ COLLINS AVE LLC → VASTER LOANS`, `SUAREZ RUBEN → CORNING FCU`). Merging them puts
+property owners and individuals into Top Sellers — silently, with plausible-looking numbers, while
+breaking the owner's primary question. Second, dollar coverage: **assignments 26,889/46,051 (58%)
+vs UCC 2,243/32,751 (7%)** — a UCC-1 describes what secures a debt, not its size, so it structurally
+cannot answer "dollar amounts". UCC gets its own surface (Borrower → Lender); **not built yet.**
+
+**Built: `aom_events_nonloan`**, a sibling of `aom_events_clean` with an identical schema, holding
+assignment filings that are READ but not loan transfers. `aom_events_all` is a VIEW over both
+(defined in `server/db.ts`, columns listed explicitly so a future column added to one table fails
+loudly instead of shifting values). Reporting picks a source by key:
+`'' → aom_events_clean` (default, unchanged) · `collateral|rents|other → aom_events_nonloan` ·
+`all → aom_events_all`. Table name comes from a server-side map, never the request.
+
+**The test run caught the design error.** First pass put 19,262 rows in the sibling table, of which
+**11,780 had no `doc_category` at all** — unread documents, which under a category filter is a lie.
+On production that is **41,970 rows, every one a Broward AST filing with neither a book/page nor a
+harvested image** (i.e. unreadable until the bulk image order lands) — more rows than everything
+classified. `normalize.py` now routes to the sibling table only when `doc_category IS NOT NULL` and
+prints the skipped count. Those rows remain on Raw Assignments, which is where unprocessed index
+data belongs.
+
+**Two silent bugs fixed on the way, both found by testing rather than reading:**
+1. **Review marks.** `PATCH/DELETE /api/reporting/:cfn/review` wrote only to `aom_events_clean`, so
+   marking a collateral filing reviewed updated **zero rows and still returned `ok:true`** — the tick
+   appeared, then vanished on refresh. Both endpoints now update both tables (a CFN is in exactly
+   one). `normalize.py` also collects marks from BOTH tables before the rebuild and restores AFTER
+   both are populated — restoring before the sibling insert would have dropped every non-loan mark
+   on each nightly run.
+2. **CSV export corrupted a record.** `escape()` quoted on `,` `"` `\n` but **not `\r`**.
+   `pdf_assignee` on CFN `2025R822456` reads `CL-LM\resI PURCHASER TRUST 1`; the bare CR ended the
+   record for Excel and every CSV parser, splitting one filing into two plausible-looking halves.
+   The only symptom was a row count one too high — which I had previously dismissed as an
+   embedded-newline artifact. It was not. Now `/[,"\n\r]/`.
+
+**Verified through the running API against a rebuilt snapshot** (`normalize.py` run end-to-end on a
+copy, never on production):
+
+    category      api      sql      | table == monthly chart
+    loans        42,319   42,319    | MATCH   (default unchanged)
+    collateral    4,205    4,205    | MATCH
+    rents         1,965    1,965    | MATCH
+    other           726      726    | MATCH
+    all          49,215   49,215    | MATCH   (= 42,319+4,205+1,965+726 exactly)
+
+Filters compose (collateral×AMO 2,045 + collateral×ASG 2,160 = 4,205). CSV exports 4,205/1,965/726
+with a single category in each. `check_doc_type_scope.py` gained four assertions on the new table: no
+UCC rows, no unclassified rows, no CFN in both tables, no LOAN_TRANSFER in the sibling.
+
+*Worth keeping: selecting a category changes WHO appears. Rents & leases surfaces Greenbox Loans,
+Casa Finance, Taylor Made Lending — names absent from the loan-transfer leaderboard entirely.*
+
+**Gotcha: a `str.replace` swapping `FROM aom_events_clean` hit `/api/clean-events` too**, which has
+no `src` in scope. `tsc` caught it. Audit every swap with an endpoint-attributing `awk` afterwards,
+which is how it was confirmed the remaining 14 all sit inside the five Reporting endpoints.
+
+**Superseded note — the `doc_category` half is now BUILT.** Original sizing below kept for context.
+53,263 extracted documents sit outside
 `aom_events_clean` (COLLATERAL 35,360 · OTHER 11,809 · RENTS_LEASES 6,094) — more than the 45,847
 inside it, so this roughly doubles what Reporting can show. **Recommended approach: a sibling table,
 not a widened `aom_events_clean`.** Every other page reads that table, and widening it means finding

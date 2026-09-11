@@ -1398,6 +1398,48 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     params.push(...match);
   }
 
+  // ── Document-category filter ───────────────────────────────────────────────
+  // What the document turned out to BE once its PDF was read, as opposed to the
+  // type the county filed it under. The two live in different tables, because
+  // aom_events_clean is the loan-transfer set by definition and every other page
+  // in the app is built on that meaning:
+  //
+  //   aom_events_clean    loan transfers        — the default, unchanged
+  //   aom_events_nonloan  everything else read  — collateral, rents & leases
+  //   aom_events_all      a view over both      — see server/db.ts
+  //
+  // Default is deliberately the clean table alone, so the Reporting tab opens on
+  // exactly the figure it opened on yesterday and the new rows are opt-in.
+  //
+  // UCC filings are in NEITHER. Their first party is the BORROWER, where an
+  // assignment's is the institution selling the loan, so folding them in here
+  // would put property owners into seller rankings. They get their own surface.
+  const CATEGORY_FILTERS: Record<string, { label: string; source: string; category?: string }> = {
+    '':           { label: 'Loan transfers', source: 'aom_events_clean' },
+    'collateral': { label: 'Collateral',     source: 'aom_events_nonloan', category: 'COLLATERAL' },
+    'rents':      { label: 'Rents & leases', source: 'aom_events_nonloan', category: 'RENTS_LEASES' },
+    'other':      { label: 'Other',          source: 'aom_events_nonloan', category: 'OTHER' },
+    'all':        { label: 'All documents',  source: 'aom_events_all' },
+  };
+
+  function categoryParam(q: any): string {
+    const key = typeof q.category === 'string' ? q.category.trim().toLowerCase() : '';
+    return key in CATEGORY_FILTERS ? key : '';
+  }
+
+  // The table name is interpolated, which is only safe because it comes from
+  // this map and never from the request — categoryParam() falls back to '' for
+  // anything unrecognised. The category value is bound.
+  function categorySource(key: string): string {
+    return CATEGORY_FILTERS[key].source;
+  }
+  function pushCategoryClause(clauses: string[], params: any[], key: string) {
+    const cat = CATEGORY_FILTERS[key].category;
+    if (!cat) return;
+    clauses.push(`doc_category = ?`);
+    params.push(cat);
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════
   // ENTITY ALIASES (entity-resolution crosswalk: merge duplicate entities)
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1751,11 +1793,14 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const entities  = parseEntities(req.query);
     const entityRole = entityRoleParam(req.query);
     const docType   = docTypeParam(req.query);
+    const category  = categoryParam(req.query);
+    const src       = categorySource(category);
 
     const county    = countyScope(req as any);
     const clauses: string[] = [];
     const params: any[] = [];
 
+    pushCategoryClause(clauses, params, category);
     if (county) { clauses.push(`COALESCE(county, '${DEFAULT_COUNTY}') = ?`); params.push(county); }
     if (search) {
       clauses.push(`(UPPER(assignor_canon) LIKE UPPER(?) OR UPPER(assignee_canon) LIKE UPPER(?) OR cfn LIKE ?)`);
@@ -1779,7 +1824,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     // filters — rather than every pill but the selected one reading zero.
     const countsWc = `WHERE ${clauses.join(' AND ')}`;
     const docTypeRows = db.prepare(`
-      SELECT doc_type, COUNT(*) AS n FROM aom_events_clean ${countsWc} GROUP BY doc_type
+      SELECT doc_type, COUNT(*) AS n FROM ${src} ${countsWc} GROUP BY doc_type
     `).all(...params) as any[];
     const docTypeCounts: Record<string, number> = { '': 0 };
     for (const [key, def] of Object.entries(DOC_TYPE_FILTERS)) {
@@ -1792,7 +1837,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     pushDocTypeClause(clauses, params, docType);
     const wc = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
 
-    const total = (db.prepare(`SELECT COUNT(*) as n FROM aom_events_clean ${wc}`).get(...params) as any).n;
+    const total = (db.prepare(`SELECT COUNT(*) as n FROM ${src} ${wc}`).get(...params) as any).n;
     const rows  = db.prepare(`
       SELECT cfn, rec_date, doc_type,
              assignor, assignee, assignor_canon, assignee_canon,
@@ -1803,7 +1848,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
              folio_parcel, sponsor_address, signatory_officer,
              rec_book, rec_page, county, total_parties,
              classification, reviewed_by, reviewed_at
-      FROM aom_events_clean ${wc}
+      FROM ${src} ${wc}
       ORDER BY rec_date DESC LIMIT ? OFFSET ?
     `).all(...params, limit, offset);
 
@@ -1815,18 +1860,27 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const { cfn } = req.params;
     const { reviewed_by, classification } = req.body as any;
     const now = new Date().toISOString();
-    db.prepare(`
-      UPDATE aom_events_clean
-      SET reviewed_by = ?, reviewed_at = ?, classification = COALESCE(?, classification)
-      WHERE cfn = ?
-    `).run(reviewed_by || 'user', now, classification || null, cfn);
+    // A CFN lives in exactly one of the two tables (check_doc_type_scope.py
+    // asserts they never overlap), so both are updated and one of them matches.
+    // Updating only the clean table meant marking a collateral filing reviewed
+    // changed nothing while still returning ok:true — the tick appeared, then
+    // vanished on the next refresh.
+    for (const table of ['aom_events_clean', 'aom_events_nonloan']) {
+      db.prepare(`
+        UPDATE ${table}
+        SET reviewed_by = ?, reviewed_at = ?, classification = COALESCE(?, classification)
+        WHERE cfn = ?
+      `).run(reviewed_by || 'user', now, classification || null, cfn);
+    }
     res.json({ ok: true, reviewed_at: now });
   });
 
   // ─── DELETE /api/reporting/:cfn/review ───────────────────────────────────
   app.delete('/api/reporting/:cfn/review', (req, res) => {
     const { cfn } = req.params;
-    db.prepare(`UPDATE aom_events_clean SET reviewed_by = NULL, reviewed_at = NULL WHERE cfn = ?`).run(cfn);
+    for (const table of ['aom_events_clean', 'aom_events_nonloan']) {
+      db.prepare(`UPDATE ${table} SET reviewed_by = NULL, reviewed_at = NULL WHERE cfn = ?`).run(cfn);
+    }
     res.json({ ok: true });
   });
 
@@ -1840,6 +1894,8 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const entities  = parseEntities(req.query);
     const entityRole = entityRoleParam(req.query);
     const docType   = docTypeParam(req.query);
+    const category  = categoryParam(req.query);
+    const src       = categorySource(category);
     const county    = countyScope(req as any);
 
     const clauses: string[] = [];
@@ -1860,6 +1916,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     clauses.push(`txn_type != 'SELF_ASSIGN'`);
     clauses.push(REPORTING_EXCLUDE);
     pushDocTypeClause(clauses, params, docType);
+    pushCategoryClause(clauses, params, category);
     const wc = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
 
     const rows = db.prepare(`
@@ -1871,15 +1928,20 @@ export async function registerRoutes(httpServer: Server, app: Express) {
              sponsor_address, signatory_officer,
              rec_book, rec_page, county,
              classification, reviewed_by, reviewed_at
-      FROM aom_events_clean ${wc}
+      FROM ${src} ${wc}
       ORDER BY rec_date DESC
     `).all(...params) as any[];
 
     const escape = (v: any) => {
       if (v === null || v === undefined) return '';
       const s = String(v);
-      return s.includes(',') || s.includes('"') || s.includes('\n')
-        ? `"${s.replace(/"/g, '""')}"` : s;
+      // \r matters as much as \n and was missing until 2026-09-11. OCR'd party
+      // names occasionally carry a bare carriage return — pdf_assignee on CFN
+      // 2025R822456 reads "CL-LM\resI PURCHASER TRUST 1" — and an unquoted CR
+      // ends the record for Excel and for every CSV parser, silently splitting
+      // one filing into two malformed rows. The export looked fine: the row
+      // count was one too high and the halves were plausible text.
+      return /[,"\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
 
     // Per-county. A Miami-Dade book/page URL built from a Broward row resolves
@@ -1933,6 +1995,8 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const entities  = parseEntities(req.query);
     const entityRole = entityRoleParam(req.query);
     const docType   = docTypeParam(req.query);
+    const category  = categoryParam(req.query);
+    const src       = categorySource(category);
     const county    = countyScope(req as any);
 
     const clauses: string[] = [];
@@ -1953,6 +2017,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     clauses.push(`txn_type != 'SELF_ASSIGN'`);
     clauses.push(REPORTING_EXCLUDE);
     pushDocTypeClause(clauses, params, docType);
+    pushCategoryClause(clauses, params, category);
     const wc = `WHERE ${clauses.join(' AND ')}`;
 
     const rows = db.prepare(`
@@ -1962,7 +2027,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
              property_address, folio_parcel, loan_amount, consideration_amount,
              signatory_officer, rec_book, rec_page, county,
              classification, reviewed_by, reviewed_at
-      FROM aom_events_clean ${wc}
+      FROM ${src} ${wc}
       ORDER BY rec_date DESC
     `).all(...params) as any[];
 
@@ -2064,6 +2129,8 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const endDate   = typeof req.query.end_date === 'string' ? req.query.end_date : '';
     const targetsOnly = req.query.targets === '1';
     const docType   = docTypeParam(req.query);
+    const category  = categoryParam(req.query);
+    const src       = categorySource(category);
     const clauses: string[] = [];
     const params: any[] = [];
     if (startDate) { clauses.push(`rec_date >= ?`); params.push(startDate); }
@@ -2071,6 +2138,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     if (targetsOnly) { clauses.push(TARGETS_MATCH); }
     clauses.push(REPORTING_EXCLUDE);
     pushDocTypeClause(clauses, params, docType);
+    pushCategoryClause(clauses, params, category);
     // Same correction as the charts (10 Sep 2026): these panels counted
     // self-assignments the table has always dropped. It mattered more here than
     // anywhere else, because a self-assignment names the SAME entity as both
@@ -2089,7 +2157,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       SELECT assignor_canon AS entity, assignor_type AS entity_type,
              COUNT(*) AS transfers_out,
              SUM(loan_amount) AS total_loan_amount
-      FROM aom_events_clean
+      FROM ${src}
       WHERE ${sellerClauses.join(' AND ')}
       GROUP BY assignor_canon ORDER BY transfers_out DESC LIMIT 20
     `).all(...params);
@@ -2100,7 +2168,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       SELECT assignee_canon AS entity, assignee_type AS entity_type,
              COUNT(*) AS transfers_in,
              SUM(loan_amount) AS total_loan_amount
-      FROM aom_events_clean
+      FROM ${src}
       WHERE ${buyerClauses.join(' AND ')}
       GROUP BY assignee_canon ORDER BY transfers_in DESC LIMIT 20
     `).all(...params);
@@ -2129,12 +2197,12 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       FROM (
         SELECT assignor_canon AS entity, assignor_type AS entity_type,
                0 AS inb, 1 AS outb, rec_date
-        FROM aom_events_clean
+        FROM ${src}
         WHERE ${sellerClauses.join(' AND ')}
         UNION ALL
         SELECT assignee_canon, assignee_type,
                1, 0, rec_date
-        FROM aom_events_clean
+        FROM ${src}
         WHERE ${buyerClauses.join(' AND ')}
       )
       GROUP BY entity
@@ -2151,6 +2219,8 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const endDate   = typeof req.query.end_date === 'string' ? req.query.end_date : '';
     const targetsOnly = req.query.targets === '1';
     const docType   = docTypeParam(req.query);
+    const category  = categoryParam(req.query);
+    const src       = categorySource(category);
     const county    = countyScope(req as any);
 
     // County joins the shared clause list, so every chart type below inherits it.
@@ -2162,6 +2232,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     if (targetsOnly) { dateClauses.push(TARGETS_MATCH); }
     dateClauses.push(REPORTING_EXCLUDE);
     pushDocTypeClause(dateClauses, dateParams, docType);
+    pushCategoryClause(dateClauses, dateParams, category);
     // The charts describe the same rows the table below them lists, so they take
     // the table's exclusions — both of them. This one was missing until
     // 10 Sep 2026: every chart on the page silently counted self-assignments
@@ -2178,7 +2249,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       const rows = db.prepare(`
         SELECT strftime('%Y-%m', rec_date) as period, COUNT(*) as count,
                SUM(loan_amount) as total_loan_amount
-        FROM aom_events_clean ${dwc}
+        FROM ${src} ${dwc}
         GROUP BY period ORDER BY period
       `).all(...dateParams);
       return res.json(rows);
@@ -2187,7 +2258,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     if (type === 'txn_type') {
       const rows = db.prepare(`
         SELECT COALESCE(txn_type, 'UNKNOWN') as label, COUNT(*) as count
-        FROM aom_events_clean ${dwc}
+        FROM ${src} ${dwc}
         GROUP BY txn_type ORDER BY count DESC
       `).all(...dateParams);
       return res.json(rows);
@@ -2196,7 +2267,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     if (type === 'top_buyers') {
       const rows = db.prepare(`
         SELECT assignee_canon as label, COUNT(*) as count
-        FROM aom_events_clean
+        FROM ${src}
         WHERE ${[...dateClauses, 'assignee_canon IS NOT NULL'].join(' AND ')}
         GROUP BY assignee_canon ORDER BY count DESC LIMIT 15
       `).all(...dateParams);
@@ -2206,7 +2277,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     if (type === 'top_sellers') {
       const rows = db.prepare(`
         SELECT assignor_canon as label, COUNT(*) as count
-        FROM aom_events_clean
+        FROM ${src}
         WHERE ${[...dateClauses, 'assignor_canon IS NOT NULL'].join(' AND ')}
         GROUP BY assignor_canon ORDER BY count DESC LIMIT 15
       `).all(...dateParams);
@@ -2216,7 +2287,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     if (type === 'entity_type') {
       const rows = db.prepare(`
         SELECT COALESCE(assignee_type, 'OTHER') as label, COUNT(*) as count
-        FROM aom_events_clean ${dwc}
+        FROM ${src} ${dwc}
         GROUP BY assignee_type ORDER BY count DESC
       `).all(...dateParams);
       return res.json(rows);

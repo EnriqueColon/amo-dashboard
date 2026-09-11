@@ -1,6 +1,6 @@
 # AMO Tracker — Mortgage Assignment Intelligence Dashboard
 
-> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 10 Sep 2026
+> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 11 Sep 2026
 > **Production URL:** `http://165.22.35.75:5000` (single shared password)
 > **Repository:** `amo-dashboard` (`origin/main`)
 
@@ -205,9 +205,24 @@ analytics header, a participant-activity breakdown and a time-series chart.
   table, both exports, the charts and the participant panels. A type with nothing in it reads `0`
   and greys out rather than disappearing, so Broward's AST visibly reads 0 while you are scoped to
   Miami-Dade instead of silently vanishing.
-  This filters by **the type the county filed the document under**, not by what the document turned
-  out to be on reading. Filtering by the latter — collateral assignments, assignments of rents and
-  leases — is a separate piece of work: those documents are deliberately not in this tab at all.
+  This filters by **the type the county filed the document under**. To filter by what the document
+  turned out to be on reading, use *Shows* below.
+- **Filter by what the document is** (added 11 Sep 2026). A second row of pills — *Loan transfers*,
+  *Collateral*, *Rents & leases*, *Other*, *All documents*.
+  **Loan transfers is the default and is exactly what this tab has always shown**, so nothing you
+  have quoted from here has changed. The others were previously invisible: assignment filings whose
+  PDF turned out to record something other than a loan changing hands.
+  Selecting a category changes *who appears*, not just how many. Rents & leases surfaces Greenbox
+  Loans, Casa Finance and Taylor Made Lending — names that do not appear on the loan-transfer
+  leaderboard at all. The whole page follows the selection: table, both exports, charts and
+  participant panels.
+  A filing only appears here **once we have actually read its PDF**. Around 42,000 Broward filings
+  are indexed but unreadable until the bulk image order lands (§7.6), and they are deliberately kept
+  out — a document nobody has read is not "other", it is unknown. They remain on Raw Assignments.
+  **UCC filings are not in either list.** They are a different instrument and their party columns
+  mean the opposite thing: on an assignment the first party is the institution selling the loan, on a
+  UCC filing it is the borrower. Mixing them would put property owners into the seller rankings.
+  They will get their own view.
 - Search by CFN, assignor or assignee.
 - **Review workflow:** mark a row reviewed/unreviewed; the marking is stored server-side and shared
   by everyone.

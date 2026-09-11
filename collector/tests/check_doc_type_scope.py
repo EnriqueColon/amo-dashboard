@@ -165,9 +165,69 @@ def check_live() -> None:
         conn.close()
 
 
+def check_nonloan_table() -> None:
+    """aom_events_nonloan holds READ, NON-loan-transfer ASSIGNMENT filings only.
+
+    Three ways this table can quietly go wrong, all of them invisible on screen:
+      - a UCC filing slips in, and property owners start appearing as sellers
+      - an unread filing slips in, and a document nobody has looked at gets
+        filed under a category (41,970 Broward rows qualify)
+      - a CFN lands in both tables, and every union double-counts it
+    """
+    if not os.path.exists(DB_PATH):
+        return
+    conn = sqlite3.connect(f'file:{DB_PATH}?mode=ro', uri=True)
+    try:
+        if not table_exists(conn, 'aom_events_nonloan'):
+            notes.append("aom_events_nonloan absent — normalize.py has not run since "
+                         "the feature shipped; skipped")
+            return
+
+        n = conn.execute("SELECT COUNT(*) FROM aom_events_nonloan").fetchone()[0]
+        notes.append(f"aom_events_nonloan holds {n} rows")
+
+        quoted = ', '.join('?' for _ in normalize.NON_ASSIGNMENT_DOC_TYPES)
+        ucc = conn.execute(
+            f"SELECT COUNT(*) FROM aom_events_nonloan WHERE doc_type IN ({quoted})",
+            normalize.NON_ASSIGNMENT_DOC_TYPES).fetchone()[0]
+        if ucc:
+            fail(f"{ucc} UCC filings reached aom_events_nonloan — their first party is "
+                 f"the BORROWER, so they would appear as loan sellers in Reporting")
+
+        unread = conn.execute(
+            "SELECT COUNT(*) FROM aom_events_nonloan WHERE doc_category IS NULL").fetchone()[0]
+        if unread:
+            fail(f"{unread} rows in aom_events_nonloan have no doc_category — an unread "
+                 f"filing must not be presented under a category filter")
+
+        both = conn.execute("""
+            SELECT COUNT(*) FROM aom_events_nonloan n
+            WHERE EXISTS (SELECT 1 FROM aom_events_clean c WHERE c.cfn = n.cfn)
+        """).fetchone()[0]
+        if both:
+            fail(f"{both} CFNs appear in BOTH aom_events_clean and aom_events_nonloan — "
+                 f"every union over the two double-counts them")
+
+        loans = conn.execute(
+            "SELECT COUNT(*) FROM aom_events_nonloan WHERE doc_category = 'LOAN_TRANSFER'"
+        ).fetchone()[0]
+        if loans:
+            fail(f"{loans} LOAN_TRANSFER rows sit in aom_events_nonloan; they belong in "
+                 f"aom_events_clean")
+
+        if not failures and n:
+            cats = conn.execute(
+                "SELECT doc_category, COUNT(*) FROM aom_events_nonloan "
+                "GROUP BY 1 ORDER BY 2 DESC").fetchall()
+            notes.append("  categories: " + ", ".join(f"{c}={k}" for c, k in cats))
+    finally:
+        conn.close()
+
+
 def main() -> int:
     check_fixture()
     check_live()
+    check_nonloan_table()
 
     for n in notes:
         print(f"  · {n}")
