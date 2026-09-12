@@ -4,148 +4,53 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
-## ⏭ NEXT SESSION — what is still open
+## ⏭ NEXT SESSION — what is still open (as of 2026-09-11)
 
-**1. ✅ Document coverage — ANSWERED 2026-09-08/09.** See the dated entry below. Portal offers 79
-doc types, exactly THREE are assignments, we request all three, plus FST now. AIT root cause found
-and fixed. **Remaining sub-item: the 23 CAPPED days** (below) are still truncated.
+**Everything the owner set on 1 Sep is now closed and deployed.** Droplet at `ff75f35`, local clean,
+nothing running. The week's work — coverage audit, AIT fix, UCC collection + extraction, both
+Reporting filters, the UCC page — is in the dated entries below.
 
-**2. Classification — partly answered.** Collateral assignments were never a missing doc type:
-19,123 documents already carry `doc_category='COLLATERAL'`. **Still open:** facility **type**
-over-labeling — everything recent reads `warehouse_or_revolving_credit_facility`, including obvious
-consumer HELOCs and a syndicated deal. Touches `FACILITY_SYSTEM_PROMPT` → **any prompt edit
-requires re-running `collector/research/scripts/verify_integration.py` at 21/21 first.**
+### Open, engineering
+1. **Facility TYPE over-labelling.** Nearly everything recent reads
+   `warehouse_or_revolving_credit_facility`, including obvious consumer HELOCs and a syndicated deal.
+   Touches `FACILITY_SYSTEM_PROMPT` → **any prompt edit must re-pass
+   `collector/research/scripts/verify_integration.py` at 21/21 first.** Longest-standing open bug.
+2. **23 CAPPED days of truncated assignment history** (`collection_log`, 2023-01-11 … 2026-02-03).
+   The portal caps a search at ~500 index rows and the splitter cannot go below one day. Recovery
+   needs a **narrower axis than date** — party name or book range. Those days hold 109–145 documents
+   against a 2024 daily average of 59, consistent with truncation.
+3. **`run_weekly.sh` looks back only 10 days**, so a window that errors ages out of retry range
+   within roughly one run. EMPTY windows stay retry-eligible by design; ERROR ones do not.
+4. **Broward is index-only for 41,970 filings** — no image, no book/page, so unreadable and
+   deliberately excluded from `aom_events_nonloan`. Blocked on the bulk image order, not on code.
+5. **UCC party direction is right ~90% of the time, not 100%.** Rows whose lender was read off the
+   document are flagged; the rest inherit the county's unreliable order and are marked amber. If
+   this becomes a problem, the fix is a targeted extraction prompt for UCC forms (debtor / secured
+   party are explicit fields on the form).
+6. **Lender name variants still split** where the difference is not case, punctuation, or a known
+   trailing legal phrase — e.g. `U.S, CENTURY BANK` (OCR comma). Deliberately conservative: the
+   general `canonicalize()` must NOT be used here, it collapses `10820 INVESTMENTS LLC` and
+   `11140 INVESTMENTS LLC` into one fictional entity.
 
-**3. Reporting tab — hide Wilmington Savings, MERS, Fannie Mae, Freddie Mac. NOT STARTED.**
-- **Display-only exclusion. Data stays in the DB** (user was explicit). Implement as a filter in the
-  Reporting query/UI, not a delete and not a normalize-time drop.
-- Must match on **canonical** names and cover the entity in EITHER direction (assignor or assignee).
-- `entity_type` alone won't do it: Fannie/Freddie are `GSE` and MERS is `MERS`, but **Wilmington
-  Savings is `BANK`** — a type-based filter would either miss Wilmington or nuke every bank. Needs an
-  explicit canonical-name exclusion list (canonical forms in `normalize.py`: `MERS`, `FANNIE MAE`,
-  `FREDDIE MAC`, `WILMINGTON SAVINGS`).
-- **Confirm before building:** hard filter or default-on toggle with "show all"? Overview/Entities
-  stats and the emailed report too, or Reporting tab only? (Assume Reporting-tab-only unless told.)
+### Open, needs the owner rather than an engineer
+- 🔴 **Revoke the leaked GitHub PAT** — plaintext in `.git/config` on this Mac and the droplet, public
+  repo. Open since 4 Aug, the oldest item and the only one with security consequences.
+- 📧 **Azure app registration** so the weekly emailed report can send — see [[amo-email-reports]].
+- 📞 **Broward bulk image order**, 954-831-4000 — unlocks item 4 above, ~41,900 documents.
+- 🔑 **DigitalOcean Space + key** for the backup job, which currently copies to the disk it protects.
+- ⚠️ **`.env`'s `AMO_PASSWORD` has drifted from what PM2 holds.** A `pm2 delete` + fresh start would
+  silently change the dashboard password. Reconcile before anyone does that.
 
-**4. 🔴 The FST extraction backfill has NOT been run** — code is deployed-ready but the ~39k-document
-extraction needs the owner's go-ahead (~$20, ~25h). See the entry below for the exact runbook.
+### Possible next pieces of work, not committed
+- A **UCC entity page** (click a lender, see its filings and counterparties), mirroring the Reporting
+  entity report.
+- Fold UCC data into the **emailed weekly report**, once that can actually send.
+- The **`doc_category` filter for Broward** — currently every Broward row is unread, so the filter is
+  empty for that county.
 
 ---
 
-## 2026-09-10 — Reporting tab: hide MERS / Fannie / Freddie / Wilmington Savings (DEPLOYED)
-
-Owner request: hide **WILMINGTON SAVINGS, MERS, FANNIE MAE, FREDDIE MAC** from the Reporting view,
-**display-only, data stays in the DB**. (Asked initially for three; MERS added mid-request — the
-1 Sep note had four, so confirm the list rather than inferring it.)
-
-**Impact measured before building: 6,317 of 48,636 non-self-assign rows, ~13%.** Reporting total
-Miami-Dade 48,636 → **42,319**, verified equal to the SQL prediction exactly.
-
-**Built in `server/routes.ts`** — `REPORTING_EXCLUDED_ENTITIES` (canonical names) + two clause forms:
-- `REPORTING_EXCLUDE` — transaction-shaped, excludes if the entity is on EITHER side. Applied at the
-  **five** browse/aggregate endpoints: `/api/reporting`, `/export`, `/export-report`, `/participants`,
-  `/chart`.
-- `REPORTING_EXCLUDE_ENTITY(col)` — single-column form for `entity_nodes`.
-
-**The bug the first pass shipped, caught by testing the API rather than reading the code:** the
-`participants` "Most Active" panel reads **`entity_nodes`**, a different table with no
-`assignor_canon`/`assignee_canon` — so the transaction-shaped clause silently did not apply and all
-four entities still appeared there. Hence the second clause form. *Any new Reporting surface reading
-a different table needs its own exclusion; the transaction clause is not universal.*
-
-**Matched on CANONICAL names** — `normalize.py` folds `FEDERAL NATIONAL MORTGAGE ASSOCIATION`/`FNMA`
-etc. into one form first. `entity_type` would NOT work: Fannie/Freddie are `GSE`, MERS is `MERS`, but
-**Wilmington Savings is `BANK`**, so a type filter misses Wilmington or hides every bank.
-`IS NULL` guards included — `col NOT IN (...)` is NULL, not true, for a NULL col and would silently
-drop those rows. Zero NULLs in those columns today (0/51,093); the guard keeps that safe.
-
-**Verified against `prod_snapshot.db` through the running API, not by reading SQL:**
-    /api/reporting total   42,319  == SQL prediction
-    CSV export             42,319 records, 0 excluded entities present
-    participants           0 excluded in topSellers / topBuyers / mostActive
-    UI                     Most Active now leads US Bank, Nationstar, JPMorgan — MERS gone
-CSV first looked like 42,323 by `wc -l`; that is embedded newlines in address fields, not a
-discrepancy — count CSV with a parser, not line count.
-
-**Deliberately NOT changed:**
-- `/api/reporting/entity-report` — requires the caller to NAME entities. Filtering it would make an
-  explicitly-requested MERS report silently return zeros. **Open question for the owner.**
-- Overview / Entities / Lending Relationships / emailed report all still count these entities.
-- The participant panels remain **un-scoped by county** — the UI labels them "not filtered by
-  county". Left as-is on purpose.
-
-### Second pass, same day — every number on the page now counts the same rows
-
-Owner: *"make sure that the graphs in the reporting tab match what is on the table."* They did not.
-**`/chart` and `/participants` had never filtered `SELF_ASSIGN`** while the table always has — a
-pre-existing gap, not caused by the exclusion work above.
-
-    charts       39,120  ->  36,993   (production, = table exactly)
-    snapshot     42,319  ->  42,319   (verified table == monthly == txn_type sum)
-
-It mattered most in the participant panels, because **a self-assignment names the same entity on
-BOTH sides**, so it inflated a firm's inbound and outbound columns simultaneously:
-`US BANK` 1,724 transfers out vs a true 1,155 (+33%), `JPMORGAN CHASE` +20%. Rankings mostly
-survived; the numbers did not.
-
-**`Most Active` was rebuilt, not just filtered.** It read `entity_nodes.total_vol` — a precomputed
-lifetime figure spanning every county, counting self-assignments and transactions against the now
-hidden entities. One panel therefore disagreed with itself: `US BANK` read **6,759** there against
-**5,094** under its two sibling tabs. It now aggregates `aom_events_clean` over the same
-seller/buyer clauses via a `UNION ALL`, so all three tabs tie out exactly (verified per entity:
-`mostActive.transfers_out == topSellers.transfers_out` and `transfers_in == topBuyers.transfers_in`
-across the top 8). `REPORTING_EXCLUDE_ENTITY` was deleted — nothing reads `entity_nodes` here any
-more, so the single-column clause form had no consumer left.
-
-**Two intended behaviour changes, worth knowing before someone reports them as bugs:**
-1. The **Txn Types** chart no longer has a `SELF_ASSIGN` slice (was 2,127). Correct — no
-   self-assignment is in the reported set.
-2. **Most Active now responds to the date filter** and its `first_seen`/`last_seen` describe the
-   selected window rather than all time. Verified: `US BANK` 5,094 full-range → 899 for 2026-only,
-   `first_seen` moving 2023-01-03 → 2026-01-02.
-
-*Lesson worth keeping: three panels in one UI component were each computed from a different query,
-and two of them from a different table. Whenever a surface gets a new filter, enumerate every query
-behind it — the "Most Active" leak survived the first pass precisely because reading the route file
-top-to-bottom makes the three tabs look like one thing.*
-
-### Third pass, same day — document-type filter on Reporting
-
-Owner: *"add a filtering system that will allow the user to search by document type."* **"Document
-type" is ambiguous in this schema and the two readings are very different work** — asked before
-building, and the owner wants BOTH:
-
-| column | values in `aom_events_clean` | usable as a filter? |
-|---|---|---|
-| `doc_type` (county filing type) | AMO 42,392 · ASG 2,280 · AST 1,175 | **yes** — shipped now |
-| `doc_category` (what the PDF is) | LOAN_TRANSFER 45,841 · NULL 6 | **no** — the table IS the loan-transfer set |
-
-**Shipped: `doc_type` filter.** `DOC_TYPE_FILTERS` in `server/routes.ts` maps short keys
-(`amo`/`asg`/`ast`) → the counties' exact strings, because Miami-Dade files
-`ASSIGNMENT OF MORTGAGE - AMO` while Broward files a bare `AST` and neither belongs in the UI.
-Validated key → bound params, never interpolated. Applied at all five Reporting surfaces.
-
-`/api/reporting` now also returns **`docTypeCounts`**, computed **before** the doc-type clause is
-applied — so each pill shows what selecting it *would* return under the other active filters,
-instead of every unselected pill reading zero. Broward's AST correctly reads 0 in a Miami-Dade scope
-and is dimmed rather than hidden; saying "0" beats making the option disappear.
-
-**Verified through the API against `prod_snapshot.db`:**
-    counts        {'': 42319, amo: 41421, asg: 898, ast: 0}   — sums exactly to the total
-    each filter   api == SQL truth for all three keys
-    chart         table == monthly chart at all/amo/asg
-    CSV           41,421 / 898 records respectively
-    participants  follows the filter (asg → top entity WELLS FARGO 64)
-    UI            clicking ASG drops the table to 898 while the counts stay intact
-AST reads 0 on the snapshot because that Aug-19 copy predates Broward extraction (0 clean Broward
-rows there vs **1,175 in production**) — a snapshot artifact, not a filter bug.
-
-**Gotcha for the next person: a scripted bulk edit of the route file broke it twice** — a duplicated
-`const docType` in the endpoint already edited by hand, and a `pushDocTypeClause` inserted *above*
-the counts query where it would have zeroed every unselected pill. `tsc` caught the first, reading
-the diff caught the second. Edit these five near-identical endpoints one at a time.
-
-### 2026-09-11 — UCC page: consumer finance hidden by default
+## 2026-09-11 — UCC page: consumer finance hidden by default
 
 **Owner added three more, 2026-09-11:** Cross River Bank, Climate First Bank, Florida Housing
 Finance Corporation. Banks by charter but not CRE lenders here — Cross River files as

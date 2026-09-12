@@ -916,7 +916,7 @@ confirmed. Commit messages are written as statements of what changed and why
 
 ---
 
-## 7. Current status — as of 24 Aug 2026
+## 7. Current status — as of 11 Sep 2026
 
 ### 7.1 Overall
 
@@ -924,13 +924,34 @@ confirmed. Commit messages are written as statements of what changed and why
 dashboard, county-scoped throughout. The Broward expansion, the major workstream since 6 Aug 2026,
 completed on 10 Aug 2026.
 
+**The week of 8–11 Sep 2026 answered the "are we pulling everything?" question and acted on it.**
+The clerk offers 79 document types; exactly three are assignments and we collect all three, so no
+assignment category was ever missing. Along the way:
+- A **three-month silent collection failure** was found and fixed. Assignment of Interest filings had
+  returned nothing since 16 June while logging what looked like network timeouts.
+- **UCC financing statements** were added as a new source — 32,759 filings, 2023 to present, 84%
+  carrying a property address — and given their own page.
+- The **Reporting tab now filters by document type and by what a document actually is**, and every
+  number on that page counts the same rows, which had not previously been true.
+
 ### 7.2 Production data
 
-| Scope | Filings | Clean transactions | Entities | Market transfers |
+| Scope | Filings indexed | Loan transfers | Other assignments | Entities |
 |---|---|---|---|---|
-| Miami-Dade | 71,366 | 44,034 | 17,938 | 20,076 |
-| **Broward** | **42,761** | **551** | **219** | **406** |
-| **All** | **114,127** | **44,585** | **18,021** | **20,482** |
+| Miami-Dade | 105,598 | 44,857 | 27,975 | — |
+| **Broward** | **43,795** | **1,224** | **601** | — |
+| **All** | **149,393** | **46,081** | **28,576** | **18,383** |
+
+Market transfers: **21,454**. Documents read end to end: **107,402**.
+
+**"Other assignments" is new as of 11 Sep 2026** — collateral assignments and assignments of rents
+and leases, which were collected and read but previously had nowhere to appear. They live in their
+own table and are reachable from the Reporting tab's *Shows* filter. They are **not** counted in
+loan transfers, so no figure above double-counts and nothing published earlier has changed meaning.
+
+Miami-Dade's filing count grew from 71,366 to 105,598 because **UCC financing statements
+(32,759) were added on 9–10 Sep 2026**. Those are secured-lending records, not assignments, and are
+deliberately excluded from every column but the first — see the UCC Filings page in §4.3.
 
 > ### ⚠️ Read this before comparing against any earlier report
 >
@@ -956,11 +977,13 @@ endpoints healthy across all three county scopes.
 
 | Component | Status |
 |---|---|
-| Miami-Dade collection (weekly cron) | 🟢 Live — but its **extract step ran keyless and silently did nothing on 14 & 21 Aug** (see §7.4 item −1); fixed 23 Aug, catch-up extraction run |
-| AIT (Assignment of Interest) collection | 🔴 **Broken** — every AIT chunk timed out in both the 14 & 21 Aug weekly runs; 0 AIT rows collected since at least 14 Aug. AMO + ASG unaffected. Not yet investigated |
-| Broward index + images + extraction (daily cron) | 🟢 Live — 42,559 index rows, 658 images, 589 extracted |
-| PDF extraction — Miami-Dade | 🟢 Live — **repair backfill complete 17 Aug 2026**, 49,838 documents re-read |
-| PDF extraction — Broward | 🟡 Live **daily**, but coverage thin — 589 of 42,559 documents |
+| Miami-Dade collection (weekly cron) | 🟢 Live — ran clean unattended on 11 Sep 2026, all four document types, whole collection phase 2m 13s |
+| AIT (Assignment of Interest) collection | 🟢 **Resolved 11 Sep 2026** — never a timeout. The county rejects the search and returns no results, exactly as it does for a day with no filings, and has done so since the type was added on 16 Jun. Now resolves in about a second and records `EMPTY` rather than a false error. **Kept active on purpose**, so collection begins by itself if the county ever starts using it |
+| UCC financing statements (weekly cron) | 🟢 **New 9–11 Sep 2026** — 32,759 filings collected and read, 2023 to present. Now part of the weekly run |
+| Broward index + images + extraction (daily cron) | 🟡 Live — 43,795 index rows, but **41,970 have no image and cannot be read** until the bulk image order lands (§7.6) |
+| PDF extraction — Miami-Dade | 🟢 Live — 107,402 documents read end to end |
+| PDF extraction — Broward | 🟡 Live **daily**, coverage still thin — blocked on images, not on the extractor |
+| Reporting tab filters (type + category) | 🟢 **Deployed 10–11 Sep 2026** — and every panel on the page now counts the same rows |
 | Facility batch backfill (20-min tick) | 🟢 Live |
 | Nightly normalize + cache bust | 🟢 Live |
 | County-aware server + client selector | 🟢 Deployed |
@@ -1305,7 +1328,7 @@ healthy (640 rows, 57% carrying loan amounts).
 
 **Engineering:**
 
-4a. **Owner-set priorities from 1 Sep 2026 — status as of 9 Sep 2026.**
+4a. **Owner-set priorities from 1 Sep 2026 — all three now closed, as of 11 Sep 2026.**
    (i) ✅ **Document coverage: ANSWERED.** The clerk offers 79 types, exactly three are assignments,
    and we request all three (see §3). Nothing was missing. The AIT failure was diagnosed — the county
    returns no results for that type and never has — and fixed so it no longer stalls each run. UCC
@@ -1319,14 +1342,11 @@ healthy (640 rows, 57% carrying loan amounts).
    from the Reporting tab.** Display filter only; every row stays in the database and every other
    page still counts them. See §4.3 for what this changes on screen.
 
-4b. 🔴 **Run the FST extraction backfill — needs an owner decision, not engineering.** FST index
-   collection is built and tested; reading the ~39,000 PDFs behind those filings is a separate,
-   costed job: **~$20 (or ~$10 via the Batch API) and ~25 hours**, using this project's own measured
-   rates. Until it runs, FST filings carry party names, dates and document numbers but no loan
-   amounts, property addresses or collateral descriptions. Note `extract_pdfs.py` defaults to a **$5
-   budget cap**, so a full run must pass `--budget` explicitly or it will stop roughly a quarter of
-   the way through. A cheaper middle option is to extract only the commercial lenders
-   (~6,000 documents, ~$3, ~4 hours) and leave the consumer solar filings unread.
+4b. ✅ **DONE 10 Sep 2026 — the UCC extraction backfill ran to completion.** 32,709 of 32,743
+   documents read, **zero download failures**, 34 failures in total (0.1%), **$19.80** against a $35
+   ceiling — within twenty cents of the estimate. 84% carry a property address. Note for any future
+   bulk run: `extract_pdfs.py` defaults to a **$5 budget cap**, so a large job must pass `--budget`
+   explicitly or it stops a quarter of the way through.
 
 5. **Real cron-failure alerting.** The dashboard now warns when Broward collection stalls *and* when
    backups stop succeeding, but both only help someone who opens it. There is still no `MAILTO` and
