@@ -847,9 +847,40 @@ def canonicalize(name: str) -> str:
         return 'UNKNOWN'
     
     s = name.strip().upper()
-    
-    # Remove leading garbage characters / numbers
-    s = re.sub(r'^[^A-Z]+', '', s)
+
+    # Strip leading punctuation and OCR junk, but KEEP leading digits.
+    #
+    # This used to be r'^[^A-Z]+', which also ate the number in a company name.
+    # "7190 HOLDINGS LLC" became "HOLDINGS", "1347 PRODUCE LLC" became
+    # "PRODUCE" — and because South Florida property companies are routinely
+    # named after their street number, 47 unrelated firms collapsed into a
+    # single fictional "INVESTMENTS" entity and 45 into "HOLDINGS". Their
+    # profiles, volumes and rankings summed businesses with nothing to do with
+    # each other. Measured 2026-09-14: 1,752 filings across 1,113 companies.
+    #
+    # Keeping digits fixes that without fragmenting any real institution —
+    # US BANK still gathers its 236 spellings, CITIBANK 67, JPMORGAN CHASE 57.
+    s = re.sub(r'^[^A-Z0-9]+', '', s)
+
+    # A LEADING ZERO, though, is never part of a company name — it is a filing
+    # sequence number or OCR damage, and stripping it lets the spellings gather:
+    #   "001 FOUNDATIONAL FAMILY REVOCABLE TRUST" -> the bare trust name
+    #   "0 0WELLS FARGO BANK NA"                  -> WELLS FARGO
+    #
+    # Magnitude was tried as the discriminator — strip anything under 100 as a
+    # "sequence prefix" — and the data rejected it. Two-digit and even
+    # single-digit leading numbers are overwhelmingly real street numbers here:
+    # "10 COLEE LLC", "11 SOUTH LLC", "12 WEST 29 STREET LLC", "1 OAK RICHLAND
+    # LLC", "1 DOLLAR PLUS LLC". That rule would have turned "11 SOUTH LLC" into
+    # "SOUTH" and recreated the exact merge it was meant to fix.
+    #
+    # So only leading zeros go. The residual cost is that "1 SHARPE OPPORTUNITY
+    # TRUST" stays separate from "SHARPE OPPORTUNITY TRUST" where the 1 really
+    # was noise. That is the right way to be wrong: a split entity is visible on
+    # the Entities page and mergeable there by hand, whereas a false merge
+    # fabricates a company nobody can spot.
+    s = re.sub(r'^0[\d\s]*(?=[A-Z])', '', s)
+    pre_suffix = s
     
     # Check manual overrides first (before stripping suffixes)
     for pat, canon in _OVERRIDE_RES:
@@ -871,6 +902,13 @@ def canonicalize(name: str) -> str:
     # If nothing left, use original
     if not s:
         s = name.strip().upper()
+
+    # Suffix stripping can leave a bare number: "1104 LLC" -> "1104". That is
+    # accurate but useless in an entity list, and unlike the old behaviour it
+    # does not merge anything, so the form WITH the suffix is kept instead.
+    # 97 names hit this.
+    if re.fullmatch(r'[\d\s\-.]+', s or ''):
+        s = pre_suffix or s
     
     if not s:
         return 'UNKNOWN'

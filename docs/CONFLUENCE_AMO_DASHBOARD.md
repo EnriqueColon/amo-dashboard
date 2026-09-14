@@ -259,12 +259,18 @@ analytics header, a participant-activity breakdown and a time-series chart.
   the document, not a review verdict. Anything you mark by hand overrides it. *(Corrected 14 Sep
   2026: before that, collateral and rents filings inherited a loan-transaction label and could read
   "LoanSale", which was wrong on every non-loan row.)*
-- ⚠️ **Company names beginning with a number are currently shortened**, e.g. "7190 Holdings LLC"
-  displays as "Holdings". Worse, unrelated companies with the same remaining word are being counted
-  as one — "Investments" is 22 different firms. **Known bug, not yet fixed**, affecting 1,752 filings
-  across 1,113 companies. It is most visible under Collateral and Rents & leases, where property
-  companies appear; loan transfers are largely between institutions and mostly unaffected. Treat any
-  single-generic-word company name on this page with suspicion until it is fixed.
+- ✅ **Company names beginning with a number now keep it** (fixed 14 Sep 2026). "7190 Holdings LLC"
+  reads as "7190 Holdings" rather than "Holdings". The display was the small half of that problem;
+  the large half was that unrelated firms sharing the leftover word were **counted as one company** —
+  "Investments" was 47 different businesses with their volumes summed. 1,752 filings across 1,113
+  companies, all separated now.
+  *One consequence to know:* where a filing carried a stray leading digit that was genuinely noise,
+  that company may now appear twice. That is deliberate — a duplicate you can see and merge on the
+  Entities page is safer than a merge that invents a company you cannot. Tell an engineer if you spot
+  one and it can be merged permanently.
+- ⚠️ **Names ending "N A" are still split from their proper company** — "Capital One N A" is separate
+  from "Capital One", "U S Bank N A" from "US Bank". **1,084 filings.** Different cause to the above
+  (an abbreviation-matching gap, not numbers) and **not yet fixed**.
 - Search by CFN, assignor or assignee.
 - **Review workflow:** mark a row reviewed/unreviewed; the marking is stored server-side and shared
   by everyone.

@@ -123,6 +123,64 @@ bug — the model choosing among categories — and worth sampling before conclu
 
 ---
 
+## 2026-09-14 (later still) — canonicalize() stopped merging unrelated companies
+
+Follow-on from the owner's screenshot. `canonicalize()` line 852 was
+`re.sub(r'^[^A-Z]+', '', s)` — strip EVERY leading non-letter. Intended for OCR junk, it also ate
+the street number that identifies a South Florida property company:
+
+    7190 HOLDINGS LLC -> HOLDINGS      1347 PRODUCE LLC -> PRODUCE
+    11440 HOUSE LLC   -> HOUSE         150 SE 2ND AVE 709 710 LLC -> SE 2ND AVE 709 710
+
+**1,752 filings / 1,113 companies.** The display damage was cosmetic; the real harm was **merging**:
+`INVESTMENTS` was **47 unrelated firms** counted as one entity, `HOLDINGS` 45. Predates everything
+this week — loan transfers are institution-to-institution, so it stayed hidden until the category
+filter surfaced the collateral population where property LLCs live.
+
+**The first fix was wrong and the data said so.** Keeping all digits over-corrected (one trust split
+across three spellings), so magnitude was tried: strip a leading number under 100 as a "sequence
+prefix". Rehearsed, aggregates looked fine. Then `54 INVESTMENTS LLC` was still collapsing, and
+checking why produced the counter-evidence: `10 COLEE LLC`, `11 SOUTH LLC`,
+`12 WEST 29 STREET LLC`, `11 OCCAM LLC`, `1 OAK RICHLAND LLC`, `1 DOLLAR PLUS LLC` — **small leading
+numbers are overwhelmingly REAL street numbers here.** That rule would have turned `11 SOUTH LLC`
+into `SOUTH` and recreated the same merge for a different set of firms.
+
+**Shipped rule: strip a leading ZERO only** — `001 FOUNDATIONAL FAMILY TRUST` (sequence number),
+`0 0WELLS FARGO BANK NA` (OCR digit-fusion). Everything else stays. Plus a guard so suffix stripping
+cannot leave a bare number (`1104 LLC` stays `1104 LLC`, not `1104`).
+
+**Accepted trade-off, stated explicitly:** where a leading digit really was noise
+(`1 SHARPE OPPORTUNITY TRUST` beside the bare form) the two now stay separate. *A split entity is
+visible on the Entities page and mergeable by hand; a false merge fabricates a company nobody can
+spot.* Be wrong in the direction a human can see.
+
+**Rehearsed on an isolated copy** (`/tmp/rehearse_run`, production checkout never modified):
+
+    entity_nodes  18,383 -> 18,416      US BANK 6,663 · MERS 3,177 · JPM 2,854 · WFC 2,815 unchanged
+    INVESTMENTS / HOLDINGS / HOUSE / PRODUCE / SOUTH / COLEE as entities: NONE remain
+    2026R622700 -> 7190 HOLDINGS · 2026R626510 -> 11440 HOUSE · 2026R628600 -> 1347 PRODUCE
+
+`aom_events_clean` +19 and `credit_facility_events` +1 are **documents extracted since the last
+production normalize**, not an effect of this change — the include decision keys on doc_type and
+doc_category, never on names.
+
+**Guardrails:** `canonicalize_baseline.tsv` regenerated (45,262 names, the project's review artifact)
+and new **`collector/tests/check_leading_numbers.py`** — 22 rules offline, no DB, asserting both
+directions: five different `INVESTMENTS` companies must yield five names, US Bank's spellings must
+yield one. That second assertion is what the old code would have failed.
+
+**A test I wrote was itself wrong, worth remembering:** it asserted `U.S. BANK, N.A.` should merge.
+Checking the data, **zero names contain periods** — the county index stores `U S BANK N A`. An
+invented input tests nothing. *Take fixtures from the data, not from intuition.*
+
+**SEPARATE pre-existing bug found doing that, NOT fixed:** `U S BANK N A` (space between N and A)
+never reaches `US BANK` — the override matches `NA` but not `N A`. Verified identical in the git
+baseline, so it is not a regression. **1,084 filings**: `CAPITAL ONE N A` 140, `U S BANK N A` 77,
+`BANKUNITED N A` 69, `BANK OF NEW YORK MELLON TRUST COMPANY N A` 40, `AMERANT BANK N A` 22. Same
+symptom the owner spotted, different mechanism — an override-pattern gap, not leading numbers.
+
+---
+
 ## ⏭ NEXT SESSION — what is still open (as of 2026-09-11)
 
 **Everything the owner set on 1 Sep is now closed and deployed.** Droplet at `ff75f35`, local clean,
