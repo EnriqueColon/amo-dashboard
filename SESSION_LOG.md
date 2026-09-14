@@ -51,11 +51,26 @@ costs money and ~10 minutes; this one can run on every change.
 
 **Verified:** `21/21` detection + `10/10` facility_type, RESULT PASS, with the classifier live.
 
-**NOT YET APPLIED TO PRODUCTION DATA.** The code is committed and affects new extractions only; the
-625 existing rows keep their old labels until facility extraction is re-run over them. That
-re-run would move **263 documents out of the facility dataset**, which is visible on the Lending
-Relationships tab — owner's call before it happens. `batch_extract_facility.py` selects
-`WHERE px.facility_type IS NULL`, so it will NOT pick these up; a re-run needs a targeted query.
+**NOT YET APPLIED TO PRODUCTION DATA**, pending the owner's go-ahead — it moves **260 documents out
+of the facility dataset**, visible on Lending Relationships.
+
+**The correction needs NO re-extraction.** Asked how long a backfill would take, checked rather than
+estimated: all 625 rows already store `facility_agreement_name` AND `facility_evidence_quote`, and
+`classify_facility_type` is a pure function of exactly those two. So it is arithmetic over columns we
+hold — no downloads, no OCR, no LLM calls. **`collector/reclassify_facility_types.py` (new) does it
+in 0.2s for $0**, with a dry-run default. Dry run on a scratch copy: 324 of 625 rows change →
+warehouse 300 · none 261 · consumer 53 · syndicated 11.
+
+The hour in that job is `normalize.py` rebuilding `credit_facility_events` (~60–85 min, detached),
+then `pm2 restart` for the 7-day response cache. Runbook is in Confluence §6.8.
+
+*Note `batch_extract_facility.py` selects `WHERE px.facility_type IS NULL`, so it would never have
+picked these rows up — a re-extraction route would have needed its own targeted query anyway.*
+
+**What this cannot fix: false negatives.** A document already read as `none` stores no agreement
+name, so nothing can reconsider it without re-extracting all 107,402 documents (~$25, ~a day). Not
+warranted on current evidence. Also still open from §7 item 7: the field-level defects (empty
+`facility_lender_name`, `facility_amount` contradicting its own evidence quote).
 
 ---
 

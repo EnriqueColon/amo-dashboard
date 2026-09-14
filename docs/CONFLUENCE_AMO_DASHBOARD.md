@@ -796,6 +796,40 @@ Two traps here, both of which have caused a wrong "it's finished" call:
 This is the exact sequence Broward followed; each step exists because skipping it caused a specific
 problem.
 
+#### Re-label credit facilities after a classification change
+
+`facility_type` — whether a credit facility is a warehouse line, a syndicated deal or a business
+line of credit — is decided in code from the agreement name the extractor reads off the document
+(`classify_facility_type` in `collector/extract_pdfs.py`). If those rules change, existing rows keep
+their old labels until they are recomputed.
+
+**This costs nothing and takes under a second.** Every row with a facility verdict already stores the
+agreement name and the evidence quote, and the rules are a pure function of those two fields, so
+nothing is downloaded, OCR'd or sent to the model:
+
+```bash
+# report what would change, write nothing
+AMO_DB_PATH=/opt/amo-dashboard/miami_dade_amo.db \
+  collector/.venv/bin/python3 collector/reclassify_facility_types.py
+
+# apply
+AMO_DB_PATH=/opt/amo-dashboard/miami_dade_amo.db \
+  collector/.venv/bin/python3 collector/reclassify_facility_types.py --apply
+```
+
+Then rebuild the derived table and clear the cache, or the Lending Relationships tab keeps showing
+the old grouping for up to seven days:
+
+```bash
+nohup collector/.venv/bin/python3 -u collector/normalize.py > /tmp/norm.log 2>&1 &
+disown          # ~60-85 minutes
+pm2 restart amo-dashboard
+```
+
+**What this cannot do:** recover false negatives. A document the extractor already read as *not* a
+facility stores no agreement name, so nothing here can reconsider it — that needs re-extracting
+every document, which is a day and roughly $25.
+
 #### Apply approved entity merges
 
 ```bash
@@ -1207,6 +1241,27 @@ instruments. 19 rows have no lender name. Worth a targeted prompt fix, not a re-
 reading, not in the classification. Both rows carry it. Any future audit should key on *incoherence
 between fields* — a "revolving facility" with a fixed `loan_amount`, an amount that contradicts its
 own evidence quote — rather than on the confidence column.
+
+**UPDATE 14 Sep 2026 — the classification half of this is fixed, and it was far larger than two
+rows.** `facility_type` was decided by the model, and it put **623 of 625 documents** in
+`warehouse_or_revolving_credit_facility`, 2 in any other category, and **none at all** in
+`syndicated_credit_agreement`. Documents whose own agreement name read "Commercial *Non-Revolving*
+Line of Credit" came back as revolving, and 101 whose only named agreement was "Security Instrument"
+or "Mortgage" — ordinary conveyancing paperwork — came back as credit facilities.
+
+The decision now happens in code rather than in the prompt, because adding explicit rules to the
+prompt fixed only 6 of 16 sampled cases: the model is reliable at reading the agreement *name* off
+the document and unreliable at judging the *category*. `2026R268269`, the SBA 504 debenture named
+above, is correctly resolved to "not a facility" by the new rules. Recomputing every existing row
+gives **warehouse 300 · not a facility 261 · business line of credit 53 · syndicated 11**.
+
+This had survived since the feature shipped because the verification gate compared only "facility"
+against "not a facility" and never checked which type was chosen — *a field no test asserts is a
+field nothing protects*. `collector/tests/check_facility_type.py` now guards the rules offline.
+
+⏳ **Existing rows still carry the old labels** until the recompute in §6.8 is run — under a second,
+but it moves 260 documents out of the facility dataset and so is an owner's call. **The field-level
+defects described above (empty lender name, amount contradicting its own quote) are NOT fixed.**
 
 **8a. Backups are taken and verified, but not yet off-box.** As of 15 Aug 2026 `run_backup.sh` runs
 nightly at 03:15, takes an online-API snapshot, integrity-checks it, asserts it is non-empty, gzips
