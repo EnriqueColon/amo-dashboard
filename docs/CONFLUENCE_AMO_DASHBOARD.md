@@ -1,6 +1,6 @@
 # AMO Tracker — Mortgage Assignment Intelligence Dashboard
 
-> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 11 Sep 2026
+> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 14 Sep 2026
 > **Production URL:** `http://165.22.35.75:5000` (single shared password)
 > **Repository:** `amo-dashboard` (`origin/main`)
 
@@ -656,6 +656,7 @@ AMO_DB_PATH=./prod_snapshot.db collector/.venv/bin/python3 collector/tests/check
 | `check_entity_names_parity.py` | The shared address book reproduces the legacy normalize functions exactly |
 | `check_alias_scope.py` | Alias scoping rules behave — note aliases are applied **after** suffix stripping |
 | `check_broward_heartbeat.py` | The Broward daily job's heartbeat separates "ran and found nothing new" (normal every weekend) from "stopped running". Stubs the SFTP layer — no network needed |
+| `check_facility_type.py` | The rules deciding whether a credit facility is a warehouse line, a syndicated deal or a business line of credit. **Offline — no API key, no network, instant**, unlike the integration gate. Includes a negative control. Exists because the model used to put 623 of 625 documents in one bucket and no test was watching that field |
 | `check_doc_type_scope.py` | Non-assignment doc types (`FST`) never reach `aom_events_clean` or the entity signal sweep, while `AMO`/`ASG`/legacy `NULL` rows still do. Runs on an in-memory fixture **plus a negative control** — production had zero FST rows when it was written, so a live-only check would have passed while asserting nothing |
 | `diff_name_systems.py`, `show_merge_proposals.py` | Diagnostics for reviewing name-matching decisions |
 

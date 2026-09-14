@@ -4,6 +4,61 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-09-14 — facility_type: the model was not the right tool for the judgement
+
+**The bug, measured:** 623 of 625 production rows read
+`warehouse_or_revolving_credit_facility`, 2 read anything else, and
+`syndicated_credit_agreement` had **zero** rows despite being offered. Consistent across all four
+years, so not a regression — it shipped that way.
+
+**Why the 21/21 gate never caught it.** `verify_integration.py` compared only
+`ftype not in (None, 'none')` — detection, never the type. *A field no test asserts is a field
+nothing protects.* The gate now asserts `facility_type` for the ten known warehouse documents.
+
+**Root cause in the prompt:** `FACILITY_SYSTEM_PROMPT` gave ~30 lines on WHETHER a facility exists
+and **zero guidance on choosing among the four types** — they appeared only in the JSON schema. Its
+single worked example ended `facility_type="warehouse_or_revolving_credit_facility"`, anchoring the
+model to the value listed first in the enum.
+
+**Adding type rules to the prompt was NOT enough — 6 of 16 sampled failures fixed.** Documents whose
+own name read "Commercial NON-Revolving Line of Credit" still came back revolving, and
+"Security Instrument" still came back as a facility, with explicit rules for both in the prompt.
+gpt-4.1-nano does not reliably apply a rule list that long.
+
+**So the judgement moved out of the model.** `classify_facility_type(agreement_name, evidence_quote)`
+in `extract_pdfs.py` is a pure function, called from the shared `postprocess_facility()` so the
+real-time and Batch API paths cannot drift. The model still extracts — it is good at that, the
+agreement names in production are accurate and specific — and code decides the category.
+**End-to-end this fixes 15 of 16**, and the prompt improvements were kept (they cost nothing).
+
+Distribution over all 625 existing rows, applying the rules to fields already in the DB:
+
+    warehouse   623 -> 298      none        0 -> 263
+    consumer      2 ->  53      syndicated  0 ->  11
+
+**Two rules that only real data would have taught:**
+- `facility_agent_name` is **not** trustworthy as a syndication signal — it holds the bare string
+  `'Agent'` and property-company names like `'Slate Property Group'`. Requiring the agent PHRASE in
+  the name or evidence took syndicated from an implausible 33 to a defensible 11.
+- The warehouse pattern must be **OCR-tolerant**: `Warchouse Mortgage Loan and Security Agreement`
+  is a real production value (tesseract reads the 'e' as 'c') and a strict `warehous` drops that
+  document — one the 21/21 gate covers — to `none`. Pattern is now `wa?r[ec]h[o0][uv]s`.
+
+**New: `collector/tests/check_facility_type.py`** — 23 rules asserted against real production
+agreement names, **offline, no API key, no network, instant**, with a negative control that disables
+the warehouse rule and requires the canonical case to stop passing. The existing integration gate
+costs money and ~10 minutes; this one can run on every change.
+
+**Verified:** `21/21` detection + `10/10` facility_type, RESULT PASS, with the classifier live.
+
+**NOT YET APPLIED TO PRODUCTION DATA.** The code is committed and affects new extractions only; the
+625 existing rows keep their old labels until facility extraction is re-run over them. That
+re-run would move **263 documents out of the facility dataset**, which is visible on the Lending
+Relationships tab — owner's call before it happens. `batch_extract_facility.py` selects
+`WHERE px.facility_type IS NULL`, so it will NOT pick these up; a re-run needs a targeted query.
+
+---
+
 ## ⏭ NEXT SESSION — what is still open (as of 2026-09-11)
 
 **Everything the owner set on 1 Sep is now closed and deployed.** Droplet at `ff75f35`, local clean,

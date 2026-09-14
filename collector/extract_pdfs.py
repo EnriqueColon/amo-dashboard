@@ -164,7 +164,45 @@ warranty, expressed or implied, except as may otherwise be expressly set forth i
 has_facility_language=true (facility_type="warehouse_or_revolving_credit_facility", \
 facility_agreement_name="Warehouse Agreement", facility_agreement_date="March 29, 2016") — the \
 parenthetical "(Warehouse Agreement)" is itself a named facility agreement, even though the \
-sentence is short and mentions it only in passing.
+sentence is short and mentions it only in passing. Note that this example settles only \
+has_facility_language; the facility_type happens to be a warehouse one here because the agreement \
+is named "Warehouse Agreement", NOT because warehouse is a default.
+
+CHOOSING facility_type. Decide this INDEPENDENTLY of the examples above — they \
+illustrate detection, not type. Pick by who the borrower is and what the agreement actually says:
+
+"warehouse_or_revolving_credit_facility" — the borrower is ITSELF a lending business \
+(a mortgage originator, lender or fund) borrowing against mortgages or notes it holds. \
+Hallmarks: "warehouse", "warehousing", "Pledged Loans", "borrowing base", "Master Repurchase \
+Agreement", or an explicitly REVOLVING loan to a lender.
+
+"syndicated_credit_agreement" — MULTIPLE lenders act together through an agent. \
+Hallmarks: a party acting "as Administrative Agent" or "as Collateral Agent" FOR THE LENDERS, \
+"the Lenders", "Lead Arranger", or a "Credit Agreement" naming an agent bank. If an agent acts \
+for a group of lenders, choose this over warehouse even when the word "revolving" appears.
+
+"consumer_or_business_line_of_credit" — a SINGLE lender extends a line of credit to an \
+individual or to an operating business that is NOT in the lending trade. \
+Hallmarks: "Home Equity Line of Credit", "HELOC", "Equity Reserve", "Commercial Line of Credit", \
+or a line of credit to a named natural person or an operating company (a restaurant, a contractor, \
+a property owner).
+
+"none" — use whenever has_facility_language is false.
+
+Three rules that override everything else, because these mistakes are common:
+1. If the text describes the credit as "NON-REVOLVING" (e.g. "Commercial Non-Revolving Line of \
+Credit"), it is NOT "warehouse_or_revolving_credit_facility". A non-revolving line to an operating \
+business is "consumer_or_business_line_of_credit".
+2. If the ONLY agreement named is a generic security instrument — "Mortgage", "Security \
+Instrument", "Deed of Trust", "Note", "Assignment" — that is standard conveyancing boilerplate, \
+NOT a facility. Set has_facility_language=false and facility_type="none".
+3. A bare "Construction Loan Agreement", "Loan Agreement" or "Loan and Security Agreement" with no \
+revolving/warehouse/agent language and no lending-business borrower is a single term loan, not a \
+facility. Set has_facility_language=false and facility_type="none".
+
+Do not default to "warehouse_or_revolving_credit_facility". It is the right answer only when the \
+borrower is a lending business, and it is genuinely the minority of line-of-credit documents \
+recorded against residential property.
 
 Respond with a JSON object with exactly these fields:
 {
@@ -493,6 +531,71 @@ def postprocess_extraction(data: dict) -> dict:
     return data
 
 
+# ── Facility type: decided in code, not by the model ──────────────────────────
+# The model extracts the agreement name accurately and judges the CATEGORY
+# badly. Before 2026-09-12 it put 623 of 625 production rows in
+# warehouse_or_revolving_credit_facility, with 2 in any other bucket and zero
+# syndicated — including documents whose own agreement name read "Commercial
+# NON-Revolving Line of Credit" and 101 whose only named agreement was
+# "Security Instrument" or "Mortgage", i.e. ordinary conveyancing boilerplate.
+#
+# Adding explicit type rules to FACILITY_SYSTEM_PROMPT helped but fixed only 6
+# of 16 sampled failures: gpt-4.1-nano does not reliably apply a rule list that
+# long. So the judgement moved here, where it is deterministic, free, and
+# testable offline against the fields already in the database.
+# collector/tests/check_facility_type.py asserts these rules with no API calls.
+_FAC_GENERIC = re.compile(
+    r'^\s*(the\s+)?('
+    r'mortgage( note| and note)?|security instrument|deed of trust|note|'
+    r'promissory note|assignment( of mortgage)?|loan documents?|'
+    r'security agreement|operator security agreement'
+    r')\s*$', re.I)
+_FAC_NON_REVOLVING = re.compile(r'non[-\s]?revolving', re.I)
+# The spelling is deliberately OCR-tolerant. "Warchouse Mortgage Loan and
+# Security Agreement" is a real production value — tesseract reads the 'e' as a
+# 'c' — and a strict r'warehous' drops that document to none, which would also
+# fail the 21/21 integration gate that covers it.
+_FAC_WAREHOUSE = re.compile(
+    r'wa?r[ec]h[o0][uv]s|pledged loans|master repurchase|borrowing base|repurchase agreement',
+    re.I)
+# The agent PHRASE, not the facility_agent_name field — that field holds values
+# like the bare word "Agent" and property-company names, and trusting it put 33
+# documents in the syndicated bucket where only 11 belong.
+_FAC_SYNDICATED = re.compile(
+    r'administrative agent|collateral agent|as agent for|the lenders|lead arranger|syndicat', re.I)
+_FAC_CONSUMER = re.compile(
+    r'home equity|heloc|equity reserve|line of credit|line-of-credit|personal line', re.I)
+_FAC_TERM_ONLY = re.compile(
+    r'^\s*(construction loan agreement|loan agreement|loan and security agreement|'
+    r'business loan agreement|term loan agreement)\s*$', re.I)
+
+
+def classify_facility_type(agreement_name: str | None,
+                           evidence_quote: str | None) -> tuple[str, str]:
+    """Return (facility_type, reason). Pure function of two extracted strings."""
+    name = (agreement_name or '').strip()
+    blob = ' '.join(x for x in (agreement_name, evidence_quote) if x)
+
+    if name and _FAC_GENERIC.match(name):
+        return 'none', 'generic instrument'
+    if _FAC_NON_REVOLVING.search(blob):
+        # Explicitly non-revolving cannot be the revolving bucket. Reroute to a
+        # line of credit only if it actually is one — a "Construction Loan
+        # Agreement" that says non-revolving is a term loan, not a line.
+        if _FAC_CONSUMER.search(blob):
+            return 'consumer_or_business_line_of_credit', 'non-revolving line'
+        return 'none', 'non-revolving term loan'
+    if _FAC_WAREHOUSE.search(blob):
+        return 'warehouse_or_revolving_credit_facility', 'warehouse language'
+    if _FAC_SYNDICATED.search(blob):
+        return 'syndicated_credit_agreement', 'agent for lenders'
+    if _FAC_CONSUMER.search(blob):
+        return 'consumer_or_business_line_of_credit', 'line of credit'
+    if name and _FAC_TERM_ONLY.match(name):
+        return 'none', 'single term loan'
+    return 'none', 'no facility marker'
+
+
 def postprocess_facility(raw: dict) -> dict:
     """Validate/coerce a raw parsed facility-extraction JSON response.
 
@@ -522,6 +625,16 @@ def postprocess_facility(raw: dict) -> dict:
 
     if data['facility_type'] not in VALID_FACILITY_TYPES:
         data['facility_type'] = 'none'
+
+    # The model's own facility_type is discarded in favour of the rules above.
+    # It is kept only to the extent that a model verdict of "none" still means
+    # none — the rules decide which KIND of facility, never whether to invent
+    # one where the model saw nothing.
+    if data['facility_type'] != 'none':
+        decided, reason = classify_facility_type(
+            raw.get('facility_agreement_name'), raw.get('evidence_quote'))
+        data['facility_type'] = decided
+        data['facility_type_reason'] = reason
 
     val = data['facility_amount']
     if isinstance(val, str):
