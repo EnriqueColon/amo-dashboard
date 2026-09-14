@@ -254,6 +254,17 @@ analytics header, a participant-activity breakdown and a time-series chart.
   mean the opposite thing: on an assignment the first party is the institution selling the loan, on a
   UCC filing it is the borrower. Mixing them would put property owners into the seller rankings.
   They will get their own view.
+- **The Class column says what the document is.** For a loan sale it reads *LoanSale*; for the other
+  categories it reads *Collateral*, *Rents & leases* or *Other* in neutral grey — a statement about
+  the document, not a review verdict. Anything you mark by hand overrides it. *(Corrected 14 Sep
+  2026: before that, collateral and rents filings inherited a loan-transaction label and could read
+  "LoanSale", which was wrong on every non-loan row.)*
+- ⚠️ **Company names beginning with a number are currently shortened**, e.g. "7190 Holdings LLC"
+  displays as "Holdings". Worse, unrelated companies with the same remaining word are being counted
+  as one — "Investments" is 22 different firms. **Known bug, not yet fixed**, affecting 1,752 filings
+  across 1,113 companies. It is most visible under Collateral and Rents & leases, where property
+  companies appear; loan transfers are largely between institutions and mostly unaffected. Treat any
+  single-generic-word company name on this page with suspicion until it is fixed.
 - Search by CFN, assignor or assignee.
 - **Review workflow:** mark a row reviewed/unreviewed; the marking is stored server-side and shared
   by everyone.

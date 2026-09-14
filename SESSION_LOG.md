@@ -74,6 +74,55 @@ warranted on current evidence. Also still open from §7 item 7: the field-level 
 
 ---
 
+## 2026-09-14 (later) — owner spotted a false label on the Reporting tab
+
+Owner, from a screenshot of the Collateral view: *"Is this an error?"* Yes — two, one of them mine.
+
+### FIXED: the Class column asserted "LoanSale" about documents that were not loan sales
+`deriveClassification()` reads `txn_type`, which is only meaningful for loan transfers. That was a
+safe assumption until 2026-09-11, because the table held nothing else **by construction**. The
+`Shows` filter broke it: CFN `2026R626049` is an **ASSIGNMENT OF RENTS**, `doc_category=COLLATERAL`,
+`txn_type=ORIGINATION` — and the column read **LoanSale**. Scale: **13,721** collateral rows carry
+`PRIVATE` and **3,399** `ORIGINATION`, so the label was wrong on every non-loan row.
+
+A row that is not a loan transfer now states its category (`Collateral` / `Rents & leases` /
+`Other`), styled neutral grey — these are facts about the document, not review verdicts, and
+colouring them like verdicts would imply a judgement nobody made. A manual `classification` still
+wins over everything. Verified: the mixed "All documents" view shows 36 LoanSale beside Collateral,
+Rents & leases and Other on one page, each correct. **Exports were never affected** — they write the
+raw `classification` column and never derived a label.
+
+*Lesson: a derived display value carries an assumption about its input set. Widening the set is
+exactly when that assumption silently becomes a lie, and it renders as confident text.*
+
+### NOT FIXED, and worse than it looks: canonicalize() mangles and MERGES property LLCs
+The same screenshot showed assignors reading `YTA`, `HOUSE`, `PRODUCE`, `HOLDINGS`,
+`SE 2ND AVE 709 710`. `canonicalize()` strips leading numbers:
+
+    7190 HOLDINGS LLC -> HOLDINGS    11440 HOUSE LLC -> HOUSE
+    1347 PRODUCE LLC  -> PRODUCE     150 SE 2ND AVE 709 710 LLC -> SE 2ND AVE 709 710
+
+**1,752 filings across 1,113 distinct companies** lose a leading number. The display damage is
+cosmetic; the real harm is **merging unrelated firms**: `INVESTMENTS` is **22 different companies**
+(748 / 2325 / 1051 / 3624 / 25800 / 691 INVESTMENTS LLC …) counted as one entity, `HOLDINGS` is 15.
+Any entity profile or ranking for those names sums unrelated businesses.
+
+**This PREDATES all of this week's work** — but it was effectively hidden, because loan transfers are
+institution-to-institution and rarely involve property LLCs. The category filter surfaced precisely
+the population where it bites. It is also the exact trap that was avoided on the UCC page
+(`10820 INVESTMENTS LLC` vs `11140 INVESTMENTS LLC`) — the miss was not checking whether the same
+function was already doing it to the assignment data.
+
+**Fix needs care, not a quick patch:** don't strip a leading number when what remains is a generic
+word, then rehearse on a snapshot, then a full `normalize.py`. It touches `entity_nodes`,
+`entity_relationships` and every entity page.
+
+### NOT INVESTIGATED: "ASSIGNMENT OF RENTS" categorised COLLATERAL
+`2026R626049` again. Plausibly should be `RENTS_LEASES`. Same class of problem as the facility_type
+bug — the model choosing among categories — and worth sampling before concluding.
+
+---
+
 ## ⏭ NEXT SESSION — what is still open (as of 2026-09-11)
 
 **Everything the owner set on 1 Sep is now closed and deployed.** Droplet at `ff75f35`, local clean,

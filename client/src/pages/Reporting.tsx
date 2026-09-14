@@ -39,8 +39,30 @@ function cleanField(v: string | null | undefined, isAddress = false): string | n
   return v.trim();
 }
 
+// What KIND of transaction this is. Only meaningful for loan transfers, and
+// until 2026-09-14 that was a safe assumption because the table held nothing
+// else — every row was a loan transfer by construction.
+//
+// Adding the Shows filter broke it. A collateral assignment has a txn_type like
+// PRIVATE or ORIGINATION, which this function happily rendered as "LoanSale":
+// CFN 2026R626049 is an ASSIGNMENT OF RENTS, categorised COLLATERAL, and the
+// column read LoanSale. 13,721 collateral rows carry txn_type PRIVATE and 3,399
+// ORIGINATION, so the label was wrong on every one of them.
+//
+// A row that is not a loan transfer now says what it actually is. txn_type is
+// still computed for these rows and still visible in its own column — this only
+// stops a loan-sale verdict being asserted about a document that never was one.
+const NON_LOAN_LABEL: Record<string, string> = {
+  COLLATERAL:   'Collateral',
+  RENTS_LEASES: 'Rents & leases',
+  OTHER:        'Other',
+};
+
 function deriveClassification(row: any): string {
+  // A human's manual review always wins, whatever the document is.
   if (row.classification) return row.classification;
+  const nonLoan = NON_LOAN_LABEL[row.doc_category];
+  if (nonLoan) return nonLoan;
   if (row.txn_type === 'MERS_RELEASE') return 'WarehouseRelease';
   if (['MARKET_TRANSFER', 'ORIGINATION', 'INSTITUTIONAL_OUT'].includes(row.txn_type)) return 'LoanSale';
   return 'NeedsReview';
@@ -50,6 +72,12 @@ const CLASS_STYLE: Record<string, string> = {
   LoanSale:         'bg-emerald-100 text-emerald-700 border-emerald-200',
   WarehouseRelease: 'bg-blue-100 text-blue-700 border-blue-200',
   NeedsReview:      'bg-amber-100 text-amber-700 border-amber-200',
+  // Neutral on purpose. These are statements of fact about the document, not
+  // review verdicts, and colouring them like verdicts would imply a judgement
+  // nobody made.
+  'Collateral':     'bg-slate-100 text-slate-600 border-slate-200',
+  'Rents & leases': 'bg-slate-100 text-slate-600 border-slate-200',
+  'Other':          'bg-slate-100 text-slate-600 border-slate-200',
 };
 
 const TYPE_COLOR: Record<string, string> = {
