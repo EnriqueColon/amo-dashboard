@@ -4,6 +4,86 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-09-15 (later) — "Collateral" now means collateral: 6,040 rent assignments moved out
+
+The second half of the same bucket. Last night's fix pulled 9,604 loan sales **out** of COLLATERAL;
+this one pulls out the rent and lease assignments, which were the majority of what remained.
+
+**What they were.** 6,040 filings that are ordinary property-level security instruments — a landlord
+assigning tenant rents to its own lender, recorded alongside the mortgage. Six were fetched and read
+first, and all six said the same thing:
+
+> "Grantor hereby assigns, **grants a continuing security interest** in, and conveys to Lender all of
+> Grantor's right, title, and interest in and to **the Rents** … THIS ASSIGNMENT IS GIVEN TO SECURE
+> (1) PAYMENT OF THE INDEBTEDNESS"
+
+No loan changes hands and no loan is pledged. While they sat in COLLATERAL they outnumbered the
+genuine pledges **four to one**, which is what made that filter useless for its actual purpose —
+seeing who finances whom.
+
+**Not one population, four.** The sizing query alone would have produced the wrong rule. 24
+documents were read across the four title shapes before anything was written:
+
+    A  "ASSIGNMENT OF RENTS"                     1,404  → RENTS_LEASES  (plain rents pledge)
+    B  "COLLATERAL ASSIGNMENT OF LEASES/RENTS"   2,138  → RENTS_LEASES  (same thing, "collateral" is
+                                                                         the manner, not the asset)
+    C  "…RIGHT TO COLLECT ASSESSMENTS…"            437  → stays COLLATERAL — a condo association
+                                                          pledging receivables to a bank for its own
+                                                          borrowing is exactly what the bucket means
+    D  "ASSIGNMENT OF MORTGAGE" under ASG/AST       ~300 → LOAN_TRANSFER (6/6 sampled were outright
+                                                          transfers to servicers and trustees)
+
+**The cheap half.** The deciding question is *what is being assigned*, and the recorded title states
+it — so this needed **no downloads, no OCR and no LLM**, just `doc_title`, a column already stored.
+Seconds, against six hours for last night's equivalent. `reclassify_rents.py`, judgment in
+`extract_pdfs.reclassify_rents_by_title`. A **regex, not a list of titles**: the population is 365
+spellings of the same few instruments, much of it OCR damage — `COLEATERAL`, `COELATERAL`,
+`COLLATERALASSIGNMENT`, `ASSIGNMENT OF-RENTS`. An exact-match list would have missed hundreds.
+
+**Two traps, both asserted in `check_doc_category.py` rather than assumed:**
+
+1. **"Collateral" in a title describes the manner, not the asset.** `COLLATERAL ASSIGNMENT OF LEASES
+   AND RENTS` (828 rows) is still a rents instrument. Reading it the other way would have left the
+   largest single group in place.
+2. **The text test's `LOAN_TRANSFER` fallback reads absence of pledge language as a conveyance** —
+   only sound once the subject is known to be a debt instrument. AMO's doc type guarantees that; the
+   generic **ASG does not**, since it also carries permits, contracts and development rights.
+   Extending the text test to ASG without gating it on the title naming a debt instrument would have
+   filed **building permits as loan sales** into Reporting's default view. Hence
+   `_cat_text_eligible()`, and negative controls for `ASSIGNMENT OF PERMITS AND AGREEMENTS`,
+   `ASSIGNMENT OF AGREEMENTS AFFECTING REAL ESTATE` and a bare `ASSIGNMENT`.
+
+**One near-miss worth keeping.** The first draft reused the new broad title regex for the *body*
+test. A bare `\bLEASES?\b` against a full OCR body fires on nearly every commercial mortgage
+assignment ever recorded — they routinely recite the leases they sweep in — which would have
+silently stopped last night's AMO transfer correction from working on new documents. The body
+pattern is now deliberately separate and narrow (`_CAT_RENTS_BODY`), with a comment saying why.
+
+**Result (Miami-Dade + Broward, 2026-09-15 23:00 UTC):**
+
+    ASG   COLLATERAL   7,547 → 1,671        ASG RENTS_LEASES   5,896 → 11,773
+    AMO   COLLATERAL   1,842 → 1,771        AST COLLATERAL       372 →    279
+    UCC   COLLATERAL  20,522 → 20,522  ← unchanged, and that is the guardrail
+
+UCC is excluded by **doc type, before its title is read**: two of its titles do mention leases, and
+all 20,522 of its filings genuinely are collateral records. `check_doc_category.py` now asserts that
+with a lease-titled UCC fixture.
+
+**Evidence is stored this time.** The 447 affirmed-collateral rows carry a `doc_category_evidence`
+quote saying why they survived a pass that moved 6,000 of their neighbours. The test distinguishes a
+verdict the rule **affirmed** (must cite evidence) from one it merely **declined to overturn** (must
+not) — `DECLINED_TO_DECIDE`. Inventing a citation for a verdict nothing supports is how the original
+bug read from the outside.
+
+**Operational note.** The chained run's phase 2 failed first time because the droplet's checkout
+predated the `--doc-types` commit — `git pull` on the droplet is a step, not an assumption, and the
+phases are chained precisely so a half-written `doc_category` never reaches `normalize.py`. Rerun
+launched waiting on the first chain's PID.
+
+Commits `a09622e`, `fe6288b`.
+
+---
+
 ## 2026-09-14 — facility_type: the model was not the right tool for the judgement
 
 **The bug, measured:** 623 of 625 production rows read

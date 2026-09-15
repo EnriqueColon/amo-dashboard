@@ -990,6 +990,12 @@ assignment category was ever missing. Along the way:
 - The **Reporting tab now filters by document type and by what a document actually is**, and every
   number on that page counts the same rows, which had not previously been true.
 
+**On 15 Sep 2026 the document classifier was corrected twice**, in both directions. 9,604 ordinary
+loan sales had been filed as "collateral" and were missing from Reporting entirely; they are back.
+Then 6,040 rent assignments that had been filed the same way were moved to the Rents & leases view,
+which is what they are. The net effect is that **each of the Reporting tab's views now contains what
+its name says** — see the two boxed notes in §7.2 before comparing against any earlier report.
+
 ### 7.2 Production data
 
 | Scope | Filings indexed | Loan transfers | Other assignments | Entities |
@@ -1007,6 +1013,48 @@ correction, not new data.**
 and leases, which were collected and read but previously had nowhere to appear. They live in their
 own table and are reachable from the Reporting tab's *Shows* filter. They are **not** counted in
 loan transfers, so no figure above double-counts and nothing published earlier has changed meaning.
+
+> ### The **Collateral** filter was mostly not collateral — corrected 15 Sep 2026
+>
+> **If you used the Reporting tab's *Collateral* view before 15 Sep 2026, re-run it.** It was
+> showing roughly five times more rows than it should have, and most of them were the wrong kind of
+> document.
+>
+> **What that filter is for.** A *collateral assignment* is a lender pledging loans it already owns
+> to **its own** lender — a mortgage company posting its loan book against a warehouse line, for
+> example. That is a competitive signal: it shows who is financing whom, and at what scale.
+>
+> **What was actually in it.** 6,040 filings that are something quite different and far more
+> ordinary: a landlord assigning the rent from its tenants to the bank that just financed the
+> building. Nobody is buying or pledging a loan; it is routine paperwork filed alongside almost
+> every commercial mortgage. They outnumbered the real collateral pledges about four to one, so the
+> signal the filter exists to show was buried in them.
+>
+> **Why they were mislabelled.** Many are titled *"Collateral Assignment of Leases and Rents"*. The
+> word "collateral" there describes *how* the assignment works, not *what* is being assigned — and
+> what is being assigned is rent, not a loan. The classifier had been reading the word and not the
+> distinction.
+>
+> **What changed.** Those 6,040 filings moved to the **Rents & leases** view, where they belong and
+> where they were always visible under that filter's proper heading. Nothing was deleted and nothing
+> left the tool. One group was deliberately **kept** in Collateral: 437 filings where a condominium
+> association pledges its assessment income to a bank to secure its own borrowing — that genuinely
+> is an owner pledging an asset for a loan.
+>
+> **What this does not affect.** **Loan transfers are unchanged by this correction**, because these
+> documents were never counted as loan sales. The **UCC Filings** page is unchanged — all 20,522 of
+> its collateral records are correctly labelled, and are excluded from this correction by design.
+>
+> | Reporting → *Shows* | Before | After |
+> |---|---|---|
+> | Collateral | ~9,761 | ~3,721 |
+> | Rents & leases | ~6,111 | ~12,151 |
+> | UCC Filings page | 20,522 | 20,522 (unchanged) |
+>
+> This is the second half of the same problem as the loan-transfer correction described below: the
+> Collateral bucket had become a catch-all. Both halves are now settled by rules in code, with the
+> reasoning recorded in `collector/tests/check_doc_category.py`, rather than left to the document
+> reader's judgement.
 
 Miami-Dade's filing count grew from 71,366 to 105,598 because **UCC financing statements
 (32,759) were added on 9–10 Sep 2026**. Those are secured-lending records, not assignments, and are
