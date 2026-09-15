@@ -181,6 +181,39 @@ symptom the owner spotted, different mechanism — an override-pattern gap, not 
 
 ---
 
+## 2026-09-14 (last) — spaced abbreviations: "U S BANK N A" now reaches US BANK
+
+The gap found while writing the previous fix's test. `STRIP_SUFFIXES` had `r'\bN\.?A\.?\b'` —
+an optional PERIOD between the letters, never a space — and the county records these letter by
+letter. So `U S BANK NA` canonicalised to `US BANK` while `U S BANK N A` did not, leaving one
+institution in two places. **1,084 filings**: `CAPITAL ONE N A` 140, `U S BANK N A` 77,
+`BANKUNITED N A` 69, `BANK OF NEW YORK MELLON TRUST COMPANY N A` 40, `AMERANT BANK N A` 22.
+
+Bigger than just N A once measured: **5,326** name occurrences end in ` N A`, plus `L L C` 127,
+`P A` 33, `F S B` 19 — and mid-string forms like `CITIBANK N A AS TRUSTEE`,
+`COMPUTERSHARE TRUST CO N A TRU`. Added `\bN\s+A\b`, `\bL\s+L\s+C\b`, `\bF\s+S\s+B\b`,
+`\bP\s+A\b` as SEPARATE patterns rather than loosening the existing ones to `[\s.]?`, which would
+also match the start of a two-word phrase like "N A REALTY"; separate lines stay reviewable.
+
+**That alone was not enough.** Overrides run BEFORE suffix stripping, and the US Bank override
+required a TRUST/NA/NATIONAL suffix: `U\.?\s*S\.?\s*BANK\s+NA|...`. With ` N A` present it
+matched nothing, fell through, stripped to `U S BANK`, and stopped — still not `US BANK`. Loosened to
+`U\.?\s*S\.?\s*BANK\b`, which the data says is safe: every `U*S*BANK*` name in production is a
+US Bank variant (`N A CO`, `N TRU`, `NAL ASSN`, `NAT TRU`, `TRUSY N A` — OCR for TRUST), **`BANK`
+must follow `U S` directly so `U S CENTURY BANK` is untouched**, and `\b` keeps it clear of
+`U S BANKRUPTCY COURT`. Both are asserted in the test.
+
+Effect over the 45,262-name baseline: **278 names change, distinct canonical names 37,404 → 37,291
+(-113)** — merging, the opposite direction to the leading-number fix, as intended.
+`US BANK` absorbs **+32** spellings, `TERRABANK` +3, `AMERANT BANK` +2, `BANKUNITED` +2.
+
+Production still shows **58 entities ending in ` N A`**; they clear on the next `normalize.py`.
+
+*Two fixes, opposite directions, same root complaint from one screenshot: names that should be one
+were many, and names that should be many were one.*
+
+---
+
 ## ⏭ NEXT SESSION — what is still open (as of 2026-09-11)
 
 **Everything the owner set on 1 Sep is now closed and deployed.** Droplet at `ff75f35`, local clean,

@@ -268,9 +268,12 @@ analytics header, a participant-activity breakdown and a time-series chart.
   that company may now appear twice. That is deliberate — a duplicate you can see and merge on the
   Entities page is safer than a merge that invents a company you cannot. Tell an engineer if you spot
   one and it can be merged permanently.
-- ⚠️ **Names ending "N A" are still split from their proper company** — "Capital One N A" is separate
-  from "Capital One", "U S Bank N A" from "US Bank". **1,084 filings.** Different cause to the above
-  (an abbreviation-matching gap, not numbers) and **not yet fixed**.
+- ✅ **Names written letter-by-letter now merge with their company** (fixed 14 Sep 2026).
+  "Capital One N A" joins Capital One, "U S Bank N A" joins US Bank, including OCR-damaged forms like
+  "U S Bank TRUSY N A". The county records these abbreviations with spaces, and the name cleaner
+  previously allowed a full stop between the letters but not a space — so the same institution sat in
+  two places across **1,084 filings**. "U S Century Bank" is correctly left alone; it is a different
+  bank.
 - Search by CFN, assignor or assignee.
 - **Review workflow:** mark a row reviewed/unreviewed; the marking is stored server-side and shared
   by everyone.

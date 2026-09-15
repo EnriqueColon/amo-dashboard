@@ -69,6 +69,23 @@ CASES = [
     ('US BANK NA', 'US BANK', 'ditto'),
     ('WELLS FARGO BANK N A', 'WELLS FARGO', 'ditto'),
 
+    # ── SPACED abbreviations, fixed 2026-09-14 ────────────────────────────
+    # The county records these letter by letter. The suffix patterns allowed an
+    # optional period between the letters but not a space, so "U S BANK NA"
+    # reached US BANK while "U S BANK N A" did not — the same institution split
+    # in two across 1,084 filings.
+    ('U S BANK N A', 'US BANK', 'the bug this block exists for'),
+    ('U S BANK N A TRU', 'US BANK', 'with OCR-truncated TRUST'),
+    ('U S BANK TRUSY N A', 'US BANK', 'OCR: TRUSY for TRUST'),
+    ('CAPITAL ONE N A', 'CAPITAL ONE', '140 filings'),
+    ('BANKUNITED N A', 'BANKUNITED', '69 filings'),
+    ('AMERANT BANK N A', 'AMERANT BANK', '22 filings'),
+    ('CITIBANK N A AS TRUSTEE', 'CITIBANK', 'mid-string, not just trailing'),
+
+    # ── and must NOT over-reach ───────────────────────────────────────────
+    ('U S CENTURY BANK', 'U S CENTURY BANK', 'a DIFFERENT bank, must not become US BANK'),
+    ('U S BANKRUPTCY COURT', 'U S BANKRUPTCY COURT', 'word boundary keeps BANK out of BANKRUPTCY'),
+
     # ── stripping the suffix must not leave a bare number ─────────────────
     ('1104 LLC', '1104 LLC', 'keeps the suffix rather than becoming "1104"'),
     ('05000 LLC', '05000 LLC', 'ditto'),

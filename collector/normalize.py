@@ -218,6 +218,21 @@ STRIP_SUFFIXES = [
     r'\bLP\b',
     r'\bFSB\b',
     r'\bN\.?A\.?\b',
+    # SPACED abbreviations. The county index frequently records these letter by
+    # letter — "U S BANK N A", "COMPUTERSHARE TRUST CO N A TRU" — and the
+    # patterns above only tolerate an optional PERIOD between the letters, not a
+    # space. So "U S BANK NA" canonicalised to US BANK while "U S BANK N A" did
+    # not, leaving the same institution split in two. Measured 2026-09-14:
+    # 5,326 name occurrences end in " N A", plus L L C 127, P A 33, F S B 19.
+    #
+    # Written as separate patterns rather than by loosening the ones above,
+    # because a looser `\bN[\s.]?A\b` also matches the start of a two-word
+    # phrase like "N A REALTY", and keeping them separate makes each one
+    # reviewable on its own line.
+    r'\bN\s+A\b',
+    r'\bL\s+L\s+C\b',
+    r'\bF\s+S\s+B\b',
+    r'\bP\s+A\b',
     r'\bII\b',
     r'\bIII\b',
     # NOTE: FINANCIAL, MORTGAGE, BANK, CAPITAL, TRUST, FUND, GROUP, HOLDINGS
@@ -246,7 +261,13 @@ MANUAL_OVERRIDES = [
     # Lakeview
     (r'LAKEVIEW\s+LOAN', 'LAKEVIEW LOAN SERVICING'),
     # US Bank
-    (r'U\.?\s*S\.?\s*BANK\s+TRUST|U\.?\s*S\.?\s*BANK\s+NA|U\.?\s*S\.?\s*BANK\s+NATIONAL', 'US BANK'),
+    # BANK must follow U S directly, which is what keeps "U S CENTURY BANK" — a
+    # different institution — out of this. The old form additionally required a
+    # TRUST/NA/NATIONAL suffix, and so missed every spaced spelling the county
+    # actually records: "U S BANK N A", "U S BANK N A CO", "U S BANK N TRU",
+    # "U S BANK NAL ASSN", "U S BANK TRUSY N A" (OCR for TRUST). \b after BANK
+    # keeps it clear of BANKRUPTCY.
+    (r'U\.?\s*S\.?\s*BANK\b', 'US BANK'),
     # Wilmington Savings
     (r'WILMINGTON\s+SAVINGS', 'WILMINGTON SAVINGS'),
     # Goldman Sachs
