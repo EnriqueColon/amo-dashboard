@@ -20,7 +20,24 @@ plain assignment — while every mortgage assignment is full of "security" and
 "securing", because a mortgage IS a security instrument.
 
 The rule only ever OVERTURNS an unsupported COLLATERAL verdict. It never invents
-one, never touches another category, and never touches a non-AMO filing.
+one and never touches another category.
+
+Rents and leases — added 2026-09-15
+-----------------------------------
+COLLATERAL held a second, unrelated error: 6,043 filings that are ordinary
+property-level security instruments — a landlord assigning tenant rents to its
+own lender, recorded alongside the mortgage. Six were read by hand; all six said
+"grants a continuing security interest in ... the Rents" and "THIS ASSIGNMENT IS
+GIVEN TO SECURE (1) PAYMENT OF THE INDEBTEDNESS". No loan changes hands and no
+loan is pledged, so they belong in RENTS_LEASES, and while they sat in COLLATERAL
+they outnumbered the genuine collateral pledges four to one.
+
+The deciding question is WHAT IS ASSIGNED, and the recorded title states it, so
+that half needs no OCR text at all. Two traps are asserted below: "collateral" in
+a title describes the manner and not the asset, so COLLATERAL ASSIGNMENT OF
+LEASES AND RENTS is still a rents instrument; and the text test's LOAN_TRANSFER
+fallback is only safe once the title names a debt instrument, because ASG also
+carries permits, contracts and development rights.
 
     collector/.venv/bin/python3 collector/tests/check_doc_category.py
 """
@@ -29,10 +46,11 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 
-from extract_pdfs import reclassify_collateral  # noqa: E402
+from extract_pdfs import reclassify_collateral, reclassify_rents_by_title  # noqa: E402
 
 AMO = 'ASSIGNMENT OF MORTGAGE - AMO'
 ASG = 'ASSIGNMENT - ASG'
+AST = 'AST'
 FST = 'FINANCING STATEMENT UCC - FST'
 
 # Text fragments are verbatim from the sampled documents.
@@ -94,10 +112,73 @@ CASES = [
     (FST, 'UCC FINANCING STATEMENT', 'This FINANCING STATEMENT covers the following '
      'collateral: all inventory and equipment', 'COLLATERAL', 'COLLATERAL',
      'a UCC filing genuinely IS a collateral record — 20,522 rows must not move'),
-    (ASG, 'ASSIGNMENT OF RENTS', RENTS, 'COLLATERAL', 'COLLATERAL',
-     'ASG has its OWN wrong-bucket problem (1,375 rent assignments); flipping '
-     'them here would swap one error for another'),
+    (FST, 'UCC FINANCING STATEMENT COVERING LEASES AND RENTS', 'collateral: all leases',
+     'COLLATERAL', 'COLLATERAL',
+     'the two UCC titles that DO mention leases must still not move — the doc '
+     'type is excluded before the title is ever looked at'),
+
+    # ── rents and leases: the second half of the wrong-bucket problem ──────
+    # 6,043 rows. Titles are verbatim from production, including the OCR damage.
+    (ASG, 'ASSIGNMENT OF RENTS', RENTS, 'COLLATERAL', 'RENTS_LEASES',
+     'the largest single group (1,375) — a landlord pledging rents to its own '
+     'lender is not a loan changing hands'),
+    (ASG, 'COLLATERAL ASSIGNMENT OF LEASES AND RENTS', RENTS, 'COLLATERAL', 'RENTS_LEASES',
+     '"collateral" describes the manner, not the asset — the asset is leases'),
+    (ASG, 'COLEATERAL ASSIGNMENT OF LEASES, RENTS AND PROFITS', RENTS, 'COLLATERAL',
+     'RENTS_LEASES', 'OCR damage: why this is a regex and not a list of titles'),
+    (ASG, 'ABSOLUTE ASSIGNMENT OF LESSOR’S INTEREST IN LEASES AND RENTS', RENTS,
+     'COLLATERAL', 'RENTS_LEASES', 'names neither "rent" nor "collateral" plainly'),
+    (AST, 'ASSIGNMENT OF RENTS', RENTS, 'COLLATERAL', 'RENTS_LEASES',
+     'the same instrument filed under a different county code'),
+    (AMO, 'ASSIGNMENT OF ASSIGNMENT OF LEASES AND RENTS', RENTS, 'COLLATERAL',
+     'RENTS_LEASES', 'still a rents instrument even when filed under the AMO code'),
+
+    # ── the assessments pledge is real collateral and must survive ─────────
+    (ASG, 'COLLATERAL ASSIGNMENT OF RIGHT TO COLLECT ASSESSMENTS AND ASSIGNMENT OF '
+     'LIEN RIGHTS', 'condominium association assigns to Lender its right to collect '
+     'assessments', 'COLLATERAL', 'COLLATERAL',
+     '437 rows: an association pledging receivables for its own borrowing is '
+     'exactly what COLLATERAL means — and "LIEN RIGHTS" must beat the rents test'),
+
+    # ── a title naming a debt instrument is never settled by the title ─────
+    (ASG, 'COLLATERAL ASSIGNMENT OF NOTE, MORTGAGE AND OTHER LOAN DOCUMENTS',
+     REAL_COLLATERAL, 'COLLATERAL', 'COLLATERAL',
+     'the body decides these, and here it says collateral'),
+    (ASG, 'ASSIGNMENT OF MORTGAGE', CLASSIC, 'COLLATERAL', 'LOAN_TRANSFER',
+     'the 119 ASG filings titled ASSIGNMENT OF MORTGAGE — sampled 6/6 outright '
+     'transfers to servicers and trustees'),
+    (AST, 'CORPORATE ASSIGNMENT OF MORTGAGE', FIFTH_THIRD, 'COLLATERAL', 'LOAN_TRANSFER',
+     'same for the 61 AST ones'),
+    (AMO, 'ASSIGNMENT OF MORTGAGE, ASSIGNMENT OF LEASES AND RENTS, SECURITY AGREEMENT '
+     'AND FIXTURE FILING', 'assignment of leases and rents made by Borrower',
+     'COLLATERAL', 'COLLATERAL',
+     'mixed instrument: title names a mortgage AND rents, body is rents — not '
+     'safely a transfer, so it is left alone rather than guessed at'),
+
+    # ── ASG carries far more than loans; those must NOT become transfers ───
+    (ASG, 'ASSIGNMENT OF PERMITS AND AGREEMENTS', 'assigns all permits and approvals',
+     'COLLATERAL', 'COLLATERAL',
+     'the reason the text test is gated on the title naming a debt instrument: '
+     'absence of pledge language here means nothing, and LOAN_TRANSFER would '
+     'put building permits into the Reporting tab'),
+    (ASG, 'ASSIGNMENT OF AGREEMENTS AFFECTING REAL ESTATE', 'assigns the agreements',
+     'COLLATERAL', 'COLLATERAL', 'same — 47 rows'),
+    (ASG, 'ASSIGNMENT', 'assigns all right title and interest', 'COLLATERAL', 'COLLATERAL',
+     'a bare title says nothing at all; 112 rows must stay put'),
 ]
+
+# Kept COLLATERAL because the rule had no basis to move them, not because it
+# found one. These carry no evidence quote, and should not: inventing a citation
+# for a verdict nothing supports is how the original bug read from the outside.
+DECLINED_TO_DECIDE = {
+    'ASSIGNMENT OF MORTGAGE, ASSIGNMENT OF LEASES AND RENTS, SECURITY AGREEMENT '
+    'AND FIXTURE FILING',
+    'ASSIGNMENT OF PERMITS AND AGREEMENTS',
+    'ASSIGNMENT OF AGREEMENTS AFFECTING REAL ESTATE',
+    'ASSIGNMENT',
+    'UCC FINANCING STATEMENT',
+    'UCC FINANCING STATEMENT COVERING LEASES AND RENTS',
+}
 
 failures: list[str] = []
 
@@ -108,10 +189,19 @@ def main() -> int:
         if got != expected:
             failures.append(f'{title!r} ({doc_type.split(" - ")[-1]})\n'
                             f'      model said {said}, expected {expected}, got {got} — {why}')
-        # A kept COLLATERAL must be able to say why.
-        if got == 'COLLATERAL' and said == 'COLLATERAL' and doc_type == AMO and not evidence:
-            if expected == 'COLLATERAL':
-                failures.append(f'{title!r}: kept COLLATERAL but recorded no evidence quote')
+        # A COLLATERAL verdict the rule AFFIRMED must be able to say why. That is
+        # different from one it merely declined to overturn: an out-of-scope
+        # filing, or an instrument whose title and body disagree, keeps the
+        # model's label untouched and has nothing of its own to cite. Both are
+        # correct outcomes, and a stored evidence quote is exactly what tells
+        # them apart later — so the distinction is named here rather than the
+        # assertion being dropped.
+        if got == 'COLLATERAL' and expected == 'COLLATERAL' and not evidence:
+            if title not in DECLINED_TO_DECIDE:
+                failures.append(f'{title!r}: affirmed COLLATERAL but recorded no evidence quote')
+        if got == 'COLLATERAL' and evidence and title in DECLINED_TO_DECIDE:
+            failures.append(f'{title!r}: expected to be left undecided, but the rule '
+                            f'affirmed it with evidence {evidence!r}')
 
     # The rule must never CREATE a collateral verdict.
     for said in ('LOAN_TRANSFER', 'RENTS_LEASES', 'OTHER', None):
@@ -120,6 +210,26 @@ def main() -> int:
         if got == 'COLLATERAL' and said != 'COLLATERAL':
             failures.append(f'rule invented a COLLATERAL verdict from {said!r} — it must only '
                             f'ever overturn one, never create one')
+
+    # Nor may the title rule reroute anything that was not COLLATERAL. A
+    # LOAN_TRANSFER whose title happens to mention rents must survive it — that
+    # would quietly drain the Reporting tab's default view.
+    for said in ('LOAN_TRANSFER', 'OTHER', None):
+        got, _ = reclassify_rents_by_title(
+            ASG, 'ASSIGNMENT OF MORTGAGE AND ASSIGNMENT OF LEASES AND RENTS', said)
+        if got != said:
+            failures.append(f'title rule rerouted a {said!r} verdict to {got!r} — it may only '
+                            f'ever act on COLLATERAL')
+
+    # The title rule must reach the same verdict as the full rule when the title
+    # decides, since the fast backfill runs it alone, without any OCR text.
+    for doc_type, title, text, said, expected, why in CASES:
+        if expected != 'RENTS_LEASES':
+            continue
+        got, _ = reclassify_rents_by_title(doc_type, title, said)
+        if got != expected:
+            failures.append(f'{title!r}: full rule says {expected} but the title-only rule '
+                            f'used by the backfill says {got} — they must agree')
 
     print(f'  · {len(CASES)} documents checked, plus a never-invent assertion')
     print('  · offline: no database, no network, no API key')

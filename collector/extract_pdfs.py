@@ -640,17 +640,99 @@ _CAT_PLEDGE = re.compile(
     r'|pledge[sd]?\s+(?:and\s+assigns?\s+)?(?:to|unto)\b',
     re.I)
 
-# Rents and leases have their OWN wrong-bucket problem in the generic ASG type —
-# 1,375 documents titled "ASSIGNMENT OF RENTS" sit in COLLATERAL. Flipping those
-# to LOAN_TRANSFER would swap one error for another, so they are recognised and
-# left for separate work rather than swept up here.
-_CAT_RENTS = re.compile(r'assignment\s+of\s+(?:leases?\s+and\s+)?rents?\b'
-                        r'|assignment\s+of\s+leases?\b', re.I)
+# Rents and leases are the OTHER half of the wrong-bucket problem: 6,043 rows
+# across ASG/AST/AMO sat in COLLATERAL while being ordinary property-level
+# security instruments. Six were fetched and read on 2026-09-15 and every one
+# said the same thing — "grants a continuing security interest in ... the Rents",
+# "THIS ASSIGNMENT IS GIVEN TO SECURE (1) PAYMENT OF THE INDEBTEDNESS" — between
+# a property owner and its own lender.
+#
+# The deciding question is WHAT IS BEING ASSIGNED, and the recorded title states
+# it. "Collateral" in a title describes the manner of the assignment, not the
+# asset: a landlord collaterally assigning tenant leases is the same economic
+# event as one plainly assigning rents, and neither is a loan changing hands nor
+# a loan pledged to a warehouse lender. Both belong in RENTS_LEASES.
+#
+# A title regex rather than a list of known titles, because the population is 365
+# distinct spellings of the same few instruments, many of them OCR damage —
+# "COLEATERAL", "COELATERAL", "ASSIGNMENT OF-RENTS", "COLLATERALASSIGNMENT".
+_CAT_RENTS_TITLE = re.compile(
+    r'\b(RENTS?|LEASES?|LESSOR|LESSEE|TENANT|RENTALS?|PROFITS)\b', re.I)
 
-# Only assignment filings are eligible. A UCC financing statement genuinely IS a
-# collateral record and its text would not match the pledge patterns above, so
-# including it here would wrongly relabel 20,522 rows.
-_CAT_ELIGIBLE_DOC_TYPES = ('ASSIGNMENT OF MORTGAGE - AMO',)
+# A condo association pledging its assessment receivables and lien rights to a
+# bank, securing its own borrowing. The asset is not rents, and the assignor
+# still owns it — this is what COLLATERAL is supposed to mean, so it is held
+# before the rents test, which its titles would otherwise catch on "LIEN".
+_CAT_ASSESSMENTS = re.compile(r'ASSESSMENT|LIEN\s+RIGHT', re.I)
+
+# Title names a debt instrument. Then the title alone cannot settle the bucket —
+# a mortgage assignment that also sweeps in rents is still a mortgage assignment
+# — so these fall through to the text test below.
+_CAT_DEBT_TITLE = re.compile(
+    r'\b(MORTGAGES?|NOTES?|DEED\s+OF\s+TRUST|LOANS?|HELOCS?|SECURITY\s+INSTRUMENTS?)\b', re.I)
+
+# A UCC financing statement genuinely IS a collateral record. Its text would not
+# match the pledge patterns above and two of its titles do mention leases, so
+# without this exclusion it would lose rows out of a bucket where all 20,522
+# belong. Asserted by check_doc_category.py.
+_CAT_UCC_DOC_TYPE = 'FINANCING STATEMENT UCC - FST'
+
+# Deliberately NOT _CAT_RENTS_TITLE. This one is matched against the whole OCR
+# body, where a bare \bLEASES?\b would fire on almost every commercial mortgage
+# assignment ever recorded — they routinely recite the leases they sweep in —
+# and would stop genuine transfers from being corrected. Only the instrument
+# name, as a phrase, counts as body evidence.
+_CAT_RENTS_BODY = re.compile(r'assignment\s+of\s+(?:leases?\s+and\s+)?rents?\b'
+                             r'|assignment\s+of\s+leases?\b', re.I)
+
+_CAT_AMO_DOC_TYPE = 'ASSIGNMENT OF MORTGAGE - AMO'
+_CAT_GENERIC_DOC_TYPES = ('ASSIGNMENT - ASG', 'AST')
+
+
+def _cat_text_eligible(doc_type: str | None, doc_title: str | None) -> bool:
+    """Whether the pledge-vs-transfer text test may run on this filing.
+
+    It matters because that test's fallback verdict is LOAN_TRANSFER — absence
+    of pledge language is read as an outright conveyance. That inference is only
+    sound once the subject is known to be a debt instrument. The AMO doc type
+    guarantees it outright; the generic ASG/AST types do not, since they also
+    carry permits, development rights and contract assignments, and defaulting
+    those to LOAN_TRANSFER would put non-loans into the Reporting tab's default
+    view. For those, the title has to name the debt instrument first.
+    """
+    dt = doc_type or ''
+    if dt == _CAT_AMO_DOC_TYPE:
+        return True
+    if dt in _CAT_GENERIC_DOC_TYPES:
+        return bool(_CAT_DEBT_TITLE.search(doc_title or ''))
+    return False
+
+
+def reclassify_rents_by_title(doc_type: str | None, doc_title: str | None,
+                              model_category: str | None
+                              ) -> tuple[str | None, str | None]:
+    """Route a COLLATERAL verdict by what the title says is being assigned.
+
+    Pure function of two stored columns — no OCR text, no download, no LLM — so
+    this one is a seconds-long backfill rather than an hours-long re-read.
+    Returns (category, evidence); leaves the verdict alone when the title does
+    not settle it.
+    """
+    if model_category != 'COLLATERAL':
+        return model_category, None
+    if (doc_type or '') == _CAT_UCC_DOC_TYPE:
+        return model_category, None
+
+    title = (doc_title or '').strip()
+    if not title:
+        return model_category, None
+    if _CAT_ASSESSMENTS.search(title):
+        return 'COLLATERAL', f'title pledges assessments / lien rights: {title[:200]}'
+    if _CAT_DEBT_TITLE.search(title):
+        return model_category, None
+    if _CAT_RENTS_TITLE.search(title):
+        return 'RENTS_LEASES', f'title assigns rents / leases: {title[:200]}'
+    return model_category, None
 
 
 def reclassify_collateral(doc_type: str | None, doc_title: str | None,
@@ -659,16 +741,23 @@ def reclassify_collateral(doc_type: str | None, doc_title: str | None,
     """Return (category, evidence). Only corrects an unsupported COLLATERAL."""
     if model_category != 'COLLATERAL':
         return model_category, None
-    if (doc_type or '') not in _CAT_ELIGIBLE_DOC_TYPES:
+
+    # What the title says is being assigned settles most of these outright.
+    cat, quote = reclassify_rents_by_title(doc_type, doc_title, model_category)
+    if cat != 'COLLATERAL' or quote:
+        return cat, quote
+
+    if not _cat_text_eligible(doc_type, doc_title):
         return model_category, None
 
     blob = f'{doc_title or ""}\n{ocr_text or ""}'
     m = _CAT_PLEDGE.search(blob)
     if m:
         return 'COLLATERAL', _cat_quote(blob, m)
-    if _CAT_RENTS.search(blob):
-        # Not a transfer and not evidenced as collateral — leave the model's
-        # verdict rather than guess. Handled separately.
+    if _CAT_RENTS_BODY.search(blob):
+        # Title named a debt instrument but the body is about rents — a mixed
+        # instrument. Not evidenced as a pledge and not safely a transfer, so
+        # the model's verdict stands rather than being guessed at.
         return model_category, None
     return 'LOAN_TRANSFER', None
 

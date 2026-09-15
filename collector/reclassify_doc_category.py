@@ -39,18 +39,26 @@ from concurrent.futures import ThreadPoolExecutor
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from extract_pdfs import (  # noqa: E402
     get_conn, ensure_schema, download_pdf, ocr_pdf, reclassify_collateral,
+    _cat_text_eligible,
 )
 
 _print_lock = threading.Lock()
 
 
 def targets(conn, limit, since):
+    """Candidate rows. Eligibility itself is decided in Python, not here.
+
+    The SQL deliberately casts wider than the rule and lets examine() reject
+    rows, rather than mirroring `_cat_text_eligible` into a WHERE clause where
+    the two copies would drift apart. Rejection happens before the download, so
+    the wider net costs nothing.
+    """
     date_clause = f"AND a.rec_date >= '{since}'" if since else ''
     return conn.execute(f"""
         SELECT a.cfn, a.rec_book, a.rec_page, a.doc_type, px.doc_title
         FROM pdf_extractions px JOIN assignments a ON a.cfn = px.cfn
         WHERE px.doc_category = 'COLLATERAL'
-          AND a.doc_type = 'ASSIGNMENT OF MORTGAGE - AMO'
+          AND a.doc_type IN ('ASSIGNMENT OF MORTGAGE - AMO', 'ASSIGNMENT - ASG', 'AST')
           AND px.raw_json IS NOT NULL
           AND a.rec_book IS NOT NULL AND a.rec_book != ''
           AND a.rec_page IS NOT NULL AND a.rec_page != ''
@@ -63,6 +71,11 @@ def targets(conn, limit, since):
 def examine(row):
     """Fetch, OCR and decide. Returns (cfn, new_category, evidence, error)."""
     cfn, book, page, doc_type, title = row
+    # Checked before the download: most ASG rows are rents assignments or
+    # permit assignments the text test must not touch, and fetching them would
+    # be the bulk of the run's cost for no decision.
+    if not _cat_text_eligible(doc_type, title):
+        return cfn, None, None, 'not eligible'
     try:
         with tempfile.TemporaryDirectory() as wd:
             pdf = os.path.join(wd, 'd.pdf')
@@ -122,7 +135,11 @@ def main() -> int:
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
         for cfn, cat, quote, err in pool.map(examine, rows):
             done += 1
-            if err:
+            if err == 'not eligible':
+                # Skipped without a download — not a failure, and counting it as
+                # one would make a healthy run look broken.
+                tally['skipped (ineligible)'] += 1
+            elif err:
                 tally['error'] += 1
             elif cat == 'LOAN_TRANSFER':
                 tally['-> LOAN_TRANSFER'] += 1
