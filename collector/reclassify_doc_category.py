@@ -45,7 +45,10 @@ from extract_pdfs import (  # noqa: E402
 _print_lock = threading.Lock()
 
 
-def targets(conn, limit, since):
+ALL_DOC_TYPES = ('ASSIGNMENT OF MORTGAGE - AMO', 'ASSIGNMENT - ASG', 'AST')
+
+
+def targets(conn, limit, since, doc_types=ALL_DOC_TYPES):
     """Candidate rows. Eligibility itself is decided in Python, not here.
 
     The SQL deliberately casts wider than the rule and lets examine() reject
@@ -54,18 +57,19 @@ def targets(conn, limit, since):
     the wider net costs nothing.
     """
     date_clause = f"AND a.rec_date >= '{since}'" if since else ''
+    holes = ','.join('?' * len(doc_types))
     return conn.execute(f"""
         SELECT a.cfn, a.rec_book, a.rec_page, a.doc_type, px.doc_title
         FROM pdf_extractions px JOIN assignments a ON a.cfn = px.cfn
         WHERE px.doc_category = 'COLLATERAL'
-          AND a.doc_type IN ('ASSIGNMENT OF MORTGAGE - AMO', 'ASSIGNMENT - ASG', 'AST')
+          AND a.doc_type IN ({holes})
           AND px.raw_json IS NOT NULL
           AND a.rec_book IS NOT NULL AND a.rec_book != ''
           AND a.rec_page IS NOT NULL AND a.rec_page != ''
           {date_clause}
         ORDER BY a.rec_date DESC
         LIMIT ?
-    """, (limit,)).fetchall()
+    """, (*doc_types, limit)).fetchall()
 
 
 def examine(row):
@@ -97,11 +101,18 @@ def main() -> int:
     ap.add_argument('--workers', type=int, default=8)
     ap.add_argument('--since', type=str, default=None,
                     help='only filings recorded on/after this date (YYYY-MM-DD)')
+    ap.add_argument('--doc-types', type=str, default=','.join(ALL_DOC_TYPES),
+                    help='comma-separated county doc types to re-read. Scoping this '
+                         'matters: the AMO rows were settled by the 2026-09-15 run and '
+                         'the rule on that path has not changed since, so including '
+                         'them again buys nothing and costs an hour of downloads.')
     args = ap.parse_args()
+
+    doc_types = tuple(t.strip() for t in args.doc_types.split(',') if t.strip())
 
     conn = get_conn()
     ensure_schema(conn)
-    rows = targets(conn, args.limit, args.since)
+    rows = targets(conn, args.limit, args.since, doc_types)
     print(f'documents to re-read: {len(rows)}   workers: {args.workers}   '
           f'apply: {args.apply}', flush=True)
 
@@ -173,12 +184,13 @@ def main() -> int:
     # Rows were committed in batches of 100 as the run progressed; an errored
     # document keeps whatever it had rather than being guessed at.
     print(f'\napplied {written} rows')
-    for cat, n in conn.execute("""
-        SELECT px.doc_category, COUNT(*) FROM pdf_extractions px
+    holes = ','.join('?' * len(doc_types))
+    for dt, cat, n in conn.execute(f"""
+        SELECT a.doc_type, px.doc_category, COUNT(*) FROM pdf_extractions px
         JOIN assignments a ON a.cfn = px.cfn
-        WHERE a.doc_type = 'ASSIGNMENT OF MORTGAGE - AMO' AND px.raw_json IS NOT NULL
-        GROUP BY 1 ORDER BY 2 DESC"""):
-        print(f'   AMO {cat:<16} {n}')
+        WHERE a.doc_type IN ({holes}) AND px.raw_json IS NOT NULL
+        GROUP BY 1, 2 ORDER BY 1, 3 DESC""", doc_types):
+        print(f'   {dt:<32} {cat or "(none)":<16} {n}')
     conn.close()
     print('\nNOTE: run normalize.py to rebuild aom_events_clean, then '
           'pm2 restart amo-dashboard to clear the response cache.')
