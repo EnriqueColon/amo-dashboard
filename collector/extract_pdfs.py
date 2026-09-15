@@ -108,6 +108,16 @@ Return a JSON object with exactly these fields:
 - signatory_officer: The name and title of the person who signed this document ON BEHALF OF THE ASSIGNOR (the transferring party). Look in the signature block for a line like "By: ___" or "Name: ___" or "Title: ___" directly under the assignor's name. DO NOT return the notary's name — the notary appears in a separate "State of ___, County of ___" acknowledgment block and is not the signatory. DO NOT return the assignee's signer. Prefer the printed/typed name under the signature line over any handwritten scrawl. Return "Name, Title" as a single string (e.g. "Jane Smith, Vice President"), or null if not legible.
 
 Rules:
+- DEFAULT FOR ASSIGNMENTS: a document that conveys the mortgage outright is LOAN_TRANSFER. The \
+giveaway wording is "forever", "without recourse", "grant, bargain, sell, assign, transfer and set \
+over", "all right, title and interest". Assignments to a trustee, servicer, GSE or to the Secretary \
+of Housing and Urban Development are LOAN_TRANSFER.
+- Do NOT answer COLLATERAL merely because the document mentions "security", "securing", or a \
+"Security Instrument". EVERY mortgage assignment contains those words, because a mortgage IS a \
+security instrument. COLLATERAL requires the assignor to be PLEDGING something it still owns, as \
+security for ITS OWN debt — look for "collateral assignment", "collaterally assign", "as collateral \
+security", or "for better securing the repayment of the Loan" where the assignee is the assignor's \
+lender. If that language is absent, it is NOT COLLATERAL.
 - A document titled "Assignment of Mortgage" that also assigns rents/leases ancillary to the mortgage is LOAN_TRANSFER.
 - A document assigning ONLY rents and leases is RENTS_LEASES even if it references a mortgage.
 - A "collateral assignment of mortgage" given as security is COLLATERAL.
@@ -269,6 +279,12 @@ def ensure_schema(conn: sqlite3.Connection):
                 'facility_lender_name TEXT', 'facility_agent_name TEXT', 'facility_borrower_name TEXT',
                 'facility_amount REAL', 'facility_amount_type TEXT',
                 'facility_evidence_quote TEXT', 'facility_confidence TEXT',
+                # Why the COLLATERAL verdict was kept or overturned. Facility
+                # extraction has had an evidence quote from the start and it is
+                # what made that bug auditable from stored data alone;
+                # doc_category had none, so correcting it cost a full re-OCR of
+                # 11,366 documents. This column means the next audit is free.
+                'doc_category_evidence TEXT',
                 # Multi-county. save() always writes this explicitly; the column
                 # has to exist even on a database created fresh by this script.
                 'county TEXT'):
@@ -596,6 +612,73 @@ def classify_facility_type(agreement_name: str | None,
     return 'none', 'no facility marker'
 
 
+# ── Document category: the COLLATERAL verdict is checked against the text ─────
+# The model put 11,366 ASSIGNMENT OF MORTGAGE filings in COLLATERAL — 21% of all
+# AMO — and reading 32 of them by hand found 20/20 of the suspect group to be
+# outright transfers: "forever without recourse", "grant, bargain, sell, assign,
+# transfer and set over", "all right, title and interest". None contained any
+# pledge language. Their assignees are trustees, servicers, GSEs and HUD, and
+# nobody pledges collateral to HUD.
+#
+# Cause is the same shape as the facility_type bug. The prompt defines COLLATERAL
+# as a pledge "(no outright transfer)" — the deciding clause is a trailing
+# parenthetical — and offers no positive anchor for a plain assignment. Meanwhile
+# EVERY mortgage assignment is saturated with "security" and "securing", because
+# a mortgage IS a security instrument, so the model reaches for COLLATERAL on
+# ambient vocabulary.
+#
+# This rule is deliberately narrow: it only ever OVERTURNS a COLLATERAL verdict
+# the document does not support, and never invents one. Validated 32/32 against
+# documents read by hand, including leaving all 6 genuine collateral assignments
+# alone. See collector/tests/check_doc_category.py.
+_CAT_PLEDGE = re.compile(
+    r'collateral\s*(?:re-?)?\s*assign'
+    r'|collaterally\s+assign'
+    r'|as\s+collateral\s+security'
+    r'|for\s+(?:better\s+)?securing\s+the\s+(?:re)?payment'
+    r'|as\s+security\s+for\s+the\s+(?:payment|performance|obligations)\s+of\s+(?:the\s+)?assignor'
+    r'|pledge[sd]?\s+(?:and\s+assigns?\s+)?(?:to|unto)\b',
+    re.I)
+
+# Rents and leases have their OWN wrong-bucket problem in the generic ASG type —
+# 1,375 documents titled "ASSIGNMENT OF RENTS" sit in COLLATERAL. Flipping those
+# to LOAN_TRANSFER would swap one error for another, so they are recognised and
+# left for separate work rather than swept up here.
+_CAT_RENTS = re.compile(r'assignment\s+of\s+(?:leases?\s+and\s+)?rents?\b'
+                        r'|assignment\s+of\s+leases?\b', re.I)
+
+# Only assignment filings are eligible. A UCC financing statement genuinely IS a
+# collateral record and its text would not match the pledge patterns above, so
+# including it here would wrongly relabel 20,522 rows.
+_CAT_ELIGIBLE_DOC_TYPES = ('ASSIGNMENT OF MORTGAGE - AMO',)
+
+
+def reclassify_collateral(doc_type: str | None, doc_title: str | None,
+                          ocr_text: str | None, model_category: str | None
+                          ) -> tuple[str | None, str | None]:
+    """Return (category, evidence). Only corrects an unsupported COLLATERAL."""
+    if model_category != 'COLLATERAL':
+        return model_category, None
+    if (doc_type or '') not in _CAT_ELIGIBLE_DOC_TYPES:
+        return model_category, None
+
+    blob = f'{doc_title or ""}\n{ocr_text or ""}'
+    m = _CAT_PLEDGE.search(blob)
+    if m:
+        return 'COLLATERAL', _cat_quote(blob, m)
+    if _CAT_RENTS.search(blob):
+        # Not a transfer and not evidenced as collateral — leave the model's
+        # verdict rather than guess. Handled separately.
+        return model_category, None
+    return 'LOAN_TRANSFER', None
+
+
+def _cat_quote(text: str, m) -> str:
+    start = max(0, m.start() - 90)
+    end = min(len(text), m.end() + 150)
+    return ' '.join(text[start:end].split())[:300]
+
+
 def postprocess_facility(raw: dict) -> dict:
     """Validate/coerce a raw parsed facility-extraction JSON response.
 
@@ -722,12 +805,13 @@ def save(conn, cfn, rec_book, rec_page, status, data=None, ocr_chars=0,
              facility_type, facility_agreement_name, facility_agreement_date,
              facility_lender_name, facility_agent_name, facility_borrower_name,
              facility_amount, facility_amount_type, facility_evidence_quote,
-             facility_confidence,
+             facility_confidence, doc_category_evidence,
              ocr_chars, model, extracted_at, raw_json)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'),?)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'),?)
         ON CONFLICT(cfn) DO UPDATE SET
             county=excluded.county,
             status=excluded.status, doc_category=excluded.doc_category,
+            doc_category_evidence=excluded.doc_category_evidence,
             doc_title=excluded.doc_title,
             assignor_name=excluded.assignor_name, assignor_parent=excluded.assignor_parent,
             assignee_name=excluded.assignee_name, assignee_parent=excluded.assignee_parent,
@@ -759,7 +843,7 @@ def save(conn, cfn, rec_book, rec_page, status, data=None, ocr_chars=0,
         d.get('facility_type'), d.get('facility_agreement_name'), d.get('facility_agreement_date'),
         d.get('facility_lender_name'), d.get('facility_agent_name'), d.get('facility_borrower_name'),
         d.get('facility_amount'), d.get('facility_amount_type'), d.get('facility_evidence_quote'),
-        d.get('facility_confidence'),
+        d.get('facility_confidence'), d.get('doc_category_evidence'),
         ocr_chars, OPENAI_MODEL if data else None,
         json.dumps(d) if data else None,
     ))
@@ -807,6 +891,27 @@ def save_facility(conn, cfn, rec_book, rec_page, status, data=None, ocr_chars=0)
 
 # ── Main loop ─────────────────────────────────────────────────────────────────
 
+
+_DOC_TYPE_CACHE: dict = {}
+_DOC_TYPE_LOCK = threading.Lock()
+
+
+def _doc_type_for(cfn: str) -> str | None:
+    """The county's doc type for a CFN, cached — workers call this per document."""
+    with _DOC_TYPE_LOCK:
+        if cfn in _DOC_TYPE_CACHE:
+            return _DOC_TYPE_CACHE[cfn]
+    conn = get_conn()
+    try:
+        row = conn.execute('SELECT doc_type FROM assignments WHERE cfn = ?', (cfn,)).fetchone()
+    finally:
+        conn.close()
+    val = row[0] if row else None
+    with _DOC_TYPE_LOCK:
+        _DOC_TYPE_CACHE[cfn] = val
+    return val
+
+
 def process_one(cfn: str, rec_book: str, rec_page: str, doc_county: str) -> tuple:
     """Everything slow for one document: fetch, OCR, both LLM calls.
 
@@ -836,6 +941,15 @@ def process_one(cfn: str, rec_book: str, rec_page: str, doc_county: str) -> tupl
         except Exception as e:
             return (cfn, rec_book, rec_page, doc_county, 'LLM_ERROR', None, len(text),
                     f'LLM failed: {e}')
+
+        # The OCR text is only in hand HERE — it is not stored — so the
+        # collateral check has to happen before this function returns. doc_type
+        # comes from the county index rather than the model.
+        cat, quote = reclassify_collateral(
+            _doc_type_for(cfn), data.get('doc_title'), text, data.get('doc_category'))
+        data['doc_category'] = cat
+        if quote:
+            data['doc_category_evidence'] = quote
 
         return (cfn, rec_book, rec_page, doc_county, 'OK', data, len(text), None)
 

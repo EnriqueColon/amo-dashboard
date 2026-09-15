@@ -1,0 +1,147 @@
+"""
+Re-check the COLLATERAL verdict on Assignment-of-Mortgage filings.
+------------------------------------------------------------------
+The model put 11,366 AMO filings — 21% of all AMO — in COLLATERAL. Reading 32 of
+them by hand found 20/20 of the suspect group to be outright transfers
+("forever without recourse", "grant, bargain, sell, assign, transfer and set
+over"), with no pledge language at all and assignees that are trustees,
+servicers, GSEs and HUD. Nobody pledges collateral to HUD.
+
+Those rows are therefore excluded from aom_events_clean by normalize.py's
+loan-transfer filter, which is why roughly one loan sale in five is missing from
+the Reporting tab.
+
+**No LLM calls.** The decision is `extract_pdfs.reclassify_collateral`, a pure
+function of the document text — but the OCR text was never stored, so each
+document has to be fetched and scanned again. That is the whole cost: bandwidth
+and CPU, no API spend. The evidence quote IS stored this time, so a future audit
+of this field needs no re-read.
+
+    # report what would change, touch nothing
+    AMO_DB_PATH=... python3 collector/reclassify_doc_category.py --limit 200
+
+    # apply
+    AMO_DB_PATH=... python3 collector/reclassify_doc_category.py --apply --workers 8
+"""
+import argparse
+import os
+import sqlite3
+import sys
+import tempfile
+import threading
+import time
+from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from extract_pdfs import (  # noqa: E402
+    get_conn, ensure_schema, download_pdf, ocr_pdf, reclassify_collateral,
+)
+
+_print_lock = threading.Lock()
+
+
+def targets(conn, limit, since):
+    date_clause = f"AND a.rec_date >= '{since}'" if since else ''
+    return conn.execute(f"""
+        SELECT a.cfn, a.rec_book, a.rec_page, a.doc_type, px.doc_title
+        FROM pdf_extractions px JOIN assignments a ON a.cfn = px.cfn
+        WHERE px.doc_category = 'COLLATERAL'
+          AND a.doc_type = 'ASSIGNMENT OF MORTGAGE - AMO'
+          AND px.raw_json IS NOT NULL
+          AND a.rec_book IS NOT NULL AND a.rec_book != ''
+          AND a.rec_page IS NOT NULL AND a.rec_page != ''
+          {date_clause}
+        ORDER BY a.rec_date DESC
+        LIMIT ?
+    """, (limit,)).fetchall()
+
+
+def examine(row):
+    """Fetch, OCR and decide. Returns (cfn, new_category, evidence, error)."""
+    cfn, book, page, doc_type, title = row
+    try:
+        with tempfile.TemporaryDirectory() as wd:
+            pdf = os.path.join(wd, 'd.pdf')
+            if not download_pdf(book, page, pdf):
+                return cfn, None, None, 'download failed'
+            text = ocr_pdf(pdf, wd)
+        if not text or len(text) < 200:
+            return cfn, None, None, 'no usable OCR text'
+        cat, quote = reclassify_collateral(doc_type, title, text, 'COLLATERAL')
+        return cfn, cat, quote, None
+    except Exception as e:                                  # noqa: BLE001
+        return cfn, None, None, f'{type(e).__name__}: {e}'
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--apply', action='store_true', help='write; otherwise report only')
+    ap.add_argument('--limit', type=int, default=50000)
+    ap.add_argument('--workers', type=int, default=8)
+    ap.add_argument('--since', type=str, default=None,
+                    help='only filings recorded on/after this date (YYYY-MM-DD)')
+    args = ap.parse_args()
+
+    conn = get_conn()
+    ensure_schema(conn)
+    rows = targets(conn, args.limit, args.since)
+    print(f'documents to re-read: {len(rows)}   workers: {args.workers}   '
+          f'apply: {args.apply}', flush=True)
+
+    t0 = time.time()
+    tally = Counter()
+    updates = []
+    done = 0
+
+    with ThreadPoolExecutor(max_workers=args.workers) as pool:
+        for cfn, cat, quote, err in pool.map(examine, rows):
+            done += 1
+            if err:
+                tally['error'] += 1
+            elif cat == 'LOAN_TRANSFER':
+                tally['-> LOAN_TRANSFER'] += 1
+                updates.append((cat, quote, cfn))
+            elif cat == 'COLLATERAL':
+                tally['stays COLLATERAL'] += 1
+                updates.append((cat, quote, cfn))
+            else:
+                tally[f'stays {cat}'] += 1
+
+            if done % 200 == 0:
+                rate = done / max(time.time() - t0, 1) * 3600
+                left = (len(rows) - done) / max(rate, 1)
+                with _print_lock:
+                    print(f'  [{done}/{len(rows)}] {dict(tally)} '
+                          f'{rate:.0f}/hr eta={left:.1f}h', flush=True)
+
+    print(f'\nfinished re-reading in {(time.time()-t0)/60:.1f} min')
+    for k, v in tally.most_common():
+        print(f'   {k:<20} {v}')
+
+    if not args.apply:
+        print('\nDRY RUN — nothing written. Re-run with --apply.')
+        conn.close()
+        return 0
+
+    # Only rows whose verdict actually came back are touched; an errored
+    # document keeps whatever it had rather than being guessed at.
+    conn.executemany(
+        'UPDATE pdf_extractions SET doc_category = ?, doc_category_evidence = ? WHERE cfn = ?',
+        updates)
+    conn.commit()
+    print(f'\napplied {len(updates)} rows')
+    for cat, n in conn.execute("""
+        SELECT px.doc_category, COUNT(*) FROM pdf_extractions px
+        JOIN assignments a ON a.cfn = px.cfn
+        WHERE a.doc_type = 'ASSIGNMENT OF MORTGAGE - AMO' AND px.raw_json IS NOT NULL
+        GROUP BY 1 ORDER BY 2 DESC"""):
+        print(f'   AMO {cat:<16} {n}')
+    conn.close()
+    print('\nNOTE: run normalize.py to rebuild aom_events_clean, then '
+          'pm2 restart amo-dashboard to clear the response cache.')
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())
