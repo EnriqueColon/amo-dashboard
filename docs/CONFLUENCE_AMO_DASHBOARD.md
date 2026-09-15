@@ -1,6 +1,6 @@
 # AMO Tracker — Mortgage Assignment Intelligence Dashboard
 
-> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 14 Sep 2026
+> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 15 Sep 2026
 > **Production URL:** `http://165.22.35.75:5000` (single shared password)
 > **Repository:** `amo-dashboard` (`origin/main`)
 
@@ -677,6 +677,7 @@ AMO_DB_PATH=./prod_snapshot.db collector/.venv/bin/python3 collector/tests/check
 | `check_alias_scope.py` | Alias scoping rules behave — note aliases are applied **after** suffix stripping |
 | `check_broward_heartbeat.py` | The Broward daily job's heartbeat separates "ran and found nothing new" (normal every weekend) from "stopped running". Stubs the SFTP layer — no network needed |
 | `check_facility_type.py` | The rules deciding whether a credit facility is a warehouse line, a syndicated deal or a business line of credit. **Offline — no API key, no network, instant**, unlike the integration gate. Includes a negative control. Exists because the model used to put 623 of 625 documents in one bucket and no test was watching that field |
+| `check_doc_category.py` | The rule that overturns an unsupported COLLATERAL verdict on an Assignment of Mortgage. Offline, no API key. Asserts both that it corrects the 9,604-document error AND that it never touches UCC filings or the generic-assignment rent problem, and that it can never *invent* a collateral verdict |
 | `check_doc_type_scope.py` | Non-assignment doc types (`FST`) never reach `aom_events_clean` or the entity signal sweep, while `AMO`/`ASG`/legacy `NULL` rows still do. Runs on an in-memory fixture **plus a negative control** — production had zero FST rows when it was written, so a live-only check would have passed while asserting nothing |
 | `diff_name_systems.py`, `show_merge_proposals.py` | Diagnostics for reviewing name-matching decisions |
 
@@ -971,7 +972,7 @@ confirmed. Commit messages are written as statements of what changed and why
 
 ---
 
-## 7. Current status — as of 11 Sep 2026
+## 7. Current status — as of 15 Sep 2026
 
 ### 7.1 Overall
 
@@ -993,11 +994,14 @@ assignment category was ever missing. Along the way:
 
 | Scope | Filings indexed | Loan transfers | Other assignments | Entities |
 |---|---|---|---|---|
-| Miami-Dade | 105,598 | 44,857 | 27,975 | — |
-| **Broward** | **43,795** | **1,224** | **601** | — |
-| **All** | **149,393** | **46,081** | **28,576** | **18,383** |
+| Miami-Dade | 105,598 | 54,381 | — | — |
+| **Broward** | **43,795** | **1,323** | — | — |
+| **All** | **149,393** | **55,704** | **19,072** | **21,517** |
 
-Market transfers: **21,454**. Documents read end to end: **107,402**.
+Market transfers: **26,699**. Documents read end to end: **107,443**.
+
+**Loan transfers rose from 46,081 to 55,704 on 15 Sep 2026 — see the note below. This is a
+correction, not new data.**
 
 **"Other assignments" is new as of 11 Sep 2026** — collateral assignments and assignments of rents
 and leases, which were collected and read but previously had nowhere to appear. They live in their
@@ -1009,6 +1013,18 @@ Miami-Dade's filing count grew from 71,366 to 105,598 because **UCC financing st
 deliberately excluded from every column but the first — see the UCC Filings page in §4.3.
 
 > ### ⚠️ Read this before comparing against any earlier report
+>
+> **SUPERSEDED 15 Sep 2026 — the correction described below overshot, and the figures it produced
+> were too LOW.** The August re-read moved 11,366 Assignment-of-Mortgage filings into "collateral",
+> and 9,604 of those were ordinary loan sales that should never have moved. They say *"forever
+> without recourse"* and *"grant, bargain, sell, assign, transfer and set over"*, and their
+> counterparties are trustees, servicers, GSEs and HUD. The extractor had been answering on the
+> words "security" and "securing", which appear in every mortgage assignment because a mortgage IS a
+> security instrument. Loan transfers are now **55,704**. Anything quoted between 17 Aug and
+> 15 Sep 2026 understated transfer activity by roughly a fifth.
+>
+> The original note follows, because the reasoning in it still holds for the documents that
+> genuinely did not belong:
 >
 > **Clean transactions fell from ~51,800 to 44,585 on 17 Aug 2026, and the smaller number is the
 > correct one.** This is not data loss — it is the removal of documents that never belonged.

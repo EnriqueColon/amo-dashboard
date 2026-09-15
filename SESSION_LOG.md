@@ -214,6 +214,76 @@ were many, and names that should be many were one.*
 
 ---
 
+## 2026-09-15 — 9,604 loan sales were filed as "collateral" and are now back
+
+Owner pointed at one row on the Collateral view and asked *"is this an error?"* It was, and it was
+21% of AMO volume.
+
+`2026R626356` — county doc type **AMO**, title **"ASSIGNMENT OF MORTGAGE"**, Mortgage Assets
+Management → **SECRETARY OF HUD**, $544,185, $10 consideration — sat in COLLATERAL, so
+normalize.py's loan-transfer filter kept it out of Reporting. **11,366 AMO filings were in that
+state**, of which 10,593 had titles that never mention collateral.
+
+**32 documents were fetched and read before any code was written.** That is the step that made this
+safe:
+
+    SUSPECT   20 (title silent)   ALL outright transfers, ZERO pledge language
+    PLAUSIBLE  6 (title says so)  all genuinely collateral
+    CONTROL    6 (known good)     indistinguishable from the suspects
+
+Suspects read *"does hereby assign, transfer, convey, set over, and deliver to: SECRETARY OF HOUSING
+AND URBAN DEVELOPMENT, **forever without recourse**"* and *"did **grant, bargain, sell, assign,
+transfer and set over**"*. Genuine ones read *"**collaterally assign**"* or *"for better **securing
+the repayment of the Loan**"* to a party named **Lender**. Note *"without recourse" appears in BOTH*
+and is not a discriminator on its own.
+
+**Root cause, the third instance of one shape.** The prompt defines COLLATERAL as a pledge
+*"(no outright transfer)"* — deciding clause in a trailing parenthetical, no positive anchor for a
+plain assignment — while **every** mortgage assignment is saturated with "security" and "securing",
+because a mortgage IS a security instrument. The model answered on ambient vocabulary.
+*Same shape as facility_type and as the Class column: a categorical judgement the model is bad at,
+with the discriminator buried.*
+
+**Fix:** `reclassify_collateral()` in `extract_pdfs.py` — only ever OVERTURNS a COLLATERAL verdict
+the document does not support, never invents one, never touches a non-AMO filing. Prompt improved
+too, since it costs nothing.
+
+**Result on production:**
+
+    aom_events_clean      46,100 -> 55,704     (+9,604, +21%)
+    aom_events_nonloan    28,591 -> 19,072
+    AMO still COLLATERAL  11,366 ->  1,842     (genuine, each with a stored evidence quote)
+    UCC COLLATERAL        20,522 -> 20,522     (unchanged — the boundary held)
+    entity_nodes          18,349 -> 21,517     market transfers 21,454 -> 26,699
+
+Newly visible top relationships: `MORTGAGE ASSETS MANAGEMENT → SECRETARY OF HOUSING AND URBAN DEV`
+(271 — the owner's exact document) and `FEDERAL DEPOSIT INSURANCE → JPMORGAN CHASE` (247).
+
+**§7.2 of Confluence is now corrected.** It had warned since August that pre-17-Aug figures were
+*overstated*; that correction **overshot** and everything quoted 17 Aug → 15 Sep **understated**
+transfer activity by about a fifth.
+
+### Two process failures worth not repeating
+1. **The backfill first accumulated all 11,366 updates in memory and wrote once at the end** — six
+   hours with nothing in the DB, a crash at hour five losing everything, and a docstring claiming it
+   was resumable when it could not be. Caught one minute in by checking whether the count had moved.
+   Now commits every 100.
+2. **`pkill -f` matched its own command string and killed the ssh shell instead of the target**, so
+   the old process survived and the relaunch produced TWO concurrent runs — 16 downloads against the
+   clerk instead of the tuned 8. *Kill long jobs by PID, never by pattern.* This bit twice today.
+
+**`doc_category_evidence` is now stored.** Facility extraction has had an evidence quote since day
+one and that is precisely what made its bug auditable from stored data; `doc_category` had none,
+which is why this correction cost a 6-hour re-OCR instead of a query. **The next audit of this field
+is free.**
+
+**NOT fixed, deliberately:** the generic `ASG` type has its OWN wrong-bucket problem — **1,375
+documents titled "ASSIGNMENT OF RENTS" sit in COLLATERAL**, plus 384 "ASSIGNMENT OF LEASES, RENTS
+AND PROFITS". Applying this rule there would flip them to LOAN_TRANSFER and swap one error for
+another. `check_doc_category.py` asserts they are left alone. Needs its own sample and its own rule.
+
+---
+
 ## ⏭ NEXT SESSION — what is still open (as of 2026-09-11)
 
 **Everything the owner set on 1 Sep is now closed and deployed.** Droplet at `ff75f35`, local clean,
