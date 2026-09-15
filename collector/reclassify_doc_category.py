@@ -11,6 +11,9 @@ Those rows are therefore excluded from aom_events_clean by normalize.py's
 loan-transfer filter, which is why roughly one loan sale in five is missing from
 the Reporting tab.
 
+Writes commit in batches of 100 as it goes, so progress survives an interruption
+and a re-run resumes — the selection keys on doc_category still being COLLATERAL.
+
 **No LLM calls.** The decision is `extract_pdfs.reclassify_collateral`, a pure
 function of the document text — but the OCR text was never stored, so each
 document has to be fetched and scanned again. That is the whole cost: bandwidth
@@ -91,8 +94,30 @@ def main() -> int:
 
     t0 = time.time()
     tally = Counter()
-    updates = []
+    pending: list = []
+    written = 0
     done = 0
+
+    def flush():
+        """Commit what has been decided so far.
+
+        Deliberately incremental. The first version accumulated all 11,366
+        updates in memory and wrote once at the end, which meant the database
+        showed no progress for six hours and a crash at hour five would have
+        thrown the whole run away — while the docstring claimed the job was
+        resumable. It is only resumable if the rows are actually written, since
+        the selection keys on doc_category still being COLLATERAL.
+        """
+        nonlocal pending, written
+        if not (args.apply and pending):
+            pending = []
+            return
+        conn.executemany(
+            'UPDATE pdf_extractions SET doc_category = ?, doc_category_evidence = ? '
+            'WHERE cfn = ?', pending)
+        conn.commit()
+        written += len(pending)
+        pending = []
 
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
         for cfn, cat, quote, err in pool.map(examine, rows):
@@ -101,19 +126,23 @@ def main() -> int:
                 tally['error'] += 1
             elif cat == 'LOAN_TRANSFER':
                 tally['-> LOAN_TRANSFER'] += 1
-                updates.append((cat, quote, cfn))
+                pending.append((cat, quote, cfn))
             elif cat == 'COLLATERAL':
                 tally['stays COLLATERAL'] += 1
-                updates.append((cat, quote, cfn))
+                pending.append((cat, quote, cfn))
             else:
                 tally[f'stays {cat}'] += 1
+
+            if len(pending) >= 100:
+                flush()
 
             if done % 200 == 0:
                 rate = done / max(time.time() - t0, 1) * 3600
                 left = (len(rows) - done) / max(rate, 1)
                 with _print_lock:
                     print(f'  [{done}/{len(rows)}] {dict(tally)} '
-                          f'{rate:.0f}/hr eta={left:.1f}h', flush=True)
+                          f'{rate:.0f}/hr eta={left:.1f}h written={written}', flush=True)
+    flush()
 
     print(f'\nfinished re-reading in {(time.time()-t0)/60:.1f} min')
     for k, v in tally.most_common():
@@ -124,13 +153,9 @@ def main() -> int:
         conn.close()
         return 0
 
-    # Only rows whose verdict actually came back are touched; an errored
+    # Rows were committed in batches of 100 as the run progressed; an errored
     # document keeps whatever it had rather than being guessed at.
-    conn.executemany(
-        'UPDATE pdf_extractions SET doc_category = ?, doc_category_evidence = ? WHERE cfn = ?',
-        updates)
-    conn.commit()
-    print(f'\napplied {len(updates)} rows')
+    print(f'\napplied {written} rows')
     for cat, n in conn.execute("""
         SELECT px.doc_category, COUNT(*) FROM pdf_extractions px
         JOIN assignments a ON a.cfn = px.cfn
