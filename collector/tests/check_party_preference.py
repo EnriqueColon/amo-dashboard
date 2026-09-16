@@ -87,6 +87,20 @@ PROPERTY_CASES = [
     ('P.O. BOX 1234, MIAMI, FL 33101', 'P.O. BOX 1234, MIAMI, FL 33101',
      'a PO box has no street number but is still locatable'),
 
+    # ── legal descriptions identify the property and must survive ─────────
+    ('Lot 13, Block 2, of LYNWOOD, according to the Plat thereof, as recorded in '
+     'Plat Book 46, Page 21',
+     'Lot 13, Block 2, of LYNWOOD, according to the Plat thereof, as recorded in '
+     'Plat Book 46, Page 21',
+     'not a street address, but it identifies the parcel more precisely than one '
+     '— an earlier draft threw these away, which was the same mistake inverted'),
+    ('Lots 20, 21 and 22 and the East 11 feet of Lot 23, Block 38, Silver Bluff Estates',
+     'Lots 20, 21 and 22 and the East 11 feet of Lot 23, Block 38, Silver Bluff Estates',
+     'plural lots, same reasoning'),
+    ('Section 25, Township 54 South, Range 39 East, Miami-Dade County, Florida',
+     'Section 25, Township 54 South, Range 39 East, Miami-Dade County, Florida',
+     'a metes-and-bounds description is a real locator'),
+
     # ── prose: the extractor answering in words ───────────────────────────
     ('AS DESCRIBED IN SAID MORTGAGE', None, '162 rows'),
     ('not explicitly stated', None, '120 rows'),

@@ -514,8 +514,18 @@ _PROP_GEO_ONLY_RE = re.compile(
     r'(?:florida|fl)?\s*,?\s*(?:\d{5})?\s*$', re.I)
 
 
+# A platted legal description — "Lot 13, Block 2, of LYNWOOD, according to the
+# Plat thereof, as recorded in Plat Book 46" — is NOT a street address but it
+# does identify the property, often more precisely than one. An earlier draft of
+# this function threw those away along with the prose, which would have been the
+# same mistake in the opposite direction: dropping real information to tidy a
+# column. They are kept.
+_PROP_LEGAL_RE = re.compile(
+    r'\b(?:lot|lots|block|plat|tract|township|range|section)\b', re.I)
+
+
 def clean_property_address(value: str | None) -> str | None:
-    """Return the value if it is plausibly a street address, else None."""
+    """Return the value if it identifies a property, else None."""
     v = sanitize_ocr_field(value)
     if not v:
         return None
@@ -523,14 +533,16 @@ def clean_property_address(value: str | None) -> str | None:
         return None
     if _PROP_GEO_ONLY_RE.match(v):
         return None
-    # A real address carries a street number or a PO box. Without either there
-    # is nothing to locate, and what is left is almost always a name or a
-    # fragment of recital text.
+    # Something locatable carries a number: a street number, a PO box, or a lot
+    # and block. Without one there is nothing to find, and what remains is
+    # almost always a person's name or a fragment of recital text.
     if not re.search(r'\d', v):
         return None
-    if not (re.match(r'^\s*\d', v) or re.search(r'\bP\.?\s*O\.?\s*BOX\b', v, re.I)):
-        return None
-    return v
+    if (re.match(r'^\s*\d', v)
+            or re.search(r'\bP\.?\s*O\.?\s*BOX\b', v, re.I)
+            or _PROP_LEGAL_RE.search(v)):
+        return v
+    return None
 
 # ── Suffix signal extraction ─────────────────────────────────────────────────
 # Captures classification-relevant information from raw filing names BEFORE
