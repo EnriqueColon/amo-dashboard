@@ -1812,20 +1812,32 @@ def build_normalized_tables():
     # is not the same as it not happening: 118 rows carried Freedom Mortgage's
     # Boca Raton office, 51 a Meriden CT office, 33 a Coral Gables one.
     #
-    # The tell is structural rather than a list of known addresses, which would
-    # go stale: a genuine property address does not repeat across dozens of
-    # filings that all share one buyer. A servicer's own address does exactly
-    # that, because every loan it bought points back at its mailroom.
+    # The tell is that the SAME string is already known to be a party's own
+    # mailing address, because sponsor_address is extracted separately on every
+    # document. An address a party lists as its own on three or more filings is
+    # its office, whatever column it later turns up in.
+    #
+    # This replaces a first attempt that keyed on repetition instead — ">=15
+    # filings sharing <=2 buyers". That was wrong in both directions: it missed
+    # Freedom Mortgage's Boca Raton office (118 rows, but FOUR buyer spellings
+    # once an OCR variant "FREDOM MORTGAGE" is counted) while catching a real
+    # platted legal description. Repetition alone cannot separate a busy
+    # property from a mailroom.
+    #
+    # Measured separation is clean, which is why the threshold is safe to set
+    # low: known offices appear as a party address 10-351 times, and the real
+    # properties in the same size band appear 0 or 1 times. Nothing sits
+    # between 1 and 10.
     for table in ('aom_events_clean', 'aom_events_nonloan'):
         before = conn.execute(
             f"SELECT COUNT(*) FROM {table} WHERE property_address IS NOT NULL").fetchone()[0]
         conn.execute(f"""
             UPDATE {table} SET property_address = NULL
-            WHERE property_address IN (
-                SELECT property_address FROM {table}
-                WHERE property_address IS NOT NULL
-                GROUP BY property_address
-                HAVING COUNT(*) >= 15 AND COUNT(DISTINCT assignee_canon) <= 2
+            WHERE UPPER(TRIM(property_address)) IN (
+                SELECT UPPER(TRIM(sponsor_address)) FROM pdf_extractions
+                WHERE sponsor_address IS NOT NULL AND TRIM(sponsor_address) != ''
+                GROUP BY UPPER(TRIM(sponsor_address))
+                HAVING COUNT(*) >= 3
             )""")
         after = conn.execute(
             f"SELECT COUNT(*) FROM {table} WHERE property_address IS NOT NULL").fetchone()[0]

@@ -4,6 +4,75 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-09-16 — The Assignor column was showing the homeowner, not the seller
+
+Owner looked at his own Reporting tab and asked *"does this seem repetitive, is it giving good
+information?"* The repetition was real and correct. The information was not.
+
+**The repetition first, because it is the thing that looks broken and isn't.** 53 rows of
+`WELLS FARGO → FREEDOM MORTGAGE` on 2026-09-10 are 53 distinct CFNs — a bulk servicing transfer,
+each loan its own recorded document. Showing them separately is right. They *look* like duplicates
+because the column that distinguishes them — property — was blank or junk. **A blank distinguishing
+column makes correct data look like a bug.**
+
+**The actual bug.** The table renders `assignor_canon`, built from the county index's grantor. The
+index lists *every* party on a filing, which for an assignment routinely includes the original
+borrower. Top row of his screen: `SOSA JAIME → FREEDOM MORTGAGE`. The document says
+`WELLS FARGO BANK, NA → FREEDOM MORTGAGE CORPORATION`. **Sosa Jaime is the homeowner.** Sized at
+~12,000 rows (22%) by a corporate-marker heuristic.
+
+Note the expand panel was *already* showing the right parties from `pdf_assignor`/`pdf_assignee` —
+the correct data was one click away the whole time, and the charts and Lending Relationships were
+never affected. Only the table display was wrong.
+
+**Three dry runs, three rejected drafts.** This is the part worth keeping:
+
+| Draft | Dry-run verdict |
+|---|---|
+| Prefer the document's party everywhere | **52% of canonical names changed.** The index is clerk-typed and clean; the document is OCR'd. `FV-1 INC` → `FY-I, INC. IN TRUST FOR MORGAN STANLEY…` — the key identifier is OCR damage, and the entity fragments away from its own other filings. Also demoted `LOAN STORE` (BANK) to `THE LOAN STORE` (OTHER). |
+| Fire whenever the classifier says `OTHER` | `OTHER` covers a homeowner **and** every company the classifier has no pattern for. Merged `ONITY MORTGAGE CORP` into `PHH MORTGAGE` — a change of *identity*, not a correction. |
+| Fire only where the index name carries **no organisational marker at all** | 4,821 assignor + 656 assignee rows. Every sample is the real shape: `CAYEMITTE,MARIE → GOLDMAN SACHS`, `LARRAIN JUAN → FANNIE MAE`, `PAZ PEDRO C SR → US BANK`. **Shipped.** |
+
+So: **the index wins on spelling, the document wins on which party** — and only the second was ever
+broken. `_looks_like_person()` exists because `classify_canonical()` cannot tell a homeowner from an
+unrecognised company; both come back `OTHER`, and conflating them is what produced drafts 1 and 2.
+
+`assignor_type` is re-derived from the name actually reported — the index's classification described
+a different string, which is how a bank ended up labelled OTHER.
+
+**Property column — same lesson, inverted.** 1,519 rows held prose, not an address:
+`AS DESCRIBED IN SAID MORTGAGE` (162), `not explicitly stated` (120), `not specified` (90), bare
+counties (92), and **borrower names** — *"Said Mortgage was made by GISELE M…"* — which is a privacy
+problem in a column labelled Property. Prose also silently breaks the property filter and the CSV
+export.
+
+**The first draft of that fix cleared 4,552 rows, and it was wrong**: it discarded platted legal
+descriptions (`Lot 13, Block 2, of LYNWOOD, according to the Plat thereof…`) and condominium unit
+numbers, which identify a parcel *more* precisely than a street address. Kept. Final rule clears
+1,519 — accept anything carrying a street number, a PO box, or a lot/block/section/unit reference.
+
+**A structural rule for party HQ addresses** (118 rows of Freedom Mortgage's Boca Raton office, etc.)
+is in normalize.py — *"≥15 filings sharing ≤2 buyers is a mailroom, not a property"* — but the dry
+run showed it catching only 2 addresses, one of them a real legal description. **Low value, non-zero
+risk; revisit rather than trust it.**
+
+**Also found, NOT fixed** (told the owner explicitly rather than rushing it before his meeting):
+- **Loan amount is only 57% populated** (50% for 2026), and dollar figures are core to the tool's
+  purpose. Needs re-reading documents; wrong amounts are worse than blank ones.
+- ~130 ASG rows titled `ASSIGNMENT OF PERMITS AND AGREEMENTS` and similar are genuinely `OTHER`, not
+  `COLLATERAL`.
+
+**Operational.** `normalize.py` empties `aom_events_clean` and refills in place, so the live
+Reporting tab reads **zero rows for the ~90 minutes it runs** — the owner hit exactly that and asked
+if it was normal. The 7-day response cache normally hides it; an uncached filter combination goes
+straight to SQLite. A follow-up task is queued to rebuild into scratch tables and swap atomically.
+**Until that lands, treat every normalize run as dashboard downtime.**
+
+Commits `75cf0bb`..`ef86231` (the `wip:` ones are dry-run iterations; `ef86231` carries the
+reasoning — history not rewritten because the droplet had already pulled them).
+
+---
+
 ## 2026-09-15 (later) — "Collateral" now means collateral: 6,040 rent assignments moved out
 
 The second half of the same bucket. Last night's fix pulled 9,604 loan sales **out** of COLLATERAL;

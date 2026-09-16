@@ -1056,6 +1056,54 @@ loan transfers, so no figure above double-counts and nothing published earlier h
 > reasoning recorded in `collector/tests/check_doc_category.py`, rather than left to the document
 > reader's judgement.
 
+> ### The Assignor column was showing the borrower — corrected 16 Sep 2026
+>
+> **Top-seller rankings changed on 16 Sep 2026. The new figures are the correct ones.** If you have a
+> screenshot or export from before that date, re-run it.
+>
+> **What was wrong.** The Reporting table's *Assignor* and *Assignee* columns came from the county
+> clerk's index. That index lists **every party named on a filing** — which, for a mortgage
+> assignment, routinely includes the original homeowner alongside the two institutions actually
+> trading the loan. The table had no way to tell which was which, so about **one row in five showed a
+> homeowner's name where the document names a bank.**
+>
+> A real example from the top of the page: the table read **"SOSA JAIME → FREEDOM MORTGAGE"**. The
+> document itself reads **"WELLS FARGO BANK, NA → FREEDOM MORTGAGE CORPORATION"**. Sosa Jaime is the
+> homeowner — not a party to the sale at all.
+>
+> **What changed.** Where the index gives a person's name and the document names an institution, the
+> table now reports the institution. **4,821 seller rows and 656 buyer rows** were corrected, and
+> those transactions are now credited to the bank or servicer that actually sold the loan.
+>
+> **Practical effect: top-seller counts went UP** for the institutions that had been losing credit to
+> homeowner names — Goldman Sachs, Fannie Mae, Nationstar, US Bank and others. Nothing was added or
+> removed; existing transactions were re-attributed to the right party.
+>
+> **Deliberately narrow.** The rule only fires where the index name carries no company marker at all.
+> Where both sides already name an institution it changes nothing, because the clerk's typing is
+> cleaner than the scanned document's text and swapping would have introduced scanning errors into
+> company names. Two earlier, broader versions were tested against the full database and rejected for
+> exactly that reason.
+>
+> **This did not affect the charts, the Lending Relationships page, or the totals** — those were
+> already reading the document's own parties. Only the table's display was wrong, and the correct
+> names were always visible by expanding a row.
+
+> ### The Property column: prose removed, legal descriptions kept — 16 Sep 2026
+>
+> **1,519 rows** in the *Property* column held sentences rather than addresses — *"AS DESCRIBED IN
+> SAID MORTGAGE"*, *"not explicitly stated"*, *"not specified"* — plus bare county names and, in some
+> cases, **the borrower's own name**. Those are now blank. A blank is honest, and the text versions
+> were also breaking the property filter and the CSV export.
+>
+> **Legal descriptions were kept.** *"Lot 13, Block 2, of LYNWOOD, according to the Plat thereof…"*
+> and condominium unit numbers are not street addresses but they identify a parcel precisely — often
+> more precisely than an address. An earlier version of this cleanup discarded them and was corrected
+> before release.
+>
+> **Still open:** the *Loan Amount* column is populated for **57%** of loan transfers (50% for 2026).
+> Closing that gap requires re-reading the source documents and is scheduled separately — see §7.4.
+
 Miami-Dade's filing count grew from 71,366 to 105,598 because **UCC financing statements
 (32,759) were added on 9–10 Sep 2026**. Those are secured-lending records, not assignments, and are
 deliberately excluded from every column but the first — see the UCC Filings page in §4.3.
