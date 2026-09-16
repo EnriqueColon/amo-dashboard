@@ -48,17 +48,30 @@ PARTY_CASES = [
     ('LAKEVIEW LOAN SERVICING, LLC', 'JOHN Q HOMEOWNER', 'LAKEVIEW LOAN SERVICING, LLC',
      'institution in the index, person in the document — index wins'),
 
-    # ── both institutional: document is the authority on spelling ─────────
-    ('WELLS FARGO BANK', 'WELLS FARGO BANK, N.A.', 'WELLS FARGO BANK, N.A.',
-     'the document carries the full legal name'),
-    ('MORTGAGE ELECTRONIC REGISTRATION SYSTEMS INC',
-     'MORTGAGE ELECTRONIC REGISTRATION SYSTEMS, INC., AS NOMINEE',
-     'MORTGAGE ELECTRONIC REGISTRATION SYSTEMS, INC., AS NOMINEE',
-     'MERS keeps its role wording, which the index drops'),
+    # ── both institutional: the INDEX keeps it ────────────────────────────
+    # The index is clerk-typed and clean; the document is OCR'd. A blanket
+    # preference for the document was tried and rejected — these are the real
+    # regressions it produced, taken from the dry run against production.
+    ('WELLS FARGO BANK', 'WELLS FARGO BANK, N.A.', 'WELLS FARGO BANK',
+     'both already name the institution — swapping buys a cosmetic spelling '
+     'change and 52% canonical churn across the table'),
+    ('LOAN STORE', 'THE LOAN STORE', 'LOAN STORE',
+     'the document spelling reclassifies a BANK as OTHER'),
+    ('FV-1', 'FY-I, . IN TRUST FOR MORGAN STAN', 'FV-1',
+     'OCR damage — the clean index name must not be replaced by it'),
+    # Honest edge: "institutional" means the pattern classifier recognises it,
+    # not that it is literally a person. HEADLANDS RESIDENTIAL is a real
+    # securitisation vehicle the classifier does not know, so the rule DOES
+    # fire and reports the trustee the document names. Both answers are
+    # defensible — the index names the trust, the document names US Bank acting
+    # for it — and the document is the one that was actually signed. Recorded
+    # here so the behaviour is a known choice rather than a surprise.
+    ('HEADLANDS RESIDENTIAL SERIES OWNER', 'US BANK', 'US BANK',
+     'unrecognised trust in the index, named trustee in the document'),
 
     # ── both personal: a genuine person-to-person assignment ──────────────
-    ('SMITH JOHN A', 'JOHN A. SMITH', 'JOHN A. SMITH',
-     'neither is institutional; the document still spells it properly'),
+    ('SMITH JOHN A', 'JOHN A. SMITH', 'SMITH JOHN A',
+     'neither names an institution, so there is no party error to correct'),
 
     # ── the document has nothing usable ───────────────────────────────────
     ('FREEDOM MORTGAGE CORPORATION', None, 'FREEDOM MORTGAGE CORPORATION',
@@ -100,6 +113,16 @@ PROPERTY_CASES = [
     ('Section 25, Township 54 South, Range 39 East, Miami-Dade County, Florida',
      'Section 25, Township 54 South, Range 39 East, Miami-Dade County, Florida',
      'a metes-and-bounds description is a real locator'),
+    ('Condominium Unit No. 3601, MARQUIS, A CONDOMINIUM',
+     'Condominium Unit No. 3601, MARQUIS, A CONDOMINIUM',
+     'a condo unit number identifies the property exactly — the first draft '
+     'cleared these because they do not start with a street number'),
+    ('Unit 712 of Rise Condominium, Miami-Dade County, Florida',
+     'Unit 712 of Rise Condominium, Miami-Dade County, Florida', 'same'),
+
+    # ── a company name is not a property, even carrying a number ──────────
+    ('Good Night Inn and Suite Baymeadow 770 LLC, Florida', None,
+     'has a digit but is a business name — no street number, no lot, no unit'),
 
     # ── prose: the extractor answering in words ───────────────────────────
     ('AS DESCRIBED IN SAID MORTGAGE', None, '162 rows'),

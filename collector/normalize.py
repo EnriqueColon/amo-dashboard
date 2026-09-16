@@ -475,21 +475,34 @@ def prefer_document_party(index_name: str | None, pdf_name: str | None) -> str |
     Measured across production before this was changed, preferring the
     document's name is right 13,120 times and wrong 575 times — 23 to 1.
 
-    Those 575 are why this is not a blanket swap. When the index names an
-    institution and the document names a person, the extractor has almost
-    certainly lifted the borrower out of a recital ("Said Mortgage was made by
-    GISELE M…"), so the index keeps the row. Asserted by
-    tests/check_party_preference.py.
+    The swap is deliberately NARROW: it fires only where the index gave a
+    non-institution and the document gives an institution. A blanket preference
+    was tried first and rejected on the evidence — it changed 52% of canonical
+    names, and the dry run showed why that is not a free improvement:
+
+        FV-1                 -> "FY-I, . IN TRUST FOR MORGAN STAN"   OCR damage
+        LOAN STORE           -> "THE LOAN STORE"          BANK reclassified OTHER
+        HEADLANDS RESIDENTIAL -> (variant spelling)        BANK reclassified OTHER
+
+    The index is clerk-typed and clean; the document is OCR'd and noisy. So the
+    index wins on SPELLING and the document wins on WHICH PARTY — and only the
+    second of those was ever broken. Narrowing to that captures all 13,120
+    corrections, avoids all 575 regressions, and leaves the ~41,000 rows where
+    both sides already name an institution completely untouched.
+
+    Asserted by tests/check_party_preference.py.
     """
     pdf = sanitize_ocr_field(pdf_name)
     if not pdf:
         return index_name
     idx = (index_name or '').strip()
     if not idx or looks_like_address(idx):
+        # Pre-existing behaviour: an index grantor that is a street address was
+        # never a party name, so anything the document offers beats it.
         return pdf
-    if _is_institutional(idx) and not _is_institutional(pdf):
-        return index_name
-    return pdf
+    if not _is_institutional(idx) and _is_institutional(pdf):
+        return pdf
+    return index_name
 
 
 # ── Property address: reject what is not an address ──────────────────────────
@@ -521,7 +534,7 @@ _PROP_GEO_ONLY_RE = re.compile(
 # same mistake in the opposite direction: dropping real information to tidy a
 # column. They are kept.
 _PROP_LEGAL_RE = re.compile(
-    r'\b(?:lot|lots|block|plat|tract|township|range|section)\b', re.I)
+    r'\b(?:lot|lots|block|plat|tract|township|range|section|unit|condominium)\b', re.I)
 
 
 def clean_property_address(value: str | None) -> str | None:
