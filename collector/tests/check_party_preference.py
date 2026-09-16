@@ -57,17 +57,23 @@ PARTY_CASES = [
      'change and 52% canonical churn across the table'),
     ('LOAN STORE', 'THE LOAN STORE', 'LOAN STORE',
      'the document spelling reclassifies a BANK as OTHER'),
-    ('FV-1', 'FY-I, . IN TRUST FOR MORGAN STAN', 'FV-1',
-     'OCR damage — the clean index name must not be replaced by it'),
-    # Honest edge: "institutional" means the pattern classifier recognises it,
-    # not that it is literally a person. HEADLANDS RESIDENTIAL is a real
-    # securitisation vehicle the classifier does not know, so the rule DOES
-    # fire and reports the trustee the document names. Both answers are
-    # defensible — the index names the trust, the document names US Bank acting
-    # for it — and the document is the one that was actually signed. Recorded
-    # here so the behaviour is a known choice rather than a surprise.
-    ('HEADLANDS RESIDENTIAL SERIES OWNER', 'US BANK', 'US BANK',
-     'unrecognised trust in the index, named trustee in the document'),
+
+    # ── unrecognised COMPANIES are not people and must be left alone ──────
+    # Strings verbatim from production. The classifier returns OTHER for both a
+    # homeowner and a company it has no pattern for; telling them apart is what
+    # _looks_like_person is for.
+    ('FV-1 INC', 'FY-I, INC. IN TRUST FOR MORGAN STANLEY MORTGAGE CAPITAL HOLDINGS LLC',
+     'FV-1 INC',
+     'the document misreads FV-1 as FY-I; swapping would fragment the entity '
+     'away from its other filings for the sake of a longer string'),
+    ('ONITY MORTGAGE CORP',
+     'ONITY MORTGAGE CORPORATION F/K/A PHH MORTGAGE CORPORATION', 'ONITY MORTGAGE CORP',
+     'canonicalises to PHH MORTGAGE and silently merges Onity into its former '
+     'name — a change of identity, not a correction'),
+    ('HEADLANDS RESIDENTIAL SERIES OWNER', 'US BANK', 'HEADLANDS RESIDENTIAL SERIES OWNER',
+     'an unrecognised securitisation vehicle, not a person — "SERIES" marks it '
+     'as an organisation, so the rule stays out of a trust-vs-trustee question '
+     'it has no business deciding'),
 
     # ── both personal: a genuine person-to-person assignment ──────────────
     ('SMITH JOHN A', 'JOHN A. SMITH', 'SMITH JOHN A',

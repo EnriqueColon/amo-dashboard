@@ -460,6 +460,32 @@ def _is_institutional(name: str | None) -> bool:
     return bool(name) and classify_canonical(canonicalize(name)) in _INST_TYPES
 
 
+# Anything carrying one of these is an organisation of some kind, even when the
+# type classifier does not recognise which. Used to tell a homeowner's name from
+# a company the classifier simply has no pattern for — a distinction the
+# classifier alone cannot make, since both come back 'OTHER'.
+_CORPORATE_MARKER_RE = re.compile(
+    r'\b(?:INC|CORP|CORPORATION|INCORPORATED|LLC|L\.?L\.?C|LTD|LP|L\.?P|LLP|PLC|'
+    r'CO|COMPANY|BANK|BANKING|N\.?A|F\.?S\.?B|SSB|TRUST|TRUSTEE|ASSOCIATION|ASSN|'
+    r'FUND|FUNDING|CAPITAL|HOLDINGS?|PARTNERS?|PARTNERSHIP|GROUP|SERIES|SYSTEMS|'
+    r'MORTGAGE|SERVICING|FINANCIAL|FINANCE|LENDING|LENDERS?|REALTY|PROPERTIES|'
+    r'INVESTMENTS?|SAVINGS|CREDIT|UNION|AGENCY|AUTHORITY|SECRETARY|DEPARTMENT|'
+    r'BANCORP|BANCSHARES|ENTERPRISES?|VENTURES?|ASSOCIATES|P\.?A)\b', re.I)
+
+
+def _looks_like_person(name: str | None) -> bool:
+    """True when nothing in the name marks it as an organisation.
+
+    Deliberately not "the classifier said OTHER". The classifier returns OTHER
+    for a homeowner AND for every company it has no pattern for, and treating
+    those the same is what made an earlier draft of the rule swap FV-1 INC ->
+    "FY-I, INC. IN TRUST FOR MORGAN STANLEY..." — trading a clean index name for
+    one whose key identifier is OCR damage, which then fails to merge with the
+    entity's other filings.
+    """
+    return bool(name) and not _CORPORATE_MARKER_RE.search(name)
+
+
 def prefer_document_party(index_name: str | None, pdf_name: str | None) -> str | None:
     """Pick which name to report for a party: the document's, or the index's.
 
@@ -500,7 +526,7 @@ def prefer_document_party(index_name: str | None, pdf_name: str | None) -> str |
         # Pre-existing behaviour: an index grantor that is a street address was
         # never a party name, so anything the document offers beats it.
         return pdf
-    if not _is_institutional(idx) and _is_institutional(pdf):
+    if _looks_like_person(idx) and _is_institutional(pdf):
         return pdf
     return index_name
 
