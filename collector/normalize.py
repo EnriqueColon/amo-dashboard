@@ -455,6 +455,83 @@ def classify_canonical(name: str) -> str:
 
 _INST_TYPES = {'BANK', 'SERVICER', 'PRIVATE_CREDIT', 'GSE', 'TRUST'}
 
+
+def _is_institutional(name: str | None) -> bool:
+    return bool(name) and classify_canonical(canonicalize(name)) in _INST_TYPES
+
+
+def prefer_document_party(index_name: str | None, pdf_name: str | None) -> str | None:
+    """Pick which name to report for a party: the document's, or the index's.
+
+    The county index lists EVERY party on a filing. For an assignment that
+    routinely includes the original borrower and MERS alongside the two
+    institutions actually trading the loan, and the dominant-party heuristic
+    above has no way to tell which is which — so the Reporting table was showing
+    a homeowner's name in the Assignor column on roughly one row in five
+    (12,068 of 55,839 measured 2026-09-16). The document itself names the
+    assignor and assignee explicitly, and that is the answer to "who sold this
+    loan to whom".
+
+    Measured across production before this was changed, preferring the
+    document's name is right 13,120 times and wrong 575 times — 23 to 1.
+
+    Those 575 are why this is not a blanket swap. When the index names an
+    institution and the document names a person, the extractor has almost
+    certainly lifted the borrower out of a recital ("Said Mortgage was made by
+    GISELE M…"), so the index keeps the row. Asserted by
+    tests/check_party_preference.py.
+    """
+    pdf = sanitize_ocr_field(pdf_name)
+    if not pdf:
+        return index_name
+    idx = (index_name or '').strip()
+    if not idx or looks_like_address(idx):
+        return pdf
+    if _is_institutional(idx) and not _is_institutional(pdf):
+        return index_name
+    return pdf
+
+
+# ── Property address: reject what is not an address ──────────────────────────
+# The extractor answers in prose when a document does not state an address —
+# "AS DESCRIBED IN SAID MORTGAGE", "not explicitly stated", "more fully
+# described in said Mortgage" — and sometimes returns the borrower's name or a
+# bare county. 801+ rows carried one of these. A blank column is honest; a
+# column that says "not explicitly stated" is noise that also breaks the
+# property filter and the CSV export.
+_PROP_PROSE_RE = re.compile(
+    r'not\s+(?:explicitly\s+|specifically\s+)?(?:stated|specified|provided|given|listed|available)'
+    r'|as\s+described\s+in|more\s+fully\s+described|described\s+in\s+said'
+    r'|said\s+mortgage|see\s+(?:the\s+)?exhibit|attached\s+exhibit|legal\s+description'
+    r'|the\s+property\s+situated|^\s*(?:n/?a|none|unknown|null)\s*$',
+    re.I)
+
+# A county or state with no street is not a property address. Anchored so it
+# only fires when that is the WHOLE value — "MIAMI-DADE County, Florida" goes,
+# "123 SW 8 ST, MIAMI-DADE COUNTY, FL" stays.
+_PROP_GEO_ONLY_RE = re.compile(
+    r'^\s*(?:miami[-\s]?dade|broward|palm\s+beach)?\s*(?:county)?\s*,?\s*'
+    r'(?:florida|fl)?\s*,?\s*(?:\d{5})?\s*$', re.I)
+
+
+def clean_property_address(value: str | None) -> str | None:
+    """Return the value if it is plausibly a street address, else None."""
+    v = sanitize_ocr_field(value)
+    if not v:
+        return None
+    if _PROP_PROSE_RE.search(v):
+        return None
+    if _PROP_GEO_ONLY_RE.match(v):
+        return None
+    # A real address carries a street number or a PO box. Without either there
+    # is nothing to locate, and what is left is almost always a name or a
+    # fragment of recital text.
+    if not re.search(r'\d', v):
+        return None
+    if not (re.match(r'^\s*\d', v) or re.search(r'\bP\.?\s*O\.?\s*BOX\b', v, re.I)):
+        return None
+    return v
+
 # ── Suffix signal extraction ─────────────────────────────────────────────────
 # Captures classification-relevant information from raw filing names BEFORE
 # legal suffixes are stripped during canonicalization.
@@ -1153,7 +1230,11 @@ def build_normalized_tables():
             'assignor_parent':     sanitize_name_field(r[3]),
             'assignee_name':       sanitize_name_field(r[4]),
             'assignee_parent':     sanitize_name_field(r[5]),
-            'property_address':    sanitize_address_field(r[6]),
+            # Note: clean_property_address, NOT sanitize_address_field. The
+            # property column has to hold a locatable address or nothing;
+            # sponsor_address below keeps the looser rule, because a corporate
+            # address is exactly what that field is for.
+            'property_address':    clean_property_address(r[6]),
             'loan_amount':         r[7],
             'consideration_amount':r[8],
             'doc_title':           sanitize_ocr_field(r[9]),
@@ -1303,14 +1384,26 @@ def build_normalized_tables():
         rec_book = entries[0][4]
         rec_page = entries[0][5]
 
-        # If the raw grantor looks like a street address, prefer the PDF-extracted name
-        if looks_like_address(dominant_assignor) and ext and ext.get('assignor_name'):
-            dominant_assignor = ext['assignor_name']
-        if looks_like_address(dominant_grantee) and ext and ext.get('assignee_name'):
-            dominant_grantee = ext['assignee_name']
+        # The document names the assignor and assignee explicitly; the index
+        # only lists everyone who appears on the filing. Prefer the document.
+        if ext:
+            dominant_assignor = prefer_document_party(dominant_assignor,
+                                                      ext.get('assignor_name'))
+            dominant_grantee = prefer_document_party(dominant_grantee,
+                                                     ext.get('assignee_name'))
 
         assignor_canon = canonicalize(dominant_assignor)
         assignee_canon = canonicalize(dominant_grantee)
+
+        # The reported name may now come from the document rather than the
+        # index, so the index's own classification no longer describes it — that
+        # is how a bank ended up labelled OTHER. Re-derive from the name
+        # actually being reported, keeping the index's answer only where the
+        # pattern classifier has nothing to say.
+        if (t := classify_canonical(assignor_canon)) != 'OTHER':
+            assignor_type = t
+        if (t := classify_canonical(assignee_canon)) != 'OTHER':
+            grantee_type = t
         txn_type = get_txn_type(assignor_canon, assignee_canon, assignor_type, grantee_type)
 
         (inserts if include else nonloan_inserts).append((
@@ -1328,7 +1421,8 @@ def build_normalized_tables():
             ext['assignee_name']         if ext else None,
             ext['assignor_parent']       if ext else None,
             ext['assignee_parent']       if ext else None,
-            (ext['property_address'] if ext and ext['property_address'] else index_address),
+            (ext['property_address'] if ext and ext['property_address']
+             else clean_property_address(index_address)),
             ext['loan_amount']           if ext else None,
             ext['consideration_amount']  if ext else None,
             ext['folio_parcel']          if ext else None,
@@ -1661,6 +1755,30 @@ def build_normalized_tables():
     non_other = sum(1 for etype, _ in type_updates if etype != 'OTHER')
     print(f"  Classified {non_other} entities (out of {n_nodes})")
     print(f"  Signal sources: {dict(source_counts)}")
+
+    # ── Strip corporate addresses out of the property column ─────────────────
+    # The prompt tells the extractor not to return a party's own address, which
+    # is not the same as it not happening: 118 rows carried Freedom Mortgage's
+    # Boca Raton office, 51 a Meriden CT office, 33 a Coral Gables one.
+    #
+    # The tell is structural rather than a list of known addresses, which would
+    # go stale: a genuine property address does not repeat across dozens of
+    # filings that all share one buyer. A servicer's own address does exactly
+    # that, because every loan it bought points back at its mailroom.
+    for table in ('aom_events_clean', 'aom_events_nonloan'):
+        before = conn.execute(
+            f"SELECT COUNT(*) FROM {table} WHERE property_address IS NOT NULL").fetchone()[0]
+        conn.execute(f"""
+            UPDATE {table} SET property_address = NULL
+            WHERE property_address IN (
+                SELECT property_address FROM {table}
+                WHERE property_address IS NOT NULL
+                GROUP BY property_address
+                HAVING COUNT(*) >= 15 AND COUNT(DISTINCT assignee_canon) <= 2
+            )""")
+        after = conn.execute(
+            f"SELECT COUNT(*) FROM {table} WHERE property_address IS NOT NULL").fetchone()[0]
+        print(f"  {table}: cleared {before - after} party-address rows from property")
 
     # Propagate updated types back into aom_events_clean and re-derive txn_type
     conn.execute("""
