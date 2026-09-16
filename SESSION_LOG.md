@@ -51,10 +51,23 @@ descriptions (`Lot 13, Block 2, of LYNWOOD, according to the Plat thereof…`) a
 numbers, which identify a parcel *more* precisely than a street address. Kept. Final rule clears
 1,519 — accept anything carrying a street number, a PO box, or a lot/block/section/unit reference.
 
-**A structural rule for party HQ addresses** (118 rows of Freedom Mortgage's Boca Raton office, etc.)
-is in normalize.py — *"≥15 filings sharing ≤2 buyers is a mailroom, not a property"* — but the dry
-run showed it catching only 2 addresses, one of them a real legal description. **Low value, non-zero
-risk; revisit rather than trust it.**
+**Party HQ addresses — the first rule was wrong and was replaced after deploy.** Freedom Mortgage's
+Boca Raton office sat in the Property column on 118 rows. The first attempt keyed on repetition
+(*"≥15 filings sharing ≤2 buyers is a mailroom"*) and **failed in both directions**: it missed Yamato
+Road, because the buyer has four spellings once the OCR variant `FREDOM MORTGAGE` is counted, and it
+caught a genuine platted legal description that happened to repeat. *Repetition cannot separate a
+busy property from a mailroom.*
+
+The working rule uses `sponsor_address`, which the extractor already stores as each document's party
+mailing address: **a string that three or more documents list as a party's own address is an office,
+whatever column it later appears in.** Separation is clean enough that the low threshold is safe —
+known offices appear as a party address **10–351 times**, the real properties in the same size band
+appear **0 or 1**, and nothing sits in between. Cleared 445 rows across 54 addresses, every one an
+office: suite numbers, a penthouse, and out-of-state servicing centres in Monroe LA, Meriden CT,
+Marlton NJ and Detroit MI. *A Miami-Dade mortgage is not secured by a building in Michigan.*
+
+Applied as a direct column UPDATE (commit `c126a0b`) rather than a fourth rebuild — it changes one
+field and needs no re-derivation, so it cost a `pm2 restart` instead of 90 minutes of downtime.
 
 **Also found, NOT fixed** (told the owner explicitly rather than rushing it before his meeting):
 - **Loan amount is only 57% populated** (50% for 2026), and dollar figures are core to the tool's
