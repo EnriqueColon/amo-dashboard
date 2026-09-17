@@ -50,4 +50,31 @@ cd "$COLLECTOR_DIR"
 # 4. LLM fallback classification for new entities
 "$VENV/bin/python3" enrich_entities.py
 
+# 5. Weekly email report — deliberately LAST, after collection and the rebuild,
+# so both counties are current when it is built. Sent mid-week, Miami-Dade
+# (collected only here) trails Broward (collected daily) by several days, and
+# the report reads as though Miami-Dade went quiet.
+#
+# OFF until REPORT_EMAIL_ENABLED=1 is set in .env. The owner approves the first
+# real send to the named recipients before it is switched on.
+if [ "${REPORT_EMAIL_ENABLED:-}" = "1" ]; then
+    echo "--- weekly email: $(date -u +%FT%TZ) ---"
+    # Friday runs finish between 09:00 and 10:05 UTC, which overlaps the 08:30
+    # nightly normalize. normalize.py empties aom_events_clean while it
+    # rebuilds, so wait for any rebuild to finish (up to 3 hours) rather than
+    # email a half-empty table. "[n]ormalize" so pgrep never matches this line.
+    waited=0
+    while pgrep -f "[n]ormalize\.py" >/dev/null && [ $waited -lt 10800 ]; do
+        sleep 60; waited=$((waited + 60))
+    done
+    if [ $waited -gt 0 ]; then echo "waited ${waited}s for a running normalize.py"; fi
+    # GRAPH_* in .env are plain KEY=value lines, not `export` lines like the
+    # rest of the file — without set -a the source at the top leaves them
+    # unexported and node never sees the credentials.
+    (
+        set -a; . /opt/amo-dashboard/.env; set +a
+        cd /opt/amo-dashboard && /usr/bin/npx tsx server/scripts/sendWeeklyReport.ts --send
+    ) || echo "WEEKLY EMAIL FAILED (exit $?) — collection and rebuild above still completed"
+fi
+
 echo "Completed: $(date)"

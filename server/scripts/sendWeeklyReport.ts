@@ -76,6 +76,18 @@ async function main() {
     return;
   }
 
+  // Refuse to email an empty report. normalize.py empties aom_events_clean and
+  // refills it in place over roughly 90 minutes, and the Friday run that sends
+  // this overlaps the 08:30 nightly rebuild (Friday runs have finished between
+  // 09:00 and 10:05). A report built mid-rebuild reads zero transfers and would
+  // go out looking like a dead market. Any real 15-day window has hundreds, so
+  // zero means "the table is being rebuilt", never "nothing happened".
+  if (report.cleanCount === 0) {
+    console.error(`NOT SENT: 0 transfers for ${startDate}..${endDate} — the table is most likely mid-rebuild. Retry later.`);
+    process.exitCode = 2;
+    return;
+  }
+
   const attachments = [
     { filename: `clean-events-${endDate}.csv`, content: report.cleanCsv },
     { filename: `lending-relationships-${endDate}.csv`, content: report.facilityCsv },
