@@ -449,7 +449,11 @@ for b in SIZES:
     other = c['document assignor is a different party than the table shows']
     ok_ = c['document confirms table direction']
     wrong = rev + other
-    sev = 'FAIL' if decided and wrong / decided > 0.05 else 'OK'
+    # A handful of documents cannot carry a FAIL; say the sample is too small instead.
+    if decided < 10:
+        sev = 'WARN'
+    else:
+        sev = 'FAIL' if wrong / decided > 0.05 else 'OK'
     add(S, f'direction — {b} ({len(by_bucket[b]):,} rows)', sev,
         f'{sum(c.values()) - c["AI extraction disagrees with document"]} read: {ok_} confirmed, {rev} reversed, '
         f'{other} different party, {c["undetermined"]} undetermined, {c["unreadable document"]} unreadable; '
@@ -503,7 +507,7 @@ json.dump(report, open(os.path.join(OUT, 'qc_data.json'), 'w'), indent=1, defaul
 order = {'FAIL': 0, 'WARN': 1, 'OK': 2, 'INFO': 3}
 with open(os.path.join(OUT, 'qc_data.md'), 'w') as f:
     counts = Counter(r['severity'] for r in report)
-    f.write(f'# QC data audit — {dt.datetime.utcnow():%Y-%m-%d %H:%M} UTC\n\n'
+    f.write(f'# QC data audit — {dt.datetime.now(dt.timezone.utc):%Y-%m-%d %H:%M} UTC\n\n'
             f'FAIL {counts["FAIL"]} · WARN {counts["WARN"]} · OK {counts["OK"]} · INFO {counts["INFO"]}\n\n')
     for sec in sorted({r['section'] for r in report}):
         f.write(f'## {sec}\n\n')

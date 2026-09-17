@@ -31,7 +31,23 @@ async function get(path: string, timeoutMs = 60000) {
     return { status: 0, ms: Date.now() - t0, text: String(e?.message || e), json: null };
   }
 }
-const csvRows = (t: string) => Math.max(0, t.trim().split('\n').length - 1);
+// Data rows in a CSV, honouring quoted fields. Counting '\n' overstated the
+// Reporting export by 12 and UCC by 9 on the trial run: addresses carry line
+// breaks inside quotes, so one record spanned several lines.
+function csvRows(t: string): number {
+  let inQuotes = false, records = 0;
+  for (let i = 0; i < t.length; i++) {
+    const ch = t[i];
+    if (ch === '"') {
+      if (inQuotes && t[i + 1] === '"') i++;
+      else inQuotes = !inQuotes;
+    } else if (ch === '\n' && !inQuotes) {
+      records++;
+    }
+  }
+  if (t.length && !t.endsWith('\n')) records++;
+  return Math.max(0, records - 1);                       // minus the header
+}
 const enc = encodeURIComponent;
 
 (async () => {
