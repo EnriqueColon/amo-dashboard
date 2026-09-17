@@ -1,10 +1,18 @@
 /**
  * Guardrail: dollar volume must count each loan once, not once per filing.
  *
- * The bug this exists to prevent shipped and was quoted-ready: the entity
- * report's "$ Volume" put Goldman Sachs at $66.7B, because one $2.95B portfolio
- * loan is filed against every building it covers and down a chain of
- * assignments — 10 filings, summed to $29.5B.
+ * The bug this exists to prevent: one $2.95B portfolio loan is filed against
+ * every building it covers and down a chain of assignments — 10 filings, summed
+ * to $29.5B. Measured as the entity report computes it (self-assignments
+ * excluded), market-wide volume read $150.9B and falls to $86.7B once each loan
+ * counts once: Wells Fargo $16.7B -> $9.7B, Goldman Sachs $15.0B -> $10.7B,
+ * Barclays $5.5B -> $1.9B. Bank of America is unchanged at $4.9B — it has no
+ * repeat filings, and a rule that moved it would be wrong.
+ *
+ * (An earlier ad-hoc audit put Goldman at $66.7B. That query counted
+ * self-assignments and both sides of each filing, which the screen never does,
+ * so the first draft of this check asserted against a number no one saw. The
+ * thresholds below are set from the screen's own arithmetic.)
  *
  * Unlike the other checks this needs the real database, because the failure is
  * a property of the data (how loans repeat), not of the arithmetic. It opens it
@@ -45,9 +53,29 @@ function entityVolume(entity: string): { naive: number; counted: number } {
 
 // ── 1. the case that started it ────────────────────────────────────────────
 const gs = entityVolume('GOLDMAN SACHS');
-ok('Goldman Sachs volume falls well below the naive sum', gs.counted < gs.naive * 0.6,
+ok('Goldman Sachs volume falls below the naive sum', gs.counted < gs.naive * 0.85,
    `${B(gs.naive)} -> ${B(gs.counted)}`);
-ok('...but does not collapse to nothing', gs.counted > gs.naive * 0.1);
+ok('...but does not collapse to nothing', gs.counted > gs.naive * 0.4);
+
+const wf = entityVolume('WELLS FARGO');
+ok('Wells Fargo volume falls below the naive sum', wf.counted < wf.naive * 0.85,
+   `${B(wf.naive)} -> ${B(wf.counted)}`);
+
+// NEGATIVE CONTROL: a firm with no repeat filings must not move at all.
+const boa = entityVolume('BANK OF AMERICA');
+ok('Bank of America, which has no repeat filings, is unchanged', boa.counted === boa.naive,
+   `${B(boa.naive)} -> ${B(boa.counted)}`);
+
+// Market-wide: the headline effect, with a floor so a future change that
+// merges genuinely distinct loans shows up as a failure, not a better number.
+const mkt = db.prepare(`
+  SELECT (SELECT SUM(CASE WHEN loan_amount>0 THEN loan_amount ELSE 0 END) FROM aom_events_clean
+          WHERE txn_type != 'SELF_ASSIGN') naive,
+         (SELECT SUM(${COUNTED_LOAN_AMOUNT}) FROM ${loanRows('aom_events_clean', `txn_type != 'SELF_ASSIGN'`)}) counted
+`).get() as any;
+ok('market-wide volume falls by a quarter or more', mkt.counted < mkt.naive * 0.75,
+   `${B(mkt.naive)} -> ${B(mkt.counted)}`);
+ok('...and keeps at least 40% of it', mkt.counted > mkt.naive * 0.4);
 
 // ── 2. the $2.95B loan counts once, wherever it is filed ───────────────────
 const one = (db.prepare(`
