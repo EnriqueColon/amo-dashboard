@@ -5,6 +5,7 @@ import { fetchFDICFinancials } from './fdic';
 import { queryGroupedFacilities } from './lending/facilities';
 import { buildActivityWorkbook } from './reporting/workbook';
 import { loanRows, COUNTED_LOAN_AMOUNT } from './reporting/loanVolume';
+import { REPORTING_EXCLUDE } from './reporting/exclusions';
 import {
   getCached, setCached, clearCache, clearCacheByPrefix, getCacheStats,
   makeCacheKey, DEFAULT_TTL_MS, STATS_TTL_MS,
@@ -1265,42 +1266,10 @@ export async function registerRoutes(httpServer: Server, app: Express) {
                        OR assignee_canon IN (SELECT entity FROM target_entities))`;
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // REPORTING EXCLUSIONS
+  // REPORTING EXCLUSIONS — REPORTING_EXCLUDE is imported from
+  // ./reporting/exclusions, shared with the weekly email so the two surfaces
+  // cannot disagree about which counterparties are in scope.
   // ═══════════════════════════════════════════════════════════════════════════
-  //
-  // Entities hidden from the Reporting tab at the owner's request (9 Sep 2026).
-  // These are pass-through registry/agency counterparties rather than market
-  // participants, and they crowd out the transactions the report exists to show
-  // — 6,317 of 48,636 rows, about 13%, on the snapshot this was measured against.
-  //
-  // DISPLAY ONLY. Nothing is deleted and normalize.py is untouched: the rows stay
-  // in aom_events_clean and every other surface (Overview, Entities, Lending
-  // Relationships, the emailed report) still counts them. Deleting this constant
-  // restores the previous behaviour exactly.
-  //
-  // Matched on CANONICAL names, which is what makes this reliable — normalize.py
-  // folds "FEDERAL NATIONAL MORTGAGE ASSOCIATION", "FNMA" and the rest into one
-  // form before it ever reaches this table. Matching entity_type instead would
-  // NOT work: Fannie/Freddie are GSE and MERS is MERS, but Wilmington Savings is
-  // a BANK, so a type filter would either miss Wilmington or hide every bank.
-  const REPORTING_EXCLUDED_ENTITIES = [
-    'WILMINGTON SAVINGS',
-    'MERS',
-    'FANNIE MAE',
-    'FREDDIE MAC',
-  ];
-
-  // Excludes a transaction if the entity appears on EITHER side. The IS NULL
-  // guards are load-bearing: `col NOT IN (...)` evaluates to NULL — not true —
-  // when col is NULL, which would silently drop every such row from the report.
-  // No NULLs exist in these columns today; the guard is here so that stays true
-  // if one ever appears.
-  const REPORTING_EXCLUDED_SQL_LIST = REPORTING_EXCLUDED_ENTITIES
-    .map(e => `'${e.replace(/'/g, "''")}'`).join(', ');
-
-  const REPORTING_EXCLUDE =
-    `(assignor_canon IS NULL OR assignor_canon NOT IN (${REPORTING_EXCLUDED_SQL_LIST}))
-     AND (assignee_canon IS NULL OR assignee_canon NOT IN (${REPORTING_EXCLUDED_SQL_LIST}))`;
 
   // Every Reporting surface now reads aom_events_clean, so this one clause
   // covers all of them. It briefly needed a single-column variant for the

@@ -1,5 +1,8 @@
 import type Database from 'better-sqlite3';
 import { queryGroupedFacilities } from '../lending/facilities';
+// Same exclusion list as the Reporting tab. The lending-relationships section
+// below needs none: on 2–17 Sep none of the four names appeared in it.
+import { REPORTING_EXCLUDE } from '../reporting/exclusions';
 
 const DEFAULT_COUNTY = 'MIAMI-DADE';
 const DASHBOARD_URL = 'http://165.22.35.75:5000';
@@ -169,6 +172,7 @@ export function buildWeeklyReport(db: Database.Database, startDate: string, endD
            loan_amount, consideration_amount, rec_book, rec_page
     FROM aom_events_clean
     WHERE rec_date >= ? AND rec_date <= ? AND txn_type != 'SELF_ASSIGN'
+      AND ${REPORTING_EXCLUDE}
     ORDER BY rec_date DESC
   `).all(startDate, endDate) as any[];
 
