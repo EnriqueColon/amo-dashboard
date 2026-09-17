@@ -347,8 +347,8 @@ function EntityDrilldown({ entity, color, entityType, startDate, endDate, onBack
             <Kpi icon={TrendingUp} label="Sold (Out)" value={(k.outbound ?? 0).toLocaleString()} />
             <Kpi icon={ArrowLeftRight} label="Net Direction"
               value={net > 0 ? `+${net.toLocaleString()} net buyer` : net < 0 ? `${net.toLocaleString()} net seller` : 'Balanced'} />
-            <Kpi icon={DollarSign} label="$ Volume (where known)" value={fmtMoney(k.dollar_volume)}
-              sub={k.dollar_known_count > 0 ? `${k.dollar_known_count.toLocaleString()} filings with $ data` : 'no $ data extracted'} />
+            <Kpi icon={DollarSign} label="$ Volume (est.)" value={fmtMoney(k.dollar_volume)}
+              sub={k.dollar_known_count > 0 ? `${k.dollar_known_count.toLocaleString()} filings with $ · each loan counted once` : 'no $ data extracted'} />
           </>
         )}
       </div>
@@ -509,8 +509,8 @@ export function EntityReport({ entities, startDate, endDate }: {
             <Kpi icon={TrendingUp} label="Sold (Out)" value={(k.outbound ?? 0).toLocaleString()} />
             <Kpi icon={ArrowLeftRight} label="Net Direction"
               value={net > 0 ? `+${net.toLocaleString()} net buyer` : net < 0 ? `${net.toLocaleString()} net seller` : 'Balanced'} />
-            <Kpi icon={DollarSign} label="$ Volume (where known)" value={fmtMoney(k.dollar_volume)}
-              sub={k.dollar_known_count > 0 ? `${k.dollar_known_count.toLocaleString()} filings with $ data` : 'no $ data extracted'} />
+            <Kpi icon={DollarSign} label="$ Volume (est.)" value={fmtMoney(k.dollar_volume)}
+              sub={k.dollar_known_count > 0 ? `${k.dollar_known_count.toLocaleString()} filings with $ · each loan counted once` : 'no $ data extracted'} />
           </>
         )}
       </div>
@@ -643,7 +643,8 @@ export function EntityReport({ entities, startDate, endDate }: {
                   <th className="px-2 py-1.5 text-right font-semibold">Bought</th>
                   <th className="px-2 py-1.5 text-right font-semibold">Sold</th>
                   <th className="px-2 py-1.5 text-right font-semibold">Net</th>
-                  <th className="px-2 py-1.5 text-right font-semibold">$ Vol (known)</th>
+                  <th className="px-2 py-1.5 text-right font-semibold"
+                      title="Estimate. A loan re-filed against several properties or passed through a chain of assignments is counted once, not once per filing.">$ Vol (est.)</th>
                   <th className="px-2 py-1.5 text-left font-semibold">Top Counterparty</th>
                   <th className="px-2 py-1.5 text-left font-semibold">First</th>
                   <th className="px-2 py-1.5 text-left font-semibold">Last</th>

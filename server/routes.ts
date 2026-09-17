@@ -4,6 +4,7 @@ import { getDb } from './db';
 import { fetchFDICFinancials } from './fdic';
 import { queryGroupedFacilities } from './lending/facilities';
 import { buildActivityWorkbook } from './reporting/workbook';
+import { loanRows, COUNTED_LOAN_AMOUNT } from './reporting/loanVolume';
 import {
   getCached, setCached, clearCache, clearCacheByPrefix, getCacheStats,
   makeCacheKey, DEFAULT_TTL_MS, STATS_TTL_MS,
@@ -1688,16 +1689,19 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     if (startDate) { dateWhere += ' AND rec_date >= ?'; dateParams.push(startDate); }
     if (endDate)   { dateWhere += ' AND rec_date <= ?'; dateParams.push(endDate); }
 
-    // KPIs — distinct filings touching the selection
+    // KPIs — distinct filings touching the selection. dollar_volume counts each
+    // loan once across the whole selection (see reporting/loanVolume.ts): a
+    // naive SUM put Goldman Sachs at $66.7B, most of it the same few portfolio
+    // loans re-filed against every building they cover.
     const kpis = db.prepare(`
       SELECT COUNT(*) AS total,
              SUM(CASE WHEN assignee_canon IN (${ph}) THEN 1 ELSE 0 END) AS inbound,
              SUM(CASE WHEN assignor_canon IN (${ph}) THEN 1 ELSE 0 END) AS outbound,
-             SUM(CASE WHEN loan_amount > 0 THEN loan_amount ELSE 0 END) AS dollar_volume,
+             SUM(${COUNTED_LOAN_AMOUNT}) AS dollar_volume,
              SUM(CASE WHEN loan_amount > 0 THEN 1 ELSE 0 END) AS dollar_known_count
-      FROM aom_events_clean
-      WHERE (assignor_canon IN (${ph}) OR assignee_canon IN (${ph}))
-        AND txn_type != 'SELF_ASSIGN' ${dateWhere}
+      FROM ${loanRows('aom_events_clean',
+        `(assignor_canon IN (${ph}) OR assignee_canon IN (${ph}))
+         AND txn_type != 'SELF_ASSIGN' ${dateWhere}`)}
     `).get(...entities, ...entities, ...entities, ...entities, ...dateParams) as any;
 
     // Timeline — per entity per month, in/out counts
@@ -1742,11 +1746,11 @@ export async function registerRoutes(httpServer: Server, app: Express) {
         SELECT
           SUM(CASE WHEN assignee_canon = ? THEN 1 ELSE 0 END) AS inbound,
           SUM(CASE WHEN assignor_canon = ? THEN 1 ELSE 0 END) AS outbound,
-          SUM(CASE WHEN loan_amount > 0 THEN loan_amount ELSE 0 END) AS dollar_volume,
+          SUM(${COUNTED_LOAN_AMOUNT}) AS dollar_volume,
           MIN(rec_date) AS first_activity, MAX(rec_date) AS last_activity
-        FROM aom_events_clean
-        WHERE (assignor_canon = ? OR assignee_canon = ?)
-          AND txn_type != 'SELF_ASSIGN' ${dateWhere}
+        FROM ${loanRows('aom_events_clean',
+          `(assignor_canon = ? OR assignee_canon = ?)
+           AND txn_type != 'SELF_ASSIGN' ${dateWhere}`)}
       `).get(entity, entity, entity, entity, ...dateParams) as any;
       const topCp = db.prepare(`
         SELECT counterparty, COUNT(*) AS n FROM (
@@ -2153,12 +2157,14 @@ export async function registerRoutes(httpServer: Server, app: Express) {
 
     const sellerClauses = [...clauses, `assignor_canon IS NOT NULL`, `assignor_canon != 'UNKNOWN'`];
     if (targetsOnly) sellerClauses.push(`assignor_canon IN (SELECT entity FROM target_entities)`);
+    // total_loan_amount is not displayed today, but it is served, so it is
+    // counted the same way as the entity report rather than left as a trap.
+    // Partitioned by firm: each seller's total is judged on its own filings.
     const topSellers = db.prepare(`
       SELECT assignor_canon AS entity, assignor_type AS entity_type,
              COUNT(*) AS transfers_out,
-             SUM(loan_amount) AS total_loan_amount
-      FROM ${src}
-      WHERE ${sellerClauses.join(' AND ')}
+             SUM(${COUNTED_LOAN_AMOUNT}) AS total_loan_amount
+      FROM ${loanRows(src, sellerClauses.join(' AND '), 'assignor_canon')}
       GROUP BY assignor_canon ORDER BY transfers_out DESC LIMIT 20
     `).all(...params);
 
@@ -2167,9 +2173,8 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const topBuyers = db.prepare(`
       SELECT assignee_canon AS entity, assignee_type AS entity_type,
              COUNT(*) AS transfers_in,
-             SUM(loan_amount) AS total_loan_amount
-      FROM ${src}
-      WHERE ${buyerClauses.join(' AND ')}
+             SUM(${COUNTED_LOAN_AMOUNT}) AS total_loan_amount
+      FROM ${loanRows(src, buyerClauses.join(' AND '), 'assignee_canon')}
       GROUP BY assignee_canon ORDER BY transfers_in DESC LIMIT 20
     `).all(...params);
 
@@ -2246,10 +2251,11 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const dwc = dateClauses.length ? `WHERE ${dateClauses.join(' AND ')}` : '';
 
     if (type === 'monthly') {
+      // Market-wide, so repeats are judged across the whole filtered set.
       const rows = db.prepare(`
         SELECT strftime('%Y-%m', rec_date) as period, COUNT(*) as count,
-               SUM(loan_amount) as total_loan_amount
-        FROM ${src} ${dwc}
+               SUM(${COUNTED_LOAN_AMOUNT}) as total_loan_amount
+        FROM ${loanRows(src, dateClauses.join(' AND '))}
         GROUP BY period ORDER BY period
       `).all(...dateParams);
       return res.json(rows);
