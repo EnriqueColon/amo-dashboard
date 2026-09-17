@@ -39,6 +39,7 @@ Safe to run alongside everything else:
 """
 import argparse
 import os
+import subprocess
 import sys
 import tempfile
 import threading
@@ -102,8 +103,42 @@ def targets(conn, scope: str, retry_failed: bool, limit: int | None):
     return conn.execute(sql).fetchall()
 
 
+# Yield to the weekly collection. Both jobs hit the same clerk endpoint and OCR
+# on the same 4 cores, and the weekly run is the one with a deadline: it brings
+# in the week's new filings. The check lives in fetch() — inside the workers —
+# because ThreadPoolExecutor.map queues every task up front, so pausing only the
+# consuming loop would leave eight threads downloading straight through the
+# weekly run. "[r]un_weekly" keeps pgrep from matching its own command line.
+_busy_lock = threading.Lock()
+_busy_cache = {'at': 0.0, 'busy': False}
+
+
+def _weekly_running() -> bool:
+    with _busy_lock:
+        if time.time() - _busy_cache['at'] > 30:
+            _busy_cache['busy'] = subprocess.run(
+                ['pgrep', '-f', '[r]un_weekly.sh'], capture_output=True).returncode == 0
+            _busy_cache['at'] = time.time()
+        return _busy_cache['busy']
+
+
+def _wait_for_weekly():
+    announced = False
+    while _weekly_running():
+        if not announced:
+            with _print_lock:
+                print(f'  weekly collection is running — pausing ({datetime.now(timezone.utc):%H:%M}Z)',
+                      flush=True)
+            announced = True
+        time.sleep(60)
+    if announced:
+        with _print_lock:
+            print(f'  weekly collection finished — resuming ({datetime.now(timezone.utc):%H:%M}Z)', flush=True)
+
+
 def fetch(row):
     cfn, book, page, _ = row
+    _wait_for_weekly()
     now = datetime.now(timezone.utc).isoformat(timespec='seconds')
     try:
         with tempfile.TemporaryDirectory() as wd:

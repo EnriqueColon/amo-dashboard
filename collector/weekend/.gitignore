@@ -1,0 +1,9 @@
+STATUS
+STATUS.log
+*.log
+.lock
+STOP
+APPROVED_FIXES
+APPROVED_EMAIL
+APPLIED_OK
+crontab.before
