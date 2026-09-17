@@ -219,8 +219,11 @@ function countyOf(r: any): string {
   return String(r.county || DEFAULT_COUNTY).toUpperCase();
 }
 
+// Names and addresses are truncated in code, not with CSS. Outlook desktop
+// renders with the Word engine and ignores max-width/text-overflow on cells, so
+// one portfolio loan listing 16 addresses stretched the whole table sideways.
 function titleName(s: string | null | undefined): string {
-  return s ? escapeHtml(s) : '—';
+  return s && s !== '—' ? escapeHtml(s) : '—';
 }
 
 function truncName(s: string | null, n: number): string {
@@ -297,14 +300,14 @@ export function buildWeeklyReport(db: Database.Database, startDate: string, endD
   // Wells Fargo → Freedom Mortgage, 127 transfers — stated none, so a dollar
   // column would have ranked the biggest trade as the smallest. Dollars live
   // only in Largest Deals, where every row has one.
-  const pairRows = groupBy(r => `${r.assignor} ${r.assignee}`)
+  const pairRows = groupBy(r => `${r.assignor}\u0000${r.assignee}`)
     .slice(0, TOP_PAIRS)
     .map(([k, rows]) => {
-      const [seller, buyer] = k.split(' ');
+      const [seller, buyer] = k.split('\u0000');
       return `<tr>
-        <td style="${td}max-width:220px;overflow:hidden;text-overflow:ellipsis;">${titleName(seller)}</td>
+        <td style="${td}">${titleName(truncName(seller, 36))}</td>
         <td style="${td}color:#94a3b8;">→</td>
-        <td style="${td}max-width:220px;overflow:hidden;text-overflow:ellipsis;">${titleName(buyer)}</td>
+        <td style="${td}">${titleName(truncName(buyer, 36))}</td>
         <td style="${tdR}font-family:monospace;font-weight:600;">${rows.length}</td>
         ${splitCells(rows)}
       </tr>`;
@@ -313,7 +316,7 @@ export function buildWeeklyReport(db: Database.Database, startDate: string, endD
   // 3. Most active sellers and buyers.
   const partyTable = (title: string, key: (r: any) => string) => {
     const body = groupBy(key).slice(0, TOP_PARTIES).map(([name, rows]) => `<tr>
-        <td style="${td}max-width:190px;overflow:hidden;text-overflow:ellipsis;">${titleName(name)}</td>
+        <td style="${td}">${titleName(truncName(name, 30))}</td>
         <td style="${tdR}font-family:monospace;font-weight:600;">${rows.length}</td>
         ${splitCells(rows)}
       </tr>`).join('') || empty;
@@ -354,8 +357,8 @@ export function buildWeeklyReport(db: Database.Database, startDate: string, endD
       <td style="${tdR}font-family:monospace;color:#059669;">${link ? `<a href="${link}" style="color:#059669;text-decoration:none;">${amount}</a>` : amount}${filings}</td>
       <td style="${td}">${fmtDay(r.rec_date)}</td>
       <td style="${td}color:${COUNTY_COLOR[c] || '#334155'};">${COUNTY_LABEL[c] || escapeHtml(c)}</td>
-      <td style="${td}max-width:300px;overflow:hidden;text-overflow:ellipsis;">${titleName(r.assignor)} <span style="color:#94a3b8;">→</span> ${titleName(r.assignee)}</td>
-      <td style="${td}max-width:220px;overflow:hidden;text-overflow:ellipsis;color:#64748b;">${property ? escapeHtml(property) : '—'}</td>
+      <td style="${td}">${titleName(truncName(r.assignor, 34))} <span style="color:#94a3b8;">→</span> ${titleName(truncName(r.assignee, 34))}</td>
+      <td style="${td}color:#64748b;" title="${property ? escapeHtml(property) : ''}">${property ? escapeHtml(truncName(property, 48)) : '—'}</td>
     </tr>`;
   }).join('') || `<tr><td colspan="5" style="${td}color:#94a3b8;">No filings stated a loan amount in this window</td></tr>`;
   const withAmount = cleanRows.filter(r => r.loan_amount > 0).length;
