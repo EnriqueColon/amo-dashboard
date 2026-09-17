@@ -19,6 +19,11 @@ import {
 import { EntityPicker, EntityReport } from '@/components/EntityReport';
 import CrossCountyNote from '@/components/CrossCountyNote';
 import { CountyCell } from '@/components/CountyCell';
+import { FilterHint } from '@/components/FilterHint';
+import {
+  CATEGORY_DEFS, DOC_TYPE_DEFS, REVIEW_DEFS, TARGETS_ONLY_DEF, DIRECTION_DEFS,
+  CHART_VIEW_DEFS, PARTICIPANT_VIEW_DEFS,
+} from '@/lib/filterDefinitions';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function fmtAmt(v: number | null | undefined): string | null {
@@ -144,10 +149,12 @@ function DynamicChart({ startDate, endDate, targetsOnly, docType, category }: { 
             const Icon = opt.icon;
             const active = chartType === opt.id;
             return (
-              <button key={opt.id} onClick={() => setChartType(opt.id)}
-                className={`flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded border transition-colors ${active ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}>
-                <Icon size={10} />{opt.label}
-              </button>
+              <FilterHint key={opt.id} def={CHART_VIEW_DEFS[opt.id]}>
+                <button onClick={() => setChartType(opt.id)}
+                  className={`flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded border transition-colors ${active ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+                  <Icon size={10} />{opt.label}
+                </button>
+              </FilterHint>
             );
           })}
         </div>
@@ -214,10 +221,12 @@ function ParticipantStats({ startDate, endDate, targetsOnly, docType, category }
             <CrossCountyNote className="ml-2" />
         <div className="flex gap-1">
           {([['active', 'Most Active'], ['sellers', 'Top Senders'], ['buyers', 'Top Receivers']] as const).map(([key, label]) => (
-            <button key={key} onClick={() => setTab(key)}
-              className={`text-[11px] font-medium px-2 py-1 rounded border transition-colors ${tab === key ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}>
-              {label}
-            </button>
+            <FilterHint key={key} def={PARTICIPANT_VIEW_DEFS[key]}>
+              <button onClick={() => setTab(key)}
+                className={`text-[11px] font-medium px-2 py-1 rounded border transition-colors ${tab === key ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+                {label}
+              </button>
+            </FilterHint>
           ))}
         </div>
       </div>
@@ -637,10 +646,12 @@ export default function Reporting() {
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-[11px] text-muted-foreground">Direction:</span>
             {([['', 'All activity'], ['assignor', 'Sold / assigned out'], ['assignee', 'Acquired']] as const).map(([val, label]) => (
-              <button key={val} onClick={() => setEntityRole(val)}
-                className={`h-6 px-2 rounded-full border text-[10px] font-medium transition-colors ${entityRole === val ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}>
-                {label}
-              </button>
+              <FilterHint key={val} def={DIRECTION_DEFS[val]}>
+                <button onClick={() => setEntityRole(val)}
+                  className={`h-6 px-2 rounded-full border text-[10px] font-medium transition-colors ${entityRole === val ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+                  {label}
+                </button>
+              </FilterHint>
             ))}
             <span className="text-[10px] text-muted-foreground/70">applies to the filing tables and CSV export</span>
           </div>
@@ -672,20 +683,21 @@ export default function Reporting() {
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-[11px] text-muted-foreground">Review:</span>
           {[['', 'All'], ['no', 'Pending'], ['yes', 'Reviewed']].map(([val, label]) => (
-            <button key={val} onClick={() => setReviewed(val)}
-              className={`h-6 px-2 rounded-full border text-[10px] font-medium transition-colors ${reviewed === val ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}>
-              {label}
-            </button>
+            <FilterHint key={val} def={REVIEW_DEFS[val]}>
+              <button onClick={() => setReviewed(val)}
+                className={`h-6 px-2 rounded-full border text-[10px] font-medium transition-colors ${reviewed === val ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+                {label}
+              </button>
+            </FilterHint>
           ))}
           <span className="text-[11px] text-muted-foreground ml-2">Shows:</span>
           {CATEGORY_OPTIONS.map(([val, label]) => (
-            <button key={val || 'loan'} onClick={() => setCategory(val)}
-              title={val === '' ? 'Filings where a loan changed hands — what this tab has always shown'
-                    : val === 'all' ? 'Every assignment document we have read, whatever it turned out to be'
-                    : `Assignment filings the extractor read as ${label.toLowerCase()}`}
-              className={`h-6 px-2 rounded-full border text-[10px] font-medium transition-colors ${category === val ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}>
-              {label}
-            </button>
+            <FilterHint key={val || 'loan'} def={CATEGORY_DEFS[val]}>
+              <button onClick={() => setCategory(val)}
+                className={`h-6 px-2 rounded-full border text-[10px] font-medium transition-colors ${category === val ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+                {label}
+              </button>
+            </FilterHint>
           ))}
           <span className="text-[11px] text-muted-foreground ml-2">Document:</span>
           {DOC_TYPE_OPTIONS.map(([val, label]) => {
@@ -696,19 +708,23 @@ export default function Reporting() {
             // reader to wonder where it went.
             const empty = n === 0;
             return (
-              <button key={val} onClick={() => setDocType(val)}
-                title={n === undefined ? label : `${label} — ${n.toLocaleString()} filing${n === 1 ? '' : 's'} under the current filters`}
-                className={`h-6 px-2 rounded-full border text-[10px] font-medium transition-colors ${docType === val ? 'bg-primary text-primary-foreground border-primary' : empty ? 'border-border text-muted-foreground/40 hover:text-muted-foreground' : 'border-border text-muted-foreground hover:text-foreground'}`}>
-                {label}{n !== undefined && <span className="ml-1 opacity-60 tabular-nums">{n.toLocaleString()}</span>}
-              </button>
+              <FilterHint key={val} def={DOC_TYPE_DEFS[val]}
+                extra={n === undefined ? undefined : `${n.toLocaleString()} filing${n === 1 ? '' : 's'} under the current filters`}>
+                <button onClick={() => setDocType(val)}
+                  className={`h-6 px-2 rounded-full border text-[10px] font-medium transition-colors ${docType === val ? 'bg-primary text-primary-foreground border-primary' : empty ? 'border-border text-muted-foreground/40 hover:text-muted-foreground' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+                  {label}{n !== undefined && <span className="ml-1 opacity-60 tabular-nums">{n.toLocaleString()}</span>}
+                </button>
+              </FilterHint>
             );
           })}
           <span className="text-[11px] text-muted-foreground ml-2">Scope:</span>
-          <button onClick={() => setTargetsOnly(v => !v)}
-            title={targetCount === 0 ? 'No targets yet — add participants in the Targets tab' : `Filter to your ${targetCount} targeted participant${targetCount === 1 ? '' : 's'}`}
-            className={`h-6 px-2 rounded-full border text-[10px] font-medium transition-colors inline-flex items-center gap-1 ${targetsOnly ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}>
-            <Crosshair size={9} />Targets only{targetCount > 0 && ` (${targetCount})`}
-          </button>
+          <FilterHint def={TARGETS_ONLY_DEF}
+            extra={targetCount === 0 ? 'You have no targets yet.' : `${targetCount} compan${targetCount === 1 ? 'y' : 'ies'} on your watchlist.`}>
+            <button onClick={() => setTargetsOnly(v => !v)}
+              className={`h-6 px-2 rounded-full border text-[10px] font-medium transition-colors inline-flex items-center gap-1 ${targetsOnly ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+              <Crosshair size={9} />Targets only{targetCount > 0 && ` (${targetCount})`}
+            </button>
+          </FilterHint>
           <div className="ml-auto flex gap-1.5">
             <Button size="sm" onClick={applySearch} className="h-7 text-xs gap-1"><Search size={11} />Search</Button>
             {hasFilters && <Button size="sm" variant="ghost" onClick={clearAll} className="h-7 text-xs gap-1 text-muted-foreground"><X size={11} />Clear</Button>}

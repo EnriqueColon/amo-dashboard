@@ -12,6 +12,8 @@ import {
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from 'recharts';
+import { FilterHint } from '@/components/FilterHint';
+import { UCC_CATEGORY_DEFS, UCC_HAS_PROPERTY_DEF, UCC_CONSUMER_DEF, UCC_ROLES_DEF, UCC_TAB_DEFS } from '@/lib/filterDefinitions';
 
 // UCC financing statements — secured lending, deliberately a separate page from
 // Reporting. The columns here are Borrower and Lender, which is what the filing
@@ -58,10 +60,12 @@ function PartyPanel({ qs }: { qs: string }) {
         </h2>
         <div className="flex gap-1">
           {(['lenders', 'borrowers'] as const).map(t => (
-            <button key={t} onClick={() => setTab(t)}
-              className={`text-[11px] font-medium px-2 py-1 rounded border transition-colors capitalize ${tab === t ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}>
-              {t}
-            </button>
+            <FilterHint key={t} def={UCC_TAB_DEFS[t]}>
+              <button onClick={() => setTab(t)}
+                className={`text-[11px] font-medium px-2 py-1 rounded border transition-colors capitalize ${tab === t ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+                {t}
+              </button>
+            </FilterHint>
           ))}
         </div>
       </div>
@@ -236,26 +240,32 @@ export default function UccFilings() {
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-[11px] text-muted-foreground">Collateral type:</span>
           {CATEGORY_OPTIONS.map(([val, label]) => (
-            <button key={val || 'all'} onClick={() => reset(() => setCategory(val))}
-              className={`h-6 px-2 rounded-full border text-[10px] font-medium transition-colors ${category === val ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}>
-              {label}
-            </button>
+            <FilterHint key={val || 'all'} def={UCC_CATEGORY_DEFS[val]}>
+              <button onClick={() => reset(() => setCategory(val))}
+                className={`h-6 px-2 rounded-full border text-[10px] font-medium transition-colors ${category === val ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+                {label}
+              </button>
+            </FilterHint>
           ))}
-          <button onClick={() => reset(() => setHasProperty(v => !v))}
-            title="Only filings where we extracted a property address"
-            className={`h-6 px-2 rounded-full border text-[10px] font-medium transition-colors inline-flex items-center gap-1 ml-2 ${hasProperty ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}>
-            <MapPin size={9} />Has a property
-          </button>
-          <button onClick={() => reset(() => setIncludeConsumer(v => !v))}
-            title="Solar, home-improvement and other consumer lenders — plus filing agents and utilities — are hidden by default. They are 36% of all filings and none of it is commercial real estate. Matched on either party, since the county's party order is unreliable."
-            className={`h-6 px-2 rounded-full border text-[10px] font-medium transition-colors inline-flex items-center gap-1 ${includeConsumer ? 'bg-amber-500 text-white border-amber-500' : 'border-border text-muted-foreground hover:text-foreground'}`}>
-            <Sun size={9} />{includeConsumer ? 'Consumer finance shown' : 'Consumer finance hidden'}
-          </button>
-          <button onClick={() => reset(() => setConfirmedOnly(v => !v))}
-            title="Only filings where the lender was read off the document itself. The county's index does not order the two parties consistently, so on the rest the direction comes from the index and may be reversed."
-            className={`h-6 px-2 rounded-full border text-[10px] font-medium transition-colors inline-flex items-center gap-1 ${confirmedOnly ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}>
-            <BadgeCheck size={9} />Roles from document
-          </button>
+          <FilterHint def={UCC_HAS_PROPERTY_DEF}>
+            <button onClick={() => reset(() => setHasProperty(v => !v))}
+              className={`h-6 px-2 rounded-full border text-[10px] font-medium transition-colors inline-flex items-center gap-1 ml-2 ${hasProperty ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+              <MapPin size={9} />Has a property
+            </button>
+          </FilterHint>
+          <FilterHint def={UCC_CONSUMER_DEF}
+            extra={includeConsumer ? 'Currently shown.' : 'Currently hidden — about a third of all UCC filings.'}>
+            <button onClick={() => reset(() => setIncludeConsumer(v => !v))}
+              className={`h-6 px-2 rounded-full border text-[10px] font-medium transition-colors inline-flex items-center gap-1 ${includeConsumer ? 'bg-amber-500 text-white border-amber-500' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+              <Sun size={9} />{includeConsumer ? 'Consumer finance shown' : 'Consumer finance hidden'}
+            </button>
+          </FilterHint>
+          <FilterHint def={UCC_ROLES_DEF}>
+            <button onClick={() => reset(() => setConfirmedOnly(v => !v))}
+              className={`h-6 px-2 rounded-full border text-[10px] font-medium transition-colors inline-flex items-center gap-1 ${confirmedOnly ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+              <BadgeCheck size={9} />Roles from document
+            </button>
+          </FilterHint>
           <div className="ml-auto flex gap-1.5">
             <Button size="sm" onClick={applySearch} className="h-7 text-xs gap-1">
               <Search size={11} />Search

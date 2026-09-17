@@ -14,6 +14,8 @@ import { TREND_QUARTERS, TTM_QUARTERS } from '@shared/fdic-window'
 import { DefTerm } from '@/components/DefTerm'
 import { InstitutionProfileDrawer, type InstitutionProfileRow } from '@/components/InstitutionProfileDrawer'
 import { Skeleton } from '@/components/ui/skeleton'
+import { FilterHint } from '@/components/FilterHint'
+import { FDIC_SCOPE_DEF } from '@/lib/filterDefinitions'
 
 const US_STATES_ALPHABETICAL = [
   'Alabama','Alaska','Arizona','Arkansas','California','Colorado','Connecticut',
@@ -342,14 +344,16 @@ export default function MarketAnalytics() {
       <div className="bg-card border border-border rounded-lg p-4">
         <p className="text-xs font-semibold text-muted-foreground uppercase mb-2">Controls</p>
         <div className="flex flex-wrap gap-3 items-center">
-          <select
-            value={region}
-            onChange={(e) => setRegion(e.target.value as RegionKey)}
-            className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground w-48"
-          >
-            <option value="national">United States</option>
-            {US_STATES_ALPHABETICAL.map((state) => <option key={state} value={state}>{state}</option>)}
-          </select>
+          <FilterHint def={FDIC_SCOPE_DEF}>
+            <select
+              value={region}
+              onChange={(e) => setRegion(e.target.value as RegionKey)}
+              className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground w-48"
+            >
+              <option value="national">United States</option>
+              {US_STATES_ALPHABETICAL.map((state) => <option key={state} value={state}>{state}</option>)}
+            </select>
+          </FilterHint>
           <div className="relative">
             <button
               type="button"

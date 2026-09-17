@@ -9,6 +9,8 @@ import DuplicateManager from '@/components/DuplicateManager';
 import ColHeader from '@/components/ColHeader';
 import { Search, ChevronRight, Info, Network } from 'lucide-react';
 import CrossCountyNote from '@/components/CrossCountyNote';
+import { FilterHint } from '@/components/FilterHint';
+import { ENTITY_TYPE_DEFS } from '@/lib/filterDefinitions';
 
 const TYPE_FILTERS = ['', 'BANK', 'PRIVATE_CREDIT', 'TRUST', 'GSE', 'SERVICER', 'MERS', 'OTHER'];
 
@@ -72,17 +74,18 @@ export default function Entities() {
           </div>
           <div className="flex items-center gap-1.5 flex-wrap">
             {TYPE_FILTERS.map(t => (
-              <button
-                key={t || 'all'}
-                onClick={() => setTypeFilter(t)}
-                className={`px-2.5 py-1 rounded text-xs font-medium border transition-colors
-                  ${typeFilter === t
-                    ? 'bg-primary/20 text-primary border-primary/40'
-                    : 'border-border text-muted-foreground hover:text-foreground hover:border-border/80'
-                  }`}
-              >
-                {t ? t.replace('_', ' ') : 'All'}
-              </button>
+              <FilterHint key={t || 'all'} def={ENTITY_TYPE_DEFS[t]}>
+                <button
+                  onClick={() => setTypeFilter(t)}
+                  className={`px-2.5 py-1 rounded text-xs font-medium border transition-colors
+                    ${typeFilter === t
+                      ? 'bg-primary/20 text-primary border-primary/40'
+                      : 'border-border text-muted-foreground hover:text-foreground hover:border-border/80'
+                    }`}
+                >
+                  {t ? t.replace('_', ' ') : 'All'}
+                </button>
+              </FilterHint>
             ))}
           </div>
         </div>

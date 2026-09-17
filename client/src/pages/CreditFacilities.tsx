@@ -7,6 +7,8 @@ import { Landmark, ChevronLeft, ChevronRight, ExternalLink, ChevronDown, Chevron
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { FilterHint } from '@/components/FilterHint';
+import { FACILITY_TYPE_DEFS } from '@/lib/filterDefinitions';
 
 const FACILITY_TYPE_META: Record<string, { label: string; color: string }> = {
   warehouse_or_revolving_credit_facility: { label: 'Warehouse / Revolving', color: 'text-blue-700 bg-blue-100 border-blue-300' },
@@ -584,17 +586,20 @@ export default function CreditFacilities() {
           </div>
         </form>
         <div className="flex flex-wrap gap-1.5">
-          <button
-            onClick={() => { setDraft(d => ({ ...d, facility_type: '' })); setApplied(a => ({ ...a, facility_type: '' })); setPage(1); }}
-            className={`h-7 px-2.5 rounded-full border text-[11px] font-medium transition-colors ${!applied.facility_type ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground hover:border-foreground/40'}`}
-          >All Types{totalTyped ? ` (${totalTyped.toLocaleString()})` : ''}</button>
-          {Object.entries(FACILITY_TYPE_META).map(([key, meta]) => (
+          <FilterHint def={FACILITY_TYPE_DEFS['']}>
             <button
-              key={key}
-              onClick={() => { setDraft(d => ({ ...d, facility_type: key })); setApplied(a => ({ ...a, facility_type: key })); setPage(1); }}
-              className={`h-7 px-2.5 rounded-full border text-[11px] font-medium transition-colors ${applied.facility_type === key ? meta.color + ' border-current' : 'border-border text-muted-foreground hover:text-foreground hover:border-foreground/40'}`}
-              title={`${typeCounts[key] ?? 0} filings of this type`}
-            >{meta.label}{typeCounts[key] != null ? ` (${typeCounts[key].toLocaleString()})` : ''}</button>
+              onClick={() => { setDraft(d => ({ ...d, facility_type: '' })); setApplied(a => ({ ...a, facility_type: '' })); setPage(1); }}
+              className={`h-7 px-2.5 rounded-full border text-[11px] font-medium transition-colors ${!applied.facility_type ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground hover:border-foreground/40'}`}
+            >All Types{totalTyped ? ` (${totalTyped.toLocaleString()})` : ''}</button>
+          </FilterHint>
+          {Object.entries(FACILITY_TYPE_META).map(([key, meta]) => (
+            <FilterHint key={key} def={FACILITY_TYPE_DEFS[key]}
+              extra={`${(typeCounts[key] ?? 0).toLocaleString()} filings of this type`}>
+              <button
+                onClick={() => { setDraft(d => ({ ...d, facility_type: key })); setApplied(a => ({ ...a, facility_type: key })); setPage(1); }}
+                className={`h-7 px-2.5 rounded-full border text-[11px] font-medium transition-colors ${applied.facility_type === key ? meta.color + ' border-current' : 'border-border text-muted-foreground hover:text-foreground hover:border-foreground/40'}`}
+              >{meta.label}{typeCounts[key] != null ? ` (${typeCounts[key].toLocaleString()})` : ''}</button>
+            </FilterHint>
           ))}
         </div>
       </div>

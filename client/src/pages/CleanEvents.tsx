@@ -13,6 +13,8 @@ import {
   ArrowRight, Info, TrendingUp, TrendingDown, Users, Filter, ChevronDown, ChevronUp,
   Landmark, Repeat2, BookOpen, AlertCircle, ArrowUpRight, Users2,
 } from 'lucide-react';
+import { FilterHint } from '@/components/FilterHint';
+import { TXN_TYPE_DEFS } from '@/lib/filterDefinitions';
 
 interface Filters { assignor: string; assignee: string; start_date: string; end_date: string; txn_type: string; }
 const EMPTY: Filters = { assignor: '', assignee: '', start_date: '', end_date: '', txn_type: '' };
@@ -474,17 +476,19 @@ export default function CleanEvents() {
             <Filter size={10} />
             Transaction type:
           </span>
-          <button
-            onClick={() => setDraft(p => ({ ...p, txn_type: '' }))}
-            className={`h-7 px-2.5 rounded-full border text-[11px] font-medium transition-colors ${!draft.txn_type ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground hover:border-foreground/40'}`}
-          >All</button>
-          {Object.entries(TXN_TYPES).map(([key, meta]) => (
+          <FilterHint def={TXN_TYPE_DEFS['']}>
             <button
-              key={key}
-              onClick={() => setDraft(p => ({ ...p, txn_type: p.txn_type === key ? '' : key }))}
-              className={`h-7 px-2.5 rounded-full border text-[11px] font-medium transition-colors ${draft.txn_type === key ? meta.color + ' border-current' : 'border-border text-muted-foreground hover:text-foreground hover:border-foreground/40'}`}
-              title={meta.desc}
-            >{meta.label}</button>
+              onClick={() => setDraft(p => ({ ...p, txn_type: '' }))}
+              className={`h-7 px-2.5 rounded-full border text-[11px] font-medium transition-colors ${!draft.txn_type ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground hover:border-foreground/40'}`}
+            >All</button>
+          </FilterHint>
+          {Object.entries(TXN_TYPES).map(([key, meta]) => (
+            <FilterHint key={key} def={TXN_TYPE_DEFS[key]}>
+              <button
+                onClick={() => setDraft(p => ({ ...p, txn_type: p.txn_type === key ? '' : key }))}
+                className={`h-7 px-2.5 rounded-full border text-[11px] font-medium transition-colors ${draft.txn_type === key ? meta.color + ' border-current' : 'border-border text-muted-foreground hover:text-foreground hover:border-foreground/40'}`}
+              >{meta.label}</button>
+            </FilterHint>
           ))}
         </div>
         <div className="flex gap-2">

@@ -4,6 +4,8 @@ import { apiRequest } from '@/lib/queryClient';
 import { useCounty, countyLabel } from '@/lib/county';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
+import { FilterHint } from '@/components/FilterHint';
+import { ENTITY_REPORT_VIEW_DEFS } from '@/lib/filterDefinitions';
 import {
   X, Plus, LineChart as LineChartIcon, Users, ArrowLeftRight,
   TrendingUp, TrendingDown, Activity, DollarSign,
@@ -524,10 +526,12 @@ export function EntityReport({ entities, startDate, endDate }: {
               const Icon = opt.icon;
               const active = chart === opt.id;
               return (
-                <button key={opt.id} onClick={() => setChart(opt.id)}
-                  className={`flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded border transition-colors ${active ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}>
-                  <Icon size={10} />{opt.label}
-                </button>
+                <FilterHint key={opt.id} def={ENTITY_REPORT_VIEW_DEFS[opt.id]}>
+                  <button onClick={() => setChart(opt.id)}
+                    className={`flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded border transition-colors ${active ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+                    <Icon size={10} />{opt.label}
+                  </button>
+                </FilterHint>
               );
             })}
           </div>
@@ -539,10 +543,12 @@ export function EntityReport({ entities, startDate, endDate }: {
               <div className="flex justify-end print:hidden">
                 <div className="inline-flex rounded border border-border overflow-hidden">
                   {([['combined', 'Combined', LineChartIcon], ['per-entity', 'Per entity', LayoutGrid]] as const).map(([mode, label, Icon]) => (
-                    <button key={mode} onClick={() => setTimelineMode(mode)}
-                      className={`flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 transition-colors ${timelineMode === mode ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
-                      <Icon size={9} />{label}
-                    </button>
+                    <FilterHint key={mode} def={ENTITY_REPORT_VIEW_DEFS[mode]}>
+                      <button onClick={() => setTimelineMode(mode)}
+                        className={`flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 transition-colors ${timelineMode === mode ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+                        <Icon size={9} />{label}
+                      </button>
+                    </FilterHint>
                   ))}
                 </div>
               </div>

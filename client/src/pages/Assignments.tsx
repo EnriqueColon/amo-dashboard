@@ -8,6 +8,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import CategoryBadge from '@/components/CategoryBadge';
 import ColHeader from '@/components/ColHeader';
 import { ChevronLeft, ChevronRight, Search, X } from 'lucide-react';
+import { FilterHint } from '@/components/FilterHint';
+import { ENTITY_TYPE_DEFS } from '@/lib/filterDefinitions';
 
 const CATEGORIES = [
   { value: 'PRIVATE_CREDIT', label: 'Private Credit' },
@@ -150,18 +152,19 @@ export default function Assignments() {
             {CATEGORIES.map(({ value, label }) => {
               const active = draft.categories.includes(value);
               return (
-                <button
-                  key={value}
-                  data-testid={`cat-toggle-${value}`}
-                  onClick={() => toggleCategory(value)}
-                  className={`px-3 py-1 rounded-full text-xs font-medium border transition-all cursor-pointer
-                    ${active
-                      ? `cat-${value} border-current ring-1 ring-current ring-offset-1 ring-offset-card`
-                      : 'border-border text-muted-foreground hover:border-muted-foreground hover:text-foreground'
-                    }`}
-                >
-                  {active && <span className="mr-1">✓</span>}{label}
-                </button>
+                <FilterHint key={value} def={ENTITY_TYPE_DEFS[value]}>
+                  <button
+                    data-testid={`cat-toggle-${value}`}
+                    onClick={() => toggleCategory(value)}
+                    className={`px-3 py-1 rounded-full text-xs font-medium border transition-all cursor-pointer
+                      ${active
+                        ? `cat-${value} border-current ring-1 ring-current ring-offset-1 ring-offset-card`
+                        : 'border-border text-muted-foreground hover:border-muted-foreground hover:text-foreground'
+                      }`}
+                  >
+                    {active && <span className="mr-1">✓</span>}{label}
+                  </button>
+                </FilterHint>
               );
             })}
             {draft.categories.length > 0 && (

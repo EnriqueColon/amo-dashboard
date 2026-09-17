@@ -2,6 +2,8 @@ import { Link, useLocation } from 'wouter';
 import { BarChart2, FileText, CheckCircle, Shield, Building2, ClipboardList, Menu, X, LineChart, LayoutList, LogOut, Crosshair, Landmark, FileSignature } from 'lucide-react';
 import { useState } from 'react';
 import { useCounty, COUNTY_OPTIONS, type CountyScope } from '@/lib/county';
+import { FilterHint } from '@/components/FilterHint';
+import { COUNTY_DEF } from '@/lib/filterDefinitions';
 
 const NAV = [
   { href: '/',                 icon: BarChart2,    label: 'Overview',           group: 'main' },
@@ -68,17 +70,19 @@ export default function Sidebar() {
           >
             County
           </label>
-          <select
-            id="county-scope"
-            data-testid="county-scope"
-            value={county}
-            onChange={e => setCounty(e.target.value as CountyScope)}
-            className="w-full text-xs rounded border border-border bg-background px-2 py-1.5 text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-          >
-            {COUNTY_OPTIONS.map(o => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </select>
+          <FilterHint def={COUNTY_DEF}>
+            <select
+              id="county-scope"
+              data-testid="county-scope"
+              value={county}
+              onChange={e => setCounty(e.target.value as CountyScope)}
+              className="w-full text-xs rounded border border-border bg-background px-2 py-1.5 text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            >
+              {COUNTY_OPTIONS.map(o => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </FilterHint>
         </div>
       )}
 
