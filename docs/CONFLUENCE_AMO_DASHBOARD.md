@@ -152,6 +152,27 @@ they respected the selector.
 2. Enter the shared password (`AMO_PASSWORD`). The session cookie lasts **7 days**.
 3. There are no roles or per-user accounts — everyone who logs in sees everything.
 
+> **Not sure what a filter means? Hover over it.** Since 17 Sep 2026 every filter and view button —
+> *Loan transfers*, *Collateral*, *Mortgage (AMO)*, *Warehouse / Revolving*, *Market Transfer* and the
+> rest — shows a plain-English definition on hover. Column headers with an ⓘ icon work the same way.
+> The definitions are kept in one place, so a term means the same thing on every page.
+>
+> One honest caveat those definitions call out: on the **UCC Filings** page, *Collateral* and *Other*
+> are not yet a reliable split — both contain the same mix of original filings, amendments,
+> continuations and terminations.
+
+### 4.1a The weekly email
+
+A summary of the last 15 days goes to the named recipients **after** Friday's data collection, so both
+counties are current. It covers: transfers per county (each with its own date range, since Broward is
+collected daily and Miami-Dade weekly), who sold to whom, the most active sellers and buyers, the
+largest deals (each loan listed once, even when filed against several properties), and the
+transaction mix. Every individual transfer is attached as a CSV. It hides Wilmington Savings, MERS,
+Fannie Mae and Freddie Mac, exactly as the Reporting tab does.
+
+**Status 17 Sep 2026:** working and tested to internal addresses; **scheduled sending is switched off**
+until the first send to the named recipients is approved.
+
 ### 4.2 The county selector
 
 Top of the left sidebar, above the navigation. Three options: **Miami-Dade**, **Broward**, **All
