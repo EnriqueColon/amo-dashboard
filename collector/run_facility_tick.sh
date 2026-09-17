@@ -35,11 +35,17 @@ source /opt/amo-dashboard/.env
 # durable version — the cron entry stays live, and the tick simply yields for as
 # long as a backfill is running, then resumes on its own with no human step.
 #
-# Deliberately narrow: it matches the main extractor only. A tick skipped here
-# costs nothing, because the state machine is resume-safe by design and the next
-# tick is 20 minutes away.
-if pgrep -f "[e]xtract_pdfs.py" >/dev/null 2>&1; then
-    echo "$(date -u +%FT%TZ) main extraction backfill is running — skipping this tick"
+# Deliberately narrow: it matches the main extractor and the document re-reader
+# only. A tick skipped here costs nothing, because the state machine is
+# resume-safe by design and the next tick is 20 minutes away.
+#
+# reread_documents.py added 2026-09-17: the weekend direction re-read downloads
+# and OCRs ~51,000 Miami-Dade documents on the same 4 cores and the same clerk
+# endpoint. The owner chose to pause this tick for its duration so the re-read
+# finishes in time for Monday's email; this line is that pause, and it lifts
+# itself when the re-read exits.
+if pgrep -f "[e]xtract_pdfs.py|[r]eread_documents.py" >/dev/null 2>&1; then
+    echo "$(date -u +%FT%TZ) extraction or document re-read is running — skipping this tick"
     exit 0
 fi
 
