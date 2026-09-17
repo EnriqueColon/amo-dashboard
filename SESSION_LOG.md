@@ -4,6 +4,48 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-09-17 — Dollar volume counted each loan once per filing; whole-tool audit
+
+**Audit first (read-only, `health_audit.py` in scratch).** Verified: parties 99% from documents,
+homeowner bug effectively 0 left; 0 duplicate CFNs; loan amount accurate where shown (20/20);
+blanks genuine (40/40). **Open bugs found, not yet fixed:** MERS typed BANK so 2,758 MERS nominee
+filings count as MARKET_TRANSFER and MERS ranks #2 seller (`MERS_RELEASE` fires 4 times); 23 CAPPED
+days are the biggest bulk-sale days (109–145 held vs 57 normal) and are truncated; entity splits
+(FaceBank ×3, Benworth 84/80, Homebridge "FINCANCIAL", First Citizens &/AND); ~32% assignor typed
+OTHER incl. real banks; 2026-05-08 and 2024-05-10 possibly missing days. 135 ERROR windows are almost
+all weekends/holidays — harmless. **Audit mistake caught:** the first party check ran
+`_looks_like_person` on canonical names, which have "BANK, N.A." stripped — reported 52%, true figure
+~0. Measure on the raw field.
+
+**The fix.** A big loan is filed once per step with the full amount each time (portfolio loan
+against every building; securitisation chain). One $2.95B loan: 10 filings, 6 party pairs, 8
+properties, 2 dates. Rule in `server/reporting/loanVolume.ts`: same exact amount in the same row set
+within 31 days is one loan — **≥$1M only** (below that, round residential amounts genuinely recur).
+Judged inside the filtered set; per-firm totals partition by firm or the 2nd firm in a chain gets $0.
+Applied to entity report (the only screen showing $), participants and monthly chart (served, not
+displayed). Label now **"$ Volume (est.) · each loan counted once"**.
+
+**Measured as the screen computes it:** market $150.9B → $86.7B (−43%); Wells Fargo $16.7B → $9.7B;
+Goldman $15.0B → $10.7B; Barclays $5.5B → $1.9B; **Bank of America unchanged $4.9B** (no repeats —
+negative control).
+
+**I misreported the size first.** Told the owner Goldman showed $66.7B. It never did: that audit query
+counted self-assignments and both sides of each filing. `check-loan-volume.ts` asserted against it and
+**failed on first run against production**, which is how it surfaced. Corrected in `a1815b8`; the
+earlier commit message `caa69a0` still carries the wrong figure. *Compute before/after the way the
+screen computes it.*
+
+**Verification that is reusable:** auth is `checkAuth` middleware in `server/index.ts`, separate from
+`registerRoutes` — so the real routes can be mounted on a private 127.0.0.1 port against a
+`VACUUM INTO` copy of the DB and hit end-to-end without credentials or touching production. Did that:
+all three endpoints 200 and matching verified figures. Then build → restart, no DB change, no blank
+window. `script/check-loan-volume.ts` (11 checks, needs real DB, skips without).
+
+**Unrelated, pre-existing:** error log holds 84 × `Cannot destructure property 'password'` — login
+POST with no body returns 500 rather than 400. Last seen 2026-09-15. Low priority.
+
+---
+
 ## 2026-09-16 — The Assignor column was showing the homeowner, not the seller
 
 Owner looked at his own Reporting tab and asked *"does this seem repetitive, is it giving good

@@ -1,6 +1,6 @@
 # AMO Tracker — Mortgage Assignment Intelligence Dashboard
 
-> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 16 Sep 2026
+> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 17 Sep 2026
 > **Production URL:** `http://165.22.35.75:5000` (single shared password)
 > **Repository:** `amo-dashboard` (`origin/main`)
 
@@ -1055,6 +1055,31 @@ loan transfers, so no figure above double-counts and nothing published earlier h
 > Collateral bucket had become a catch-all. Both halves are now settled by rules in code, with the
 > reasoning recorded in `collector/tests/check_doc_category.py`, rather than left to the document
 > reader's judgement.
+
+> ### Dollar volume counted big loans several times — corrected 17 Sep 2026
+>
+> **"$ Volume" figures fell on 17 Sep 2026, and the lower numbers are the right ones.** The figure is
+> now labelled **"$ Volume (est.)"**.
+>
+> **What was wrong.** A large loan is recorded once per step, and every record repeats the full
+> amount. A portfolio loan is filed against each building it covers; a loan that is packaged and sold
+> on is filed again at each hand-off. The tool added every record together, so one $2.95B loan filed
+> 10 times counted as $29.5B.
+>
+> **What changed.** For loans of $1 million and up, the same exact amount on the same firm within a
+> month now counts once. Smaller loans are not merged, because identical round amounts between the
+> same lender and buyer are common and usually genuinely separate loans.
+>
+> | | Before | After |
+> |---|---|---|
+> | Whole market | $150.9B | $86.7B |
+> | Wells Fargo | $16.7B | $9.7B |
+> | Goldman Sachs | $15.0B | $10.7B |
+> | Bank of America | $4.9B | $4.9B (no repeated loans — unchanged, as expected) |
+>
+> **Why "est."** Some repeats name different properties, which is also exactly what a single portfolio
+> loan looks like, so a small number of distinct same-sized loans may be merged. Treat the figure as a
+> sound estimate of scale, not an exact sum. Transaction counts are unaffected.
 
 > ### The Assignor column was showing the borrower — corrected 16 Sep 2026
 >
