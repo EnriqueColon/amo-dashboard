@@ -17,6 +17,13 @@ set -u
 cd /opt/amo-dashboard/collector
 source /opt/amo-dashboard/.env
 
+# Two rebuilds at once empty and refill the same tables under each other.
+# "[n]ormalize" keeps pgrep from matching its own command line.
+if pgrep -f "[n]ormalize.py" >/dev/null; then
+    echo "=== nightly normalize SKIPPED: another rebuild is running ($(date -u +%FT%TZ)) ==="
+    exit 0
+fi
+
 echo "=== nightly normalize starting: $(date -u +%FT%TZ) ==="
 .venv/bin/python3 -u normalize.py
 status=$?

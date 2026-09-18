@@ -1,6 +1,6 @@
 # AMO Tracker — Mortgage Assignment Intelligence Dashboard
 
-> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 17 Sep 2026
+> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 18 Sep 2026
 > **Production URL:** `http://165.22.35.75:5000` (single shared password)
 > **Repository:** `amo-dashboard` (`origin/main`)
 
@@ -125,11 +125,22 @@ Assigned by a cascade, highest confidence first:
 | `txn_type` | Meaning |
 |---|---|
 | `SELF_ASSIGN` | Both sides resolve to the same company — an internal re-titling, not a market event. |
-| `MERS_RELEASE` | MERS assigning as nominee — a housekeeping release, not a trade. |
+| `MERS_RELEASE` | MERS on **either** side — the registry handing over, or taking, the placeholder interest it holds as nominee. Record-keeping, not a trade. (Until 18 Sep 2026 MERS was typed `BANK`, so ~2,900 of these counted as market transfers.) |
 | `MARKET_TRANSFER` | Institution → institution. **The real signal**: debt actually changing hands between market participants. |
 | `ORIGINATION` | Non-institution → institution. Paper entering the institutional market. |
 | `INSTITUTIONAL_OUT` | Institution → non-institution. Paper leaving it. |
 | `PRIVATE` | Neither side is an institution. |
+
+### Direction — which way did the loan move?
+
+Miami-Dade's county index sometimes lists the two parties of an assignment **backwards** — about
+7,500 loan transfers (13.6%), found 17 Sep 2026. Since 18 Sep 2026 (weekend rebuild) the rule is:
+**the document decides the direction, the index keeps the spelling.** The AI reading of each document
+names its assignor and assignee; where that is the exact or near reverse of the index, the row is
+flipped. An independent text check on the stored document text (`document_text`, kept since the
+18 Sep re-read) can overrule a flip; rows where the two disagree are kept as the index has them and
+listed in `direction_decisions` with `needs_review = 1`. Broward's index is not affected. Code and
+evidence: `collector/document_direction.py`.
 
 ### County scope — an important nuance
 
@@ -638,6 +649,11 @@ All installed via `crontab -e` on the droplet.
 | `0 6 * * 5` | `run_weekly.sh` | Miami-Dade: collect last 10 days → extract PDFs → normalize → enrich. Sources `/opt/amo-dashboard/.env` itself and **aborts loudly up front if `OPENAI_API_KEY` is missing** (fix `2441222`, 23 Aug 2026 — cron provides no environment; before the fix the run half-succeeded: collection worked, extraction silently died, see §7.4). |
 | `15 3 * * *` | `run_backup.sh` | Verified snapshot of the database + Broward images → local rotation (7 kept) → DigitalOcean Spaces. Records every run in `backup_runs`; the Overview banner reads it. |
 
+**One-off, 18–21 Sep 2026 (remove after):** `5 6 18 9 *` `collector/weekend/run_weekend.sh` (re-read →
+waits for fixes → `apply_weekend_fixes.sh` → email check) and `0 13 21 9 *`
+`collector/weekend/monday_email.sh` (Monday 09:00 ET send, only if both checks passed). Progress at
+`/weekend` or `cat /opt/amo-dashboard/collector/weekend/STATUS`.
+
 **Not yet installed:** a weekly emailed report (`server/scripts/sendWeeklyReport.ts`), planned to run
 right after `run_weekly.sh` on the same Friday 06:00 UTC slot. Built and preview-tested locally as of
 19 Aug 2026 but not yet wired into cron — see §7.4 item 9.
@@ -993,9 +1009,20 @@ confirmed. Commit messages are written as statements of what changed and why
 
 ---
 
-## 7. Current status — as of 15 Sep 2026
+## 7. Current status — as of 18 Sep 2026
 
 ### 7.1 Overall
+
+**18–21 Sep 2026: the QC audit's fixes are being applied over the weekend.** A read-only audit of the
+whole tool (17 Sep) and the owner's review of it produced six confirmed fixes
+(`docs/qc/QC_FIX_LIST_2026-09-17.md`): (1) Miami-Dade rows shown in reverse direction, (2) homeowners
+still shown as the seller on ~7,700 rows, (3) MERS counted as a bank, (4) companies split across
+several spellings, (5) lenders typed "Other", (6) a handful of documents never read. All six are
+permanent code; they go live in **one rebuild on Saturday evening** after every Miami-Dade loan
+document is re-read and its text stored. **Follow it at `/weekend`** (same login). Dry-run effect on
+production data: 7,520 rows re-oriented, homeowner sellers 7,697 → 64, MERS out of the seller
+rankings. The Monday 21 Sep email sends automatically only if the rebuild and an end-to-end email
+check both pass.
 
 🟢 **Live and healthy.** Both counties flow end to end: index → images → extraction → normalization →
 dashboard, county-scoped throughout. The Broward expansion, the major workstream since 6 Aug 2026,
@@ -1198,7 +1225,10 @@ endpoints healthy across all three county scopes.
 | PDF extraction — Broward | 🟡 Live **daily**, coverage still thin — blocked on images, not on the extractor |
 | Reporting tab filters (type + category) | 🟢 **Deployed 10–11 Sep 2026** — and every panel on the page now counts the same rows |
 | Facility batch backfill (20-min tick) | 🟢 Live |
-| Nightly normalize + cache bust | 🟢 Live |
+| Nightly normalize + cache bust | 🟢 Live — **but see §7.4: it discards the company types Friday's AI step assigns**, so counts swing Thu↔Fri. Skips itself if another rebuild is running (18 Sep 2026) |
+| Direction of transfer (Miami-Dade) | 🟡 **Fix built 18 Sep 2026, applied in the 19 Sep rebuild** — `document_direction.py`; review list in `direction_decisions` (no screen yet) |
+| Stored document text (`document_text`) | 🟡 **Filling 18–19 Sep 2026** — every Miami-Dade loan transfer re-read and kept (~1.7 KB/doc compressed); future audits need no re-download |
+| Weekend progress page (`/weekend`) | 🟢 Deployed 18 Sep 2026 — read-only view of the weekend run |
 | County-aware server + client selector | 🟢 Deployed |
 | Per-county document links | 🟢 Deployed |
 | Endpoint county scoping | 🟢 Deployed — all document endpoints |
@@ -1212,6 +1242,21 @@ endpoints healthy across all three county scopes.
 | Automated backups | 🟢 **Live off-box 17 Aug 2026** — nightly verified snapshot → DigitalOcean Spaces (`amo-dashboard-backups-ec`, NYC3). Restore verified from the bucket copy |
 
 ### 7.4 Known gaps and open items
+
+**−5. NEW 18 Sep 2026 — the nightly rebuild throws away the weekly AI company types.** Friday's
+`enrich_entities.py` types companies with an LLM (e.g. Northern Trust → BANK); every nightly
+`normalize.py` re-derives types without it, so they revert to OTHER until the next Friday. That is why
+market transfers read 31,095 on Thursday 17 Sep and 38,312 on Friday 18 Sep with no code change.
+Next step: have normalize keep `confidence_source = 'llm'` types, then re-check the mix. Until then,
+compare numbers only within the same side of Friday.
+
+**−4. NEW 18 Sep 2026 — open items from the QC review** (full list and evidence in
+`docs/qc/QC_FIX_LIST_2026-09-17.md`, section 3): the 23 truncated (CAPPED) collection days need a
+narrower-than-a-day search; show the real lender behind "MERS as nominee for X" using the stored
+text; a screen for the direction review list; stop the lending-relationship reader retrying the same
+14 documents every 20 minutes; "Collateral" still holds some non-loan pledges; the UCC Collateral/Other
+filter does not separate anything; login returns 500 on an empty request; Freddie Mac is split by the
+spelling "FEDERAL HOME LOAN MTG" (now typed GSE, not yet merged).
 
 **−3. ✅ FIXED 24 Aug 2026 (pending deploy) — the FDIC "NI YoY %" column had never worked, and the
 national screen is narrower than it looks.**

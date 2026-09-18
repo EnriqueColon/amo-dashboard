@@ -16,6 +16,7 @@ from collections import defaultdict
 
 import entity_names
 import name_matching
+import document_direction
 
 DB = os.environ.get('AMO_DB_PATH', '/opt/amo-dashboard/miami_dade_amo.db')
 
@@ -268,8 +269,12 @@ MANUAL_OVERRIDES = [
     # "U S BANK NAL ASSN", "U S BANK TRUSY N A" (OCR for TRUST). \b after BANK
     # keeps it clear of BANKRUPTCY.
     (r'U\.?\s*S\.?\s*BANK\b', 'US BANK'),
-    # Wilmington Savings
-    (r'WILMINGTON\s+SAVINGS', 'WILMINGTON SAVINGS'),
+    # Wilmington Savings. SAVINGS? — the county also records "WILMINGTON SAVING
+    # FUND SOCIETY", which missed this and stood alone at 404 filings (+62 as
+    # "...TRU") until 2026-09-18.
+    (r'WILMINGTON\s+SAVINGS?\b', 'WILMINGTON SAVINGS'),
+    # Wilmington Trust — "WILMINGTON TRUST TRU" is the index truncating TRUSTEE
+    (r'WILMINGTON\s+TRUST\b', 'WILMINGTON TRUST'),
     # Goldman Sachs
     (r'GOLDMAN\s+SACHS', 'GOLDMAN SACHS'),
     # Deutsche Bank
@@ -309,7 +314,7 @@ MANUAL_OVERRIDES = [
     # HUD / Secretary of Housing — all variants → single canonical
     (r'SECRETARY\s+OF\s+HOUSING|HOUSING\s+AND\s+URBAN\s+DEV|HOUSING\s*&\s*URBAN\s+DEV|\bHUD\b', 'SECRETARY OF HOUSING AND URBAN DEVELOPMENT'),
     # Mortgage Assets Management (special servicer)
-    (r'MORTGAGE\s+ASSETS\s+MANAGEMENT', 'MORTGAGE ASSETS MANAGEMENT'),
+    (r'MORTGAGE\s+ASSETS\s+(?:MANAGEMENT|MGMT)', 'MORTGAGE ASSETS MANAGEMENT'),
     # Kiavi Funding (bridge/private lender)
     (r'KIAVI\s+FUND', 'KIAVI FUNDING'),
     # Figure Lending
@@ -378,6 +383,17 @@ MANUAL_OVERRIDES = [
     # Banesco (FL state-chartered bank — OCR/word-order variants: BANESCO USA,
     # USA BANESCO, BANESCOUSA, BANK BANESCO, etc.)
     (r'BANESCO', 'BANESCO USA'),
+    # ── Merges confirmed by the owner 2026-09-18 (QC fix list #4) ──────────
+    # One company recorded under several spellings. Deliberately NOT merged,
+    # because they are different firms: Citibank / CIT Bank, Civic / CV3,
+    # My Mortgage / TY Mortgage, Churchill MRA Funding, the Headlands and Legacy
+    # trust series.
+    (r'FACE\s*BANK|\bINTERNATIONAL\s+FACEBANK', 'FACEBANK INTERNATIONAL'),
+    (r'BENWORTH\s+CAPITAL', 'BENWORTH CAPITAL PARTNERS'),
+    (r'HOMEBRIDGE\s+FIN', 'HOMEBRIDGE FINANCIAL SERVICES'),
+    (r'RUSHMORE\s+LOAN', 'RUSHMORE LOAN MANAGEMENT SERVICES'),
+    (r'FIRST[\s-]+CITIZENS\s+BANK\s*(?:&|AND)\s*TRUST', 'FIRST CITIZENS BANK & TRUST COMPANY'),
+    (r'CHASE\s+HOME\s+LENDING\s+(?:MTG|MORTGAGE)\s+TRUST\s+2023\W*RPL\s*1', 'CHASE HOME LENDING MORTGAGE TRUST 2023-RPL1'),
     # First Federal Bank — suffix stripping would otherwise reduce these to 'FIRST'
     (r'FIRST\s+FEDERAL\s+BANK\s+OF\s+KANSAS\s+CITY', 'FIRST FEDERAL BANK OF KANSAS CITY'),
     (r'FIRST\s+FEDERAL\s+BANK', 'FIRST FEDERAL BANK'),
@@ -486,7 +502,8 @@ def _looks_like_person(name: str | None) -> bool:
     return bool(name) and not _CORPORATE_MARKER_RE.search(name)
 
 
-def prefer_document_party(index_name: str | None, pdf_name: str | None) -> str | None:
+def prefer_document_party(index_name: str | None, pdf_name: str | None,
+                          broad: bool = True) -> str | None:
     """Pick which name to report for a party: the document's, or the index's.
 
     The county index lists EVERY party on a filing. For an assignment that
@@ -527,6 +544,19 @@ def prefer_document_party(index_name: str | None, pdf_name: str | None) -> str |
         # never a party name, so anything the document offers beats it.
         return pdf
     if _looks_like_person(idx) and _is_institutional(pdf):
+        return pdf
+    # Widened 2026-09-18 (QC fix list #2). "The document names an institution"
+    # was the test, and _is_institutional() only knows the classifier's
+    # patterns — so the homeowner stayed in the Assignor column whenever the
+    # document's seller was MERS (4,330 Miami-Dade rows: "MORTGAGE ELECTRONIC
+    # REGISTRATION SYSTEMS, INC., AS NOMINEE FOR CALIBER HOME LOANS") or a
+    # company the classifier has no pattern for (3,372: Forethought Life
+    # Insurance, the FDIC, Reverse Mortgage Funding). Read by eye: 2023R100219,
+    # 2025R944628, 2026R68031. A name carrying an organisational marker is
+    # enough; the same marker test that keeps FV-1 INC from being "corrected"
+    # decides it. The caller guards against the one bad outcome measured — the
+    # document's party being the other side of the row (~3 in 20 sampled).
+    if broad and _looks_like_person(idx) and not _looks_like_person(pdf):
         return pdf
     return index_name
 
@@ -762,6 +792,14 @@ def resolve_entity_type(entity: str, suffix_signals: dict,
     """Classify an entity using all available signals.
     Returns (entity_type, confidence_source)."""
 
+    # 0. MERS is a registry, never a bank. Until 2026-09-18 it reached step 6
+    #    below, where its volume and spread of counterparties look exactly like
+    #    a bank's — so 2,867 MERS filings counted as market sales and MERS
+    #    ranked #2 seller, and MERS_RELEASE fired 6 times in total. Exact
+    #    pattern, not a substring: FARMERS and CUSTOMERS contain "MERS".
+    if classify_canonical(entity) == 'MERS':
+        return 'MERS', 'manual_override'
+
     # 1. Manual overrides from enrich_entities (imported inline to avoid circular dep)
     for key, val in _MANUAL_TYPE_OVERRIDES.items():
         if key in entity.upper():
@@ -801,6 +839,9 @@ def resolve_entity_type(entity: str, suffix_signals: dict,
 # Consolidated manual type overrides — single source of truth used by both
 # normalize.py and enrich_entities.py. Keyed by substring match on UPPER name.
 _MANUAL_TYPE_OVERRIDES: dict[str, str] = {
+    # Government
+    'NATIONAL HOMEBUYERS FUND':     'GSE',              # "an instrumentality of government"
+
     # Securitization trusts / structured finance vehicles
     'MEB LOAN TRUST':               'TRUST',
     'TOWD POINT':                   'TRUST',
@@ -833,7 +874,12 @@ _MANUAL_TYPE_OVERRIDES: dict[str, str] = {
     'MTGLQ INVESTORS':              'PRIVATE_CREDIT',
     'ARIXA CAPITAL':                'PRIVATE_CREDIT',
     'ATHENE ANNUITY':               'PRIVATE_CREDIT',
+    # Added 2026-09-18 (QC fix list #5) — lenders the classifier left as OTHER
+    'CASA FINANCE GROUP':           'PRIVATE_CREDIT',   # trades with Unitas / Churchill
+    'NEWTEK BUSINESS SERVICES':     'PRIVATE_CREDIT',   # SBA lender, sells to its own SPVs
+    'INTERNATIONAL MORTGAGE BROKERS': 'PRIVATE_CREDIT', # local private-money lender
     # Servicers
+    'MORTGAGE ASSETS MANAGEMENT':   'SERVICER',         # HUD reverse-mortgage servicer
     'FINANCE OF AMERICA REVERSE':   'SERVICER',
     'PARAMOUNT RESIDENTIAL':        'SERVICER',
     'CITIMORTGAGE':                 'SERVICER',
@@ -843,6 +889,7 @@ _MANUAL_TYPE_OVERRIDES: dict[str, str] = {
     'NEW RESIDENTIAL MORTGAGE':     'SERVICER',
     'AMERICAN BANCSHARES MORTGAGE': 'SERVICER',
     # Banks
+    'FACEBANK':                     'BANK',             # FaceBank International, Coral Gables
     'EASTERN FINANCIAL':            'BANK',
     'BRADESCO':                     'BANK',
     'SPACE COAST CREDIT UNION':     'BANK',
@@ -851,6 +898,37 @@ _MANUAL_TYPE_OVERRIDES: dict[str, str] = {
     'MIDFIRST BANK':                'BANK',
     'PACIFIC LIFE INSURANCE':       'BANK',
 }
+
+
+# Held at their pre-2026-09-18 type. These lenders were typed by the
+# behavioural rule (step 6 of resolve_entity_type), which needs >= 5 distinct
+# counterparties feeding the entity. Before QC fix #2 most of those
+# counterparties were HOMEOWNERS wrongly shown as sellers; once the document's
+# real seller (usually MERS) replaced them, 133 lenders fell below the threshold
+# and dropped to OTHER — a side effect nobody asked for, worth ~1,100 market
+# transfers. Pinned here so fix #2 changes who is shown selling, not what
+# these firms are. Measured on a dry run of production, 18 Sep 2026; every
+# entity with >= 25 filings that lost its type, minus the ones that were
+# never institutions (Habitat for Humanity; "NP", a truncated name).
+_PINNED_TYPES_2026_09_18: dict[str, str] = {
+    'U S SMALL BUSINESS ADMINISTRATION': 'GSE',
+    'FEDERAL HOME LOAN MTG':        'GSE',              # Freddie Mac, abbreviated
+    **{name: 'BANK' for name in (
+        'RBI MORTGAGES', 'LOAN STORE', 'RBI PRIVATE LENDING', 'FLORIDA HOME TRUST MORTGAGE',
+        'UNITAS FUNDING', 'CIVIC FINANCIAL SERVICES', 'MCM HOLDINGS', 'HOMETAP EQUITY PARTNERS',
+        'ANGEL OAK MORTGAGE SOLUTIONS', 'MY MORTGAGE', 'ALTALOANS', '1ST FINANCIAL',
+        'FAMILY BENEFIT LIFE INSURANCE', 'NO LIMIT MTG SOLUTIONS', 'JLM CAPITAL', 'AVAIL 3',
+        'CV3 FINANCIAL SERVICES', 'TOWNE MORTGAGE COMPANY', 'FAIRWAY INDEPENDENT M', 'REAL CAPITAL FINANCE',
+        'POINT MORTGAGE', 'CELINK', 'EAGLE HOME MORTGAGE', 'LENNAR MTG', 'POINT TITLING TRUST',
+        'DHI MORTGAGE COMPANY', 'LIBERTY HOME EQUITY SOLUTIONS', 'READY MORTGAGE LENDERS',
+        'HOMEXPRESS MORTGAGE', 'OCMBC', 'AMCAP MORTGAGE', 'ATHAS CAPITAL GROUP',
+        'FIRST CITIZENS SECURITIZATION DEPOSITOR', 'MY MTG', 'BPL MORTGAGE', 'TRUST MTG LENDING',
+        'CHAMPION MTG', 'GENEVA FINANCIAL', 'HAMILTON HOME LOANS', 'MOVEMENT MTG', 'FM HOME LOANS',
+        'HMC ASSETS', 'WORLD ALLIANCE FINANCIAL', 'RESIDENTIAL MORTGAGE AGGREGATION TRUST',
+        'ROK LENDING', 'SUN WEST MTG')},
+    'DISCOVER BANK':                'SERVICER',
+}
+_MANUAL_TYPE_OVERRIDES.update(_PINNED_TYPES_2026_09_18)
 
 
 # ── Credit-facility name cleaning ─────────────────────────────────────────────
@@ -935,7 +1013,7 @@ def get_txn_type(assignor_canon: str, assignee_canon: str,
                  assignor_type: str, assignee_type: str) -> str:
     if assignor_canon == assignee_canon:
         return 'SELF_ASSIGN'
-    if assignor_type == 'MERS':
+    if assignor_type == 'MERS' or assignee_type == 'MERS':
         return 'MERS_RELEASE'
     a_inst = assignor_type in _INST_TYPES
     b_inst = assignee_type in _INST_TYPES
@@ -1353,6 +1431,13 @@ def build_normalized_tables():
     for row in rows:
         cfn_groups[row[0]].append(row)
 
+    # Stored OCR text for the direction check (document_direction.py). Empty
+    # until reread_documents.py has run; the rule then relies on the AI reading
+    # alone, which is what the D3/D4 evidence validated.
+    doc_texts = document_direction.load_texts(conn)
+    print(f"  Stored document texts for the direction check: {len(doc_texts)}")
+    direction_rows = []
+
     print(f"  Processing {len(cfn_groups)} unique CFNs...")
 
     AMO_DOC_TYPE = 'ASSIGNMENT OF MORTGAGE - AMO'
@@ -1435,13 +1520,38 @@ def build_normalized_tables():
         rec_book = entries[0][4]
         rec_page = entries[0][5]
 
+        # ── Direction: which way did the loan move? ─────────────────────────
+        # Miami-Dade's index lists some assignments backwards (7,478 rows,
+        # 13.6%, measured 2026-09-17/18). The document decides the direction,
+        # the index keeps the spelling. Rule and evidence: document_direction.py.
+        # Runs BEFORE the party preference below, so each index name is paired
+        # with the document's party on the same side.
+        if include and ext and entries[0][13] == 'MIAMI-DADE':
+            pa_raw, pb_raw = ext.get('assignor_name'), ext.get('assignee_name')
+            bkt = document_direction.bucket(
+                canonicalize(dominant_assignor), canonicalize(dominant_grantee),
+                canonicalize(pa_raw) if pa_raw else None, canonicalize(pb_raw) if pb_raw else None)
+            verdict = document_direction.text_verdict(doc_texts.get(cfn), dominant_assignor, dominant_grantee)
+            swap, review = document_direction.decide(bkt, verdict)
+            if swap or review:
+                direction_rows.append((cfn, bkt, verdict, 'SWAPPED' if swap else 'KEPT', int(review),
+                                       dominant_assignor, dominant_grantee))
+            if swap:
+                dominant_assignor, dominant_grantee = dominant_grantee, dominant_assignor
+                assignor_type, grantee_type = grantee_type, assignor_type
+
         # The document names the assignor and assignee explicitly; the index
         # only lists everyone who appears on the filing. Prefer the document.
         if ext:
-            dominant_assignor = prefer_document_party(dominant_assignor,
-                                                      ext.get('assignor_name'))
-            dominant_grantee = prefer_document_party(dominant_grantee,
-                                                     ext.get('assignee_name'))
+            new_a = prefer_document_party(dominant_assignor, ext.get('assignor_name'))
+            new_b = prefer_document_party(dominant_grantee, ext.get('assignee_name'))
+            # The widened rule (2026-09-18) must never turn a two-party row into
+            # a fake self-transfer: in ~3 of 20 sampled rows the document's
+            # "assignor" was the buyer. Where it would, keep the narrow rule.
+            if canonicalize(new_a) == canonicalize(new_b):
+                new_a = prefer_document_party(dominant_assignor, ext.get('assignor_name'), broad=False)
+                new_b = prefer_document_party(dominant_grantee, ext.get('assignee_name'), broad=False)
+            dominant_assignor, dominant_grantee = new_a, new_b
 
         assignor_canon = canonicalize(dominant_assignor)
         assignee_canon = canonicalize(dominant_grantee)
@@ -1518,6 +1628,28 @@ def build_normalized_tables():
                 WHERE cfn = ?
             """, [(c, rb, ra, cfn) for cfn, c, rb, ra in review_rows])
     conn.commit()
+
+    # Every direction decision that changed a row or needs a human look. Rebuilt
+    # each run, like the tables it explains; the Needs-review list is
+    # `WHERE needs_review = 1`.
+    conn.executescript("""
+        DROP TABLE IF EXISTS direction_decisions;
+        CREATE TABLE direction_decisions (
+            cfn             TEXT PRIMARY KEY,
+            bucket          TEXT,     -- D1..D5, see document_direction.py
+            text_verdict    TEXT,     -- FORWARD | REVERSED | NULL (text check abstained / no text)
+            action          TEXT,     -- SWAPPED | KEPT
+            needs_review    INTEGER,
+            index_assignor  TEXT,     -- the index's order, before any swap
+            index_assignee  TEXT
+        );
+    """)
+    conn.executemany("INSERT OR REPLACE INTO direction_decisions VALUES (?,?,?,?,?,?,?)", direction_rows)
+    conn.commit()
+    n_swapped = sum(1 for r in direction_rows if r[3] == 'SWAPPED')
+    n_review = sum(r[4] for r in direction_rows)
+    print(f"  Direction: {n_swapped} Miami-Dade rows swapped to the document's order; "
+          f"{n_review} flagged for review")
 
     n = conn.execute("SELECT COUNT(*) FROM aom_events_clean").fetchone()[0]
     n_other = conn.execute("SELECT COUNT(*) FROM aom_events_nonloan").fetchone()[0]
@@ -1859,7 +1991,11 @@ def build_normalized_tables():
         UPDATE aom_events_clean SET txn_type =
         CASE
             WHEN assignor_canon = assignee_canon THEN 'SELF_ASSIGN'
-            WHEN assignor_type  = 'MERS'         THEN 'MERS_RELEASE'
+            -- MERS on EITHER side is record-keeping, not a sale. Before
+            -- 2026-09-18 a loan assigned TO MERS fell through to PRIVATE here
+            -- (and to INSTITUTIONAL_OUT in get_txn_type), because MERS was typed
+            -- BANK and neither path had ever seen it on the buying side.
+            WHEN assignor_type  = 'MERS' OR assignee_type = 'MERS' THEN 'MERS_RELEASE'
             WHEN assignor_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST')
              AND assignee_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST') THEN 'MARKET_TRANSFER'
             WHEN assignor_type NOT IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST','MERS')
