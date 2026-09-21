@@ -1,6 +1,6 @@
 # AMO Tracker — Mortgage Assignment Intelligence Dashboard
 
-> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 18 Sep 2026
+> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 21 Sep 2026
 > **Production URL:** `http://165.22.35.75:5000` (single shared password)
 > **Repository:** `amo-dashboard` (`origin/main`)
 
@@ -172,17 +172,51 @@ they respected the selector.
 > are not yet a reliable split — both contain the same mix of original filings, amendments,
 > continuations and terminations.
 
-### 4.1a The weekly email
+### 4.1a The weekly email — "AMO Market Monitor"
 
-A summary of the last 15 days goes to the named recipients **after** Friday's data collection, so both
-counties are current. It covers: transfers per county (each with its own date range, since Broward is
-collected daily and Miami-Dade weekly), who sold to whom, the most active sellers and buyers, the
-largest deals (each loan listed once, even when filed against several properties), and the
-transaction mix. Every individual transfer is attached as a CSV. It hides Wilmington Savings, MERS,
-Fannie Mae and Freddie Mac, exactly as the Reporting tab does.
+Goes to the named recipients **after** Friday's data collection, so both counties are current.
 
-**Status 17 Sep 2026:** working and tested to internal addresses; **scheduled sending is switched off**
-until the first send to the named recipients is approved.
+Since 21 Sep 2026 it is a **roll-up over three horizons** — the last 15 days, the last 30 days and the
+last 360 days — each compared with the period of equal length immediately before it. The owner asked
+for this on 19 Sep so the recipients can see how the current fortnight sits against the month and the
+year, rather than reading a fortnight in isolation.
+
+What it covers, in order: a plain-English "Pulse" paragraph; three headline cards (transfers, change
+vs the prior period, stated dollar volume, transfers per business day, active sellers); a 52-week
+trend chart; pace per business day; the transaction mix; the most active sellers and buyers with a
+momentum multiplier against each firm's own 360-day norm; firms heating up and cooling off; the top
+seller→buyer relationships; the largest loans of the last 30 days; and the most recently filed
+lending relationships. The last 30 days of transfers and every lending relationship are attached as
+CSVs.
+
+**Miami-Dade and Broward are held apart throughout.** The headline cards, the transaction mix, the
+sellers and buyers tables and the top relationships each carry their own county breakdown, and the
+pace chart draws a separate block per county. This is shown as a colour-coded line under each row
+rather than as `M-D`/`BRW` columns: the tables already carry three window columns, and six numeric
+columns wrap in Outlook and on phones.
+
+Two rules keep the comparisons honest:
+
+- **Each county's windows end on its own latest recorded date.** Miami-Dade is collected weekly and
+  Broward daily, so a shared end date would leave several empty days at the end of Miami-Dade's
+  window and read as a slowdown that never happened.
+- **A "vs prior" change counts only counties with complete data in both periods.** Broward loan
+  transfers begin 22 Jul 2026, so it is excluded from the 30- and 360-day comparisons — which are
+  labelled "Miami-Dade only" — rather than manufacturing growth out of a coverage change. The
+  360-day comparison stays Miami-Dade-only until roughly July 2027.
+
+It hides Wilmington Savings, MERS, Fannie Mae and Freddie Mac, exactly as the Reporting tab does.
+
+Charts are built from table cells with background colours, never SVG or images, because Outlook
+desktop renders HTML with the Word engine and often blocks images.
+
+**Status 21 Sep 2026:** the roll-up is committed and previewed against live data, but **not yet
+deployed** — the droplet still holds the previous 15-day template. The scripts run from source via
+`tsx`, so a `git pull` on the droplet is enough to change what Friday sends; no rebuild is needed.
+The last send was the Monday run on 21 Sep 13:00 UTC, which used the old template.
+
+The old 15-day builder remains at `server/email/report.ts`, unused, until the roll-up has sent
+cleanly a few times.
 
 ### 4.2 The county selector
 
@@ -1009,7 +1043,7 @@ confirmed. Commit messages are written as statements of what changed and why
 
 ---
 
-## 7. Current status — as of 18 Sep 2026
+## 7. Current status — as of 21 Sep 2026
 
 ### 7.1 Overall
 
@@ -1229,6 +1263,7 @@ endpoints healthy across all three county scopes.
 | Direction of transfer (Miami-Dade) | 🟡 **Fix built 18 Sep 2026, applied in the 19 Sep rebuild** — `document_direction.py`; review list in `direction_decisions` (no screen yet) |
 | Stored document text (`document_text`) | 🟡 **Filling 18–19 Sep 2026** — every Miami-Dade loan transfer re-read and kept (~1.7 KB/doc compressed); future audits need no re-download |
 | Weekend progress page (`/weekend`) | 🟢 Deployed 18 Sep 2026 — read-only view of the weekend run |
+| Weekly emailed report ("AMO Market Monitor") | 🟡 **Roll-up rebuilt 21 Sep 2026** — three horizons (15 / 30 / 360 days) with per-county breakdown throughout; committed and previewed against live data, **not yet pulled to the droplet**, which still sends the previous 15-day template (§4.1a) |
 | County-aware server + client selector | 🟢 Deployed |
 | Per-county document links | 🟢 Deployed |
 | Endpoint county scoping | 🟢 Deployed — all document endpoints |

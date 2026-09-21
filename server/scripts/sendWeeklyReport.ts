@@ -1,4 +1,12 @@
-// Weekly emailed report — clean AMO events + lending relationships, rolling 15-day window.
+// Weekly emailed report — the AMO Market Monitor roll-up: the same market over
+// three horizons (last 15 days, last 30 days, last 360 days), each against the
+// period just before it, with Miami-Dade and Broward held apart throughout.
+//
+// Replaced the single rolling 15-day summary on 21 Sep 2026, at the owner's
+// request (19 Sep): "activity in roll-up last 15 days, last month, and the last
+// 360 days … with charts so they can see changes from those time frames."
+// server/email/report.ts still holds the old 15-day builder, unused, until the
+// roll-up has sent cleanly a few times.
 //
 // Usage:
 //   tsx server/scripts/sendWeeklyReport.ts             preview only, writes local files, sends nothing
@@ -13,13 +21,14 @@
 //   graph: GRAPH_TENANT_ID, GRAPH_CLIENT_ID, GRAPH_CLIENT_SECRET
 //   smtp:  REPORT_SMTP_PASS (Outlook app password)
 //   both:  REPORT_SMTP_USER (sending mailbox), REPORT_RECIPIENTS (comma-separated)
-// REPORT_START_DATE / REPORT_END_DATE (YYYY-MM-DD) override the rolling 15-day window —
-// useful for previewing against a dev DB whose data lags today, or regenerating a past week.
+// REPORT_SEND_DATE (YYYY-MM-DD) pins the as-of date, for regenerating a past report.
+// Each county's windows still end on its own latest recorded date, so a DB that
+// lags today renders a full report rather than an empty one.
 import fs from 'fs';
 import path from 'path';
-import { subDays, format } from 'date-fns';
+import { format } from 'date-fns';
 import { getDb } from '../db';
-import { buildWeeklyReport } from '../email/report';
+import { buildRollupReport } from '../email/rollupReport';
 import { createReportTransport } from '../email/mailer';
 import { sendViaGraph, verifyGraphAccess } from '../email/graphMailer';
 
@@ -45,19 +54,20 @@ async function main() {
     return;
   }
 
-  const endDate = process.env.REPORT_END_DATE || format(new Date(), 'yyyy-MM-dd');
-  const startDate = process.env.REPORT_START_DATE || format(subDays(new Date(endDate), 15), 'yyyy-MM-dd');
+  const sendDate = process.env.REPORT_SEND_DATE || format(new Date(), 'yyyy-MM-dd');
 
   const db = getDb();
-  const report = buildWeeklyReport(db, startDate, endDate);
-  const subject = `AMO Dashboard — ${startDate} to ${endDate} Activity Report`;
+  const report = buildRollupReport(db, sendDate);
+  const subject = report.subject;
+  const coverage = Object.entries(report.asOf)
+    .map(([c, d]) => `${c} through ${d}`).join(', ') || 'no data';
 
   if (!SEND) {
     const outDir = path.resolve(process.cwd(), 'server/scripts/output');
     fs.mkdirSync(outDir, { recursive: true });
-    const htmlPath = path.join(outDir, `report-preview-${endDate}.html`);
-    const cleanCsvPath = path.join(outDir, `clean-events-${endDate}.csv`);
-    const facilityCsvPath = path.join(outDir, `lending-relationships-${endDate}.csv`);
+    const htmlPath = path.join(outDir, `report-preview-${sendDate}.html`);
+    const cleanCsvPath = path.join(outDir, `clean-events-${sendDate}.csv`);
+    const facilityCsvPath = path.join(outDir, `lending-relationships-${sendDate}.csv`);
     fs.writeFileSync(htmlPath, report.html);
     fs.writeFileSync(cleanCsvPath, report.cleanCsv);
     fs.writeFileSync(facilityCsvPath, report.facilityCsv);
@@ -66,8 +76,9 @@ async function main() {
     console.log(`Subject: ${subject}`);
     console.log(`From:    "AMO Dashboard" <${SENDER}>`);
     console.log(`To:      ${RECIPIENTS.join(', ')}`);
-    console.log(`Clean AMO events:     ${report.cleanCount} rows`);
-    console.log(`Lending relationships: ${report.facilityCount} rows`);
+    console.log(`Data through: ${coverage}`);
+    console.log(`Transfers (last 15 days): ${report.cleanCount}`);
+    console.log(`Lending relationships:    ${report.facilityCount}`);
     console.log('Files written:');
     console.log(`  ${htmlPath}`);
     console.log(`  ${cleanCsvPath}`);
@@ -82,15 +93,18 @@ async function main() {
   // 09:00 and 10:05). A report built mid-rebuild reads zero transfers and would
   // go out looking like a dead market. Any real 15-day window has hundreds, so
   // zero means "the table is being rebuilt", never "nothing happened".
+  //
+  // buildRollupReport returns cleanCount 0 for both shapes of empty: a table
+  // with no rows at all, and one whose rows all fall outside the window.
   if (report.cleanCount === 0) {
-    console.error(`NOT SENT: 0 transfers for ${startDate}..${endDate} — the table is most likely mid-rebuild. Retry later.`);
+    console.error(`NOT SENT: 0 transfers as of ${sendDate} (${coverage}) — the table is most likely mid-rebuild. Retry later.`);
     process.exitCode = 2;
     return;
   }
 
   const attachments = [
-    { filename: `clean-events-${endDate}.csv`, content: report.cleanCsv },
-    { filename: `lending-relationships-${endDate}.csv`, content: report.facilityCsv },
+    { filename: `clean-events-${sendDate}.csv`, content: report.cleanCsv },
+    { filename: `lending-relationships-${sendDate}.csv`, content: report.facilityCsv },
   ];
 
   if (TRANSPORT === 'graph') {
