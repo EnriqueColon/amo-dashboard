@@ -1,0 +1,11 @@
+{
+  "name": "amo-droplet-mcp",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "MCP server exposing the amo-dashboard droplet (deploy, pipeline health, logs, read-only DB) as named tools.",
+  "bin": { "amo-droplet-mcp": "server.mjs" },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0"
+  }
+}
