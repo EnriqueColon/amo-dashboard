@@ -1,6 +1,6 @@
 # AMO Tracker — Mortgage Assignment Intelligence Dashboard
 
-> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 21 Sep 2026
+> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 22 Sep 2026
 > **Production URL:** `http://165.22.35.75:5000` (single shared password)
 > **Repository:** `amo-dashboard` (`origin/main`)
 
@@ -14,7 +14,7 @@
 | **Who uses it** | Internal — one analyst/deal team. Single shared password, no user accounts. |
 | **Counties live** | Miami-Dade (full), Broward (live since 10 Aug 2026) |
 | **History depth** | 3 Jan 2023 → present |
-| **Data volume** | ~114,100 recorded filings, ~18,000 resolved entities, 44,585 confirmed loan transfers |
+| **Data volume** | 150,336 recorded filings, 10,431 resolved entities, 56,484 confirmed loan transfers (22 Sep 2026 — see §7.2) |
 | **Refresh cadence** | Broward daily, Miami-Dade weekly, derived tables rebuilt nightly |
 | **Stack** | React + Vite (client) · Express + SQLite (server) · Python (collector) |
 | **Hosting** | Single DigitalOcean droplet, PM2-managed Node process |
@@ -527,6 +527,8 @@ amo-dashboard/
 │   ├── migrate_add_county.py      multi-county schema migration
 │   ├── tests/                     guardrails (see §6.6)
 │   └── run_*.sh                   cron wrappers
+├── tools/
+│   └── droplet-mcp/    MCP server exposing droplet ops as named tools (§6.4a)
 ├── CLAUDE.md           operational facts for AI assistants
 ├── SESSION_LOG.md      dense running history — read before changing anything
 └── ROLLBACK.md         revert paths for in-flight workstreams
@@ -670,6 +672,48 @@ nohup python3 -u collector/normalize.py > /tmp/normalize.log 2>&1 & disown
 ```
 
 `-u` is not optional in practice — without unbuffered output, a healthy quiet run looks stalled.
+
+### 6.4a Droplet operations as MCP tools
+
+`tools/droplet-mcp/` is a small MCP server that exposes the droplet to an AI assistant as a fixed set
+of named tools, instead of the assistant composing `ssh` commands itself. Added 22 Sep 2026. It runs
+on the developer's machine and connects out over the existing SSH key; nothing is installed on the
+droplet.
+
+| Tool | Does | Writes |
+|---|---|---|
+| `pipeline_status` | pm2, disk, memory, crontab, and last-modified time of every collector log | no |
+| `git_state` | HEAD vs `origin/main`, uncommitted files, and **`dist/index.cjs` build time against commit time** | no |
+| `tail_log` | Tail a known log, optional filter | no |
+| `db_query` | Read-only SQL against the production database | no |
+| `restart_app` | `pm2 restart` only | yes |
+| `deploy` | pull → build → restart → HTTP check. Requires `confirm:true` | yes |
+| `run_collector` | Trigger one collector off-schedule, detached. Requires `confirm:true` | yes |
+
+**Why it exists.** Two of this page's standing hazards are procedural, and both are the kind a human
+or an assistant forgets under time pressure: §6.4's "build before restart", and the deploy-verification
+risk in §7.5 — *production keeps running old code while the checks look fine*. `deploy` performs all
+three steps as one operation so the build cannot be skipped, and `git_state` answers the question that
+actually matters — **is the running bundle older than the commit?** — rather than the question `git
+log` answers, which is only what was fetched. It caught exactly that state on the day it was built:
+`d0d3f97` pulled on the droplet, `dist/index.cjs` still from 19 Sep.
+
+**Guardrails.** There is no arbitrary-command tool; every remote command is built from fixed strings
+plus validated enum/integer arguments. `db_query` opens SQLite with `-readonly`, so writes fail in the
+engine, not in a check that could be bypassed. `deploy` and `run_collector` refuse without
+`confirm:true`. None of this replaces §7.5's rule that the owner decides when to deploy — the tools
+make the steps atomic and the state visible, they do not grant authority to ship.
+
+**Setup gotcha.** MCP clients launch servers with a stripped environment, so `SSH_AUTH_SOCK` is absent
+and every call fails with `Permission denied (publickey)`. The key on disk is passphrase-protected, so
+`ssh -i` is not a workaround. The server recovers the agent socket at startup via `launchctl getenv
+SSH_AUTH_SOCK` on macOS; on Linux, export it in the MCP client's own environment.
+
+```bash
+cd tools/droplet-mcp && npm install
+claude mcp add amo-droplet --scope user -- node "$PWD/server.mjs"
+node tools/droplet-mcp/smoke-test.mjs   # read-only tools + refusal checks
+```
 
 ### 6.5 Scheduled jobs
 
@@ -1082,11 +1126,26 @@ its name says** — see the two boxed notes in §7.2 before comparing against an
 
 | Scope | Filings indexed | Loan transfers | Other assignments | Entities |
 |---|---|---|---|---|
-| Miami-Dade | 105,598 | 54,381 | — | — |
-| **Broward** | **43,795** | **1,323** | — | — |
-| **All** | **149,393** | **55,704** | **19,072** | **21,517** |
+| Miami-Dade | 106,158 | 54,974 | — | — |
+| **Broward** | **44,178** | **1,510** | — | — |
+| **All** | **150,336** | **56,484** | **18,939** | **10,431** |
 
-Market transfers: **26,699**. Documents read end to end: **107,443**.
+Market transfers: **30,218**. Documents read end to end: **108,316**.
+
+*Counts re-queried against production 22 Sep 2026. Definitions, so the next reviewer can reproduce
+them: filings = `assignments` (by `county`); loan transfers = `aom_events_clean`; other assignments =
+`aom_events_nonloan`; market transfers = `aom_events_clean WHERE txn_type='MARKET_TRANSFER'`;
+documents read = `pdf_extractions WHERE status='OK'`; entities = the Overview's own
+`statsUniqueEntities` query — distinct `assignor_canon` ∪ `assignee_canon` over `aom_events_clean`.*
+
+> **The entity count fell from a published 21,517 to 10,431 and the drop is not explained.** 10,431
+> is what the Overview actually shows, because it is that endpoint's own query — so the figure above
+> is what a reader sees. But no current table reproduces 21,517 (`entity_classifications` is 25,042,
+> `entity_nodes` is 10,431), so the earlier figure was either a different definition or already
+> wrong when published. Either the canonicaliser merged roughly half the address book, or the two
+> numbers were never measuring the same thing. **Do not cite an entity count in anything outgoing
+> until this is settled** — see §7.4. Every other figure in this table moved in the direction and
+> rough magnitude the week's collection would predict.
 
 **Loan transfers rose from 46,081 to 55,704 on 15 Sep 2026 — see the note below. This is a
 correction, not new data.**
@@ -1263,7 +1322,7 @@ endpoints healthy across all three county scopes.
 | Direction of transfer (Miami-Dade) | 🟡 **Fix built 18 Sep 2026, applied in the 19 Sep rebuild** — `document_direction.py`; review list in `direction_decisions` (no screen yet) |
 | Stored document text (`document_text`) | 🟡 **Filling 18–19 Sep 2026** — every Miami-Dade loan transfer re-read and kept (~1.7 KB/doc compressed); future audits need no re-download |
 | Weekend progress page (`/weekend`) | 🟢 Deployed 18 Sep 2026 — read-only view of the weekend run |
-| Weekly emailed report ("AMO Market Monitor") | 🟡 **Roll-up rebuilt 21 Sep 2026** — three horizons (15 / 30 / 360 days) with per-county breakdown throughout; committed and previewed against live data, **not yet pulled to the droplet**, which still sends the previous 15-day template (§4.1a) |
+| Weekly emailed report ("AMO Market Monitor") | 🟡 **Roll-up rebuilt 21 Sep 2026** — three horizons (15 / 30 / 360 days) with per-county breakdown throughout; committed and previewed against live data. **Correction 22 Sep 2026: the commit *is* on the droplet** (`d0d3f97`, `git pull` done), but `dist/index.cjs` still dates from 19 Sep, so it was never built and the live site still sends the previous 15-day template (§4.1a). Deploy is on hold at the owner's instruction, so this is intended — but "not yet pulled" was the wrong description of it |
 | County-aware server + client selector | 🟢 Deployed |
 | Per-county document links | 🟢 Deployed |
 | Endpoint county scoping | 🟢 Deployed — all document endpoints |
@@ -1275,8 +1334,20 @@ endpoints healthy across all three county scopes.
 | FDIC analytics | 🟡 Live, **one fix pending deploy** (24 Aug 2026). Audited for the CET1/CRE direction inversion found in the sibling tool — **clean**; peer-ranking logic consolidated into `client/src/lib/peer-metrics.ts` behind a direction guardrail. A **real** bug was found and fixed: the 18-month query window could not satisfy the 8-quarter year-over-year comparison, so **NI YoY % was blank for every institution since it shipped** — window now 27 months and row limit raised together, verified live (0 → 990 of 1,215 national). National coverage remains asset-truncated by design (~1,113 of ~4,450; the tab now says so). Composite opportunity/earnings/vulnerability scores are still hardcoded to `0` and unused — AMO has no composite ranking |
 | Deal Intelligence page | ⚫ **Retired 11 Aug 2026** — page and its 8 endpoints removed together |
 | Automated backups | 🟢 **Live off-box 17 Aug 2026** — nightly verified snapshot → DigitalOcean Spaces (`amo-dashboard-backups-ec`, NYC3). Restore verified from the bucket copy |
+| Droplet MCP tools (`tools/droplet-mcp/`) | 🟢 **New 22 Sep 2026** — seven named tools over SSH (§6.4a). Developer-machine only; nothing installed on the droplet, no new credential, no change to how production runs. Smoke-tested against live: read-only tools returned, `db_query` write rejected by SQLite, both guarded tools refused without `confirm` |
 
 ### 7.4 Known gaps and open items
+
+**−6. NEW 22 Sep 2026 — the entity count does not reconcile with what was last published.** The
+Overview reports **10,431** unique entities; this page last published **21,517**. No current table
+reproduces 21,517, so one of two things is true: the canonicaliser merged roughly half the address
+book at some point between 21 and 22 Sep, or the published figure was never the Overview's own
+measure. Both matter, for different reasons — the first is a real change in the data that nobody
+noticed, the second means a headline number was wrong in a document written for non-developers.
+Every other production figure in §7.2 moved as the week's collection would predict, so this is
+isolated to entities. **Next step:** diff `entity_nodes` against a pre-21 Sep backup snapshot (§6.8
+has the restore-to-scratch runbook) and check whether the row count actually fell or the definition
+drifted. Until then, do not quote an entity count outside the tool.
 
 **−5. NEW 18 Sep 2026 — the nightly rebuild throws away the weekly AI company types.** Friday's
 `enrich_entities.py` types companies with an LLM (e.g. Northern Trust → BANK); every nightly
@@ -1594,7 +1665,8 @@ healthy (640 rows, 57% carrying loan amounts).
 | Broward image feed missed for >10 days | **Permanent, unrecoverable data loss** | Cron polls three times daily (15:30/19:30/23:30 UTC) so a moving publication time cannot outrun it; `flock` prevents overlap; ~10-day buffer. The Overview keys on the **per-run heartbeat** in `broward_runs` — red for "job stopped or failed", separately red for "images pending on the feed". Reworked 24 Aug 2026; the previous 48h-since-last-harvest rule false-alarmed every Monday |
 | An alarm that fires on a healthy system | The reader learns to dismiss it, so the **real** alert is ignored too | Liveness is measured from the job's own recorded runs, never inferred from when upstream data last arrived — upstream sources have their own calendars (Broward publishes business days only, ~3 days behind). "Never run" is deliberately **not** treated as a stoppage |
 | A derived metric's input window cannot satisfy its own precondition | The field is `null` **forever**, renders as `—`, and is indistinguishable from missing upstream data. Cost AMO a permanently blank NI YoY column; cost the sibling tool a silently redistributed score weight | `script/check-fdic-window.ts` asserts the window yields enough published quarters, with 18mo and 24mo as negative controls. The window is a single shared constant (`shared/fdic-window.ts`) imported by both the query builder and its consumer, so the two cannot drift |
-| A deploy silently fails | Production keeps running old code while checks look fine | `git pull` prints `Updating <old>..<new>` AFTER an abort — **verify by effect** (`git log --oneline -1` on the droplet, or grep `dist/index.cjs`), not by output. Bit us 11 Aug 2026 |
+| A deploy silently fails | Production keeps running old code while checks look fine | `git pull` prints `Updating <old>..<new>` AFTER an abort — **verify by effect** (`git log --oneline -1` on the droplet, or grep `dist/index.cjs`), not by output. Bit us 11 Aug 2026. **Improved 22 Sep 2026:** `git_state` (§6.4a) reports the `dist/index.cjs` build time against the commit time, so a pulled-but-not-built box is visible in one call instead of being inferred; `deploy` performs pull + build + restart as one operation so the build cannot be skipped |
+| A published figure is stale or measured differently from what the tool shows | A non-developer quotes a number outward that the dashboard contradicts | **Partly open.** §7.2 now records the exact query behind each figure so the next reviewer can reproduce them, and `db_query` (§6.4a) makes re-checking cheap. But nothing *asserts* the page and the Overview agree — the 21,517 → 10,431 entity discrepancy (§7.4 item −6) was found by hand, and only because the figures were being re-derived for this review |
 | PM2 restarted mid-normalize | Dashboard shows zeros for up to 7 days | Nightly wrapper restarts only on success; documented in `ROLLBACK.md` and here |
 | A new writer forgets the `county` column | Rows **silently relabelled Miami-Dade**, no error anywhere | `check_county_isolation.py` asserts it — has already caught this three times |
 | Two jobs writing `pdf_extractions` disagree on what "done" means | **50,042 documents silently never extracted**, every row reading `status='OK'` — happened 22 Jul–15 Aug 2026 | Pending work is now keyed on `raw_json IS NULL`, not row existence. **No automated check yet** — a guardrail asserting "every `status='OK'` row has `raw_json`" would have caught this on day one |

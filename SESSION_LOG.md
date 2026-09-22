@@ -4,6 +4,57 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-09-22 — Droplet exposed to Claude as MCP tools; production figures re-derived
+
+**Context.** Owner asked what MCP is, then whether a specific droplet could be connected to Claude.
+Built it. Commit `ea4d63e`, pushed.
+
+**Built: `tools/droplet-mcp/`** — stdio MCP server, runs on the dev machine, SSHes out. Nothing
+installed on the droplet, no new credential. Registered user-scope as `amo-droplet`. Seven tools:
+`pipeline_status`, `git_state`, `tail_log`, `db_query` (read-only), `restart_app`, `deploy`,
+`run_collector`. Full write-up is §6.4a of the Confluence page; `smoke-test.mjs` exercises it.
+
+**Design decisions worth keeping.**
+- No arbitrary-command tool. Every remote command is fixed strings + validated enum/integer args.
+- `db_query` runs `sqlite3 -readonly` — writes are rejected by the engine, not by a check.
+- `deploy` bundles pull + build + restart so the build step cannot be skipped (§6.4's standing
+  hazard), and requires `confirm:true`. `run_collector` likewise.
+- `git_state` compares `dist/index.cjs` mtime to the HEAD commit date. This is the useful question —
+  `git log` only tells you what was fetched, not what is running.
+- SQL goes over stdin and `tail_log`'s filter is base64'd in transit, so neither is spliced into a
+  remote shell command line.
+
+**Gotcha that cost the most time.** MCP clients spawn servers with a stripped environment, so
+`SSH_AUTH_SOCK` is absent and every call failed `Permission denied (publickey)` — while the identical
+`ssh` from a normal shell worked. The on-disk key is passphrase-protected, so `ssh -i` +
+`IdentitiesOnly` does **not** work around it (verified: still denied). Fix is
+`launchctl getenv SSH_AUTH_SOCK` at server startup on macOS. On Linux, export it in the client env.
+
+**Found immediately by the new `git_state`:** droplet is at `d0d3f97` (pulled), but `dist/index.cjs`
+dates from 19 Sep — so the 15/30/360 email was **pulled but never built**, and the live site still
+sends the old 15-day template. Deploy is on hold by owner instruction, so this is intended; §7.3's
+wording ("not yet pulled to the droplet") was simply wrong and is corrected.
+
+**§7.2 production figures re-derived against live** (they had drifted; §1 "At a glance" was far
+staler still, carrying 114,100/18,000/44,585). Now: filings 150,336 (M-D 106,158 / BRW 44,178), loan
+transfers 56,484 (54,974 / 1,510), other assignments 18,939, market transfers 30,218, documents read
+108,316. The exact query behind each figure is now recorded in §7.2 so the next reviewer can
+reproduce them instead of guessing at definitions.
+
+**Open, and the reason to read this entry:** the **entity count does not reconcile.** Overview's own
+query (distinct `assignor_canon` ∪ `assignee_canon` over `aom_events_clean`) returns **10,431**;
+this page last published **21,517**. Nothing reproduces 21,517 — `entity_classifications` is 25,042,
+`entity_nodes` is 10,431. So either the canonicaliser merged roughly half the address book unnoticed,
+or the published number was never the Overview's measure. Every *other* figure moved as a week of
+collection would predict, so it is isolated to entities. Logged as §7.4 item −6 with a next step
+(diff `entity_nodes` against a pre-21 Sep backup). **Do not quote an entity count outward until
+settled.**
+
+**Also noted:** the GitHub PAT in the `origin` remote URL is still live and in plaintext — already
+§7.6 item 1, unchanged, flagged again to the owner this session.
+
+---
+
 ## 2026-09-21 — Weekly email rebuilt as a 15/30/360-day roll-up, county-separated
 
 **Context.** Owner asked (19 Sep) for the email as a roll-up over "last 15 days, last month, and the
