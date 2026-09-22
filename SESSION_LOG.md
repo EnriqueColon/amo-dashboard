@@ -41,14 +41,36 @@ transfers 56,484 (54,974 / 1,510), other assignments 18,939, market transfers 30
 108,316. The exact query behind each figure is now recorded in §7.2 so the next reviewer can
 reproduce them instead of guessing at definitions.
 
-**Open, and the reason to read this entry:** the **entity count does not reconcile.** Overview's own
-query (distinct `assignor_canon` ∪ `assignee_canon` over `aom_events_clean`) returns **10,431**;
-this page last published **21,517**. Nothing reproduces 21,517 — `entity_classifications` is 25,042,
-`entity_nodes` is 10,431. So either the canonicaliser merged roughly half the address book unnoticed,
-or the published number was never the Overview's measure. Every *other* figure moved as a week of
-collection would predict, so it is isolated to entities. Logged as §7.4 item −6 with a next step
-(diff `entity_nodes` against a pre-21 Sep backup). **Do not quote an entity count outward until
-settled.**
+**Entity count 21,517 → 10,431: RESOLVED same session** by querying the whole backup series (seven
+nightly `.gz` snapshots + the manual `backup_pre_*.db` ones). **The old number was inflated; the new
+one is correct.** Two drops, each a deliberate fix working as intended:
+
+| Snapshot | Entities | |
+|---|---|---|
+| 15 Sep 22:59 `backup_pre_rents_fix` | **21,517** | the exact figure the page published |
+| 16 Sep 03:04 `backup_pre_party_fix` | 21,603 | |
+| 17 Sep nightly | **16,896** | **drop 1: −4,707** — party fix |
+| 18/19 Sep nightlies | 16,906 → 16,987 | normal growth |
+| 19 Sep 19:36 `pre_weekend_fixes` | 16,994 | |
+| 20–22 Sep nightlies | **10,428** | **drop 2: −6,566** — weekend QC fixes |
+
+- **Drop 1** = party attribution + name order (`MAE FANNIE` → `FANNIE MAE`; `CITIBANK` → `US BANK`).
+- **Drop 2** = of 7,186 vanished names, **4,116 were individual people**; 4,892 rows moved to `MERS`.
+  Worked example CFN `2024R673026`: entity was `GIL ISABEL E`, but `pdf_assignor` reads *MORTGAGE
+  ELECTRONIC REGISTRATION SYSTEMS, INC.* — the pipeline had been taking **the homeowner** from the
+  county index instead of the assignor on the instrument. Remainder = OCR variants merged
+  (`STATE FARM ... COMPAMY` → `COMPANY`, `FIRST-CITIZENS` → `FIRST CITIZENS`, `IRBC3LLC` → `IRBC3`).
+- **Not data loss:** `aom_events_clean` grew 55,935 → 56,484; zero NULL/empty canon in either
+  snapshot; 623 new names appeared. Checked both explicitly.
+- **Consequence:** any entity count quoted before 20 Sep counted homeowners as lending institutions.
+
+**Two things found while doing it, both logged (§7.4 −6a/−6b, §7.5):**
+1. **`amo-20260916-031501.db.gz` has `aom_events_clean` = 0** — taken 03:15 while a *manual* normalize
+   was running (`backup_pre_party_fix.db` is 03:04 that morning). One of seven retained backups would
+   restore a zeroed dashboard, and it **passed verification** because the row-count assertion keys on
+   a table that stays full. Fix: assert non-zero `aom_events_clean` in `run_backup.sh` + honour a
+   normalize lock.
+2. **Canonicaliser mangles `N.A.`** → `BANKUNITED, . F/K/A BANKUNITED`. 37 names, 61 rows. Cosmetic.
 
 **Also noted:** the GitHub PAT in the `origin` remote URL is still live and in plaintext — already
 §7.6 item 1, unchanged, flagged again to the owner this session.

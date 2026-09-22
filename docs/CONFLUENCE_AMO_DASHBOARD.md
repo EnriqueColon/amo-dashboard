@@ -1138,14 +1138,13 @@ them: filings = `assignments` (by `county`); loan transfers = `aom_events_clean`
 documents read = `pdf_extractions WHERE status='OK'`; entities = the Overview's own
 `statsUniqueEntities` query — distinct `assignor_canon` ∪ `assignee_canon` over `aom_events_clean`.*
 
-> **The entity count fell from a published 21,517 to 10,431 and the drop is not explained.** 10,431
-> is what the Overview actually shows, because it is that endpoint's own query — so the figure above
-> is what a reader sees. But no current table reproduces 21,517 (`entity_classifications` is 25,042,
-> `entity_nodes` is 10,431), so the earlier figure was either a different definition or already
-> wrong when published. Either the canonicaliser merged roughly half the address book, or the two
-> numbers were never measuring the same thing. **Do not cite an entity count in anything outgoing
-> until this is settled** — see §7.4. Every other figure in this table moved in the direction and
-> rough magnitude the week's collection would predict.
+> **The entity count fell from 21,517 to 10,431 because it was being counted wrong before. Settled
+> 22 Sep 2026** against the backup series; full reasoning in §7.4 item −6. In short: thousands of
+> **homeowners** were being recorded as the assigning party where the document itself named a
+> lender or MERS, and OCR spelling variants of the same institution were each counted as a separate
+> entity. Two deliberate fixes (16 Sep "party fix", 19 Sep weekend QC fixes) corrected both. No rows
+> were lost — `aom_events_clean` grew over the same window — and no canonical name was blanked.
+> **10,431 is the trustworthy figure; 21,517 should not be cited again.**
 
 **Loan transfers rose from 46,081 to 55,704 on 15 Sep 2026 — see the note below. This is a
 correction, not new data.**
@@ -1338,16 +1337,53 @@ endpoints healthy across all three county scopes.
 
 ### 7.4 Known gaps and open items
 
-**−6. NEW 22 Sep 2026 — the entity count does not reconcile with what was last published.** The
-Overview reports **10,431** unique entities; this page last published **21,517**. No current table
-reproduces 21,517, so one of two things is true: the canonicaliser merged roughly half the address
-book at some point between 21 and 22 Sep, or the published figure was never the Overview's own
-measure. Both matter, for different reasons — the first is a real change in the data that nobody
-noticed, the second means a headline number was wrong in a document written for non-developers.
-Every other production figure in §7.2 moved as the week's collection would predict, so this is
-isolated to entities. **Next step:** diff `entity_nodes` against a pre-21 Sep backup snapshot (§6.8
-has the restore-to-scratch runbook) and check whether the row count actually fell or the definition
-drifted. Until then, do not quote an entity count outside the tool.
+**−6. RESOLVED 22 Sep 2026 — the entity count fell from 21,517 to 10,431 because the old number was
+inflated.** Checked against the full backup series (seven nightly snapshots plus the manual
+pre-change ones). The count did not drift and nothing was lost; it fell in **two steps, each caused
+by a deliberate fix that was working as intended.**
+
+| Snapshot | Unique entities | |
+|---|---|---|
+| 15 Sep 22:59 `backup_pre_rents_fix` | **21,517** | ← exactly the figure this page published |
+| 16 Sep 03:04 `backup_pre_party_fix` | 21,603 | |
+| 17 Sep nightly | **16,896** | ← **drop 1: −4,707** (party fix) |
+| 18–19 Sep nightlies | 16,906 → 16,987 | normal growth |
+| 19 Sep 19:36 `pre_weekend_fixes` | 16,994 | |
+| 20 Sep nightly onward | **10,428** | ← **drop 2: −6,566** (weekend QC fixes) |
+
+**Drop 1 (16→17 Sep) — the party fix.** Corrected which side of the document each party sits on, and
+party name order: `MAE FANNIE` → `FANNIE MAE`, and reassignments such as `CITIBANK` → `US BANK` where
+the assignor had been read off the wrong field.
+
+**Drop 2 (19→20 Sep) — the weekend QC fixes.** Of 7,186 entity names that disappeared, **4,116 were
+individual people** whose rows now correctly name the institution on the document — 4,892 rows moved
+to `MERS` alone. Worked example, CFN `2024R673026`: the entity was `GIL ISABEL E`; the document's own
+`pdf_assignor` reads *MORTGAGE ELECTRONIC REGISTRATION SYSTEMS, INC.* The pipeline had been taking the
+county index party — **the homeowner** — instead of the assignor named on the instrument. The
+remainder are OCR and spelling variants of one institution being merged: `STATE FARM LIFE INSURANCE
+COMPAMY` → `...COMPANY`, `FIRST-CITIZENS` → `FIRST CITIZENS`, `IRBC3LLC` → `IRBC3`.
+
+**Why this is a correction and not data loss:** `aom_events_clean` *grew* across the window
+(55,935 → 56,484); zero canonical names are NULL or empty in either snapshot, so nothing collapsed
+into a blank bucket; and 623 genuinely new entity names appeared over the same period.
+
+**What it means for anything published earlier:** an entity count quoted before 20 Sep 2026 counted
+thousands of homeowners as if they were lending institutions. **21,517 was never a count of
+institutions.** 10,431 is.
+
+**−6a. NEW 22 Sep 2026 — one retained backup is unusable, and the verifier did not notice.**
+`amo-20260916-031501.db.gz` contains **`aom_events_clean` = 0 rows**. It was taken at 03:15 while a
+manual normalize was mid-run — `backup_pre_party_fix.db` is stamped 03:04 the same morning — which is
+precisely the empty window §6.5 warns about for PM2 restarts. The snapshot is integrity-checked and
+row-count-asserted before it may rotate an older one away (§7.5), but the assertion evidently keys on
+a table that was still full, so this one passed. Restoring it would bring back a dashboard showing
+zeros for Clean Transactions, Reporting and Lending Relationships. **Fix:** assert non-zero
+`aom_events_clean` in `run_backup.sh`, and have it refuse to run while a normalize lock is held.
+
+**−6b. NEW 22 Sep 2026 — the canonicaliser mangles `N.A.`** It strips the letters and leaves the
+punctuation: `BANKUNITED, . F/K/A BANKUNITED`, `BNY MELLON, . S/B/M MELLON TRUST OF NEW ENGLAND`,
+`CMG MORTGAGE, . DBA CMG HOME LOANS`. **37 distinct names, 61 rows** — cosmetic, low volume, but
+user-visible in entity lists.
 
 **−5. NEW 18 Sep 2026 — the nightly rebuild throws away the weekly AI company types.** Friday's
 `enrich_entities.py` types companies with an LLM (e.g. Northern Trust → BANK); every nightly
@@ -1674,6 +1710,8 @@ healthy (640 rows, 57% carrying loan amounts).
 | Data changed without clearing the cache | Stale dashboard for up to 7 days | Nightly restart; `POST /api/cache/bust` |
 | Single droplet, single SQLite file | Total loss on host failure | **Resolved 17 Aug 2026** — nightly verified snapshot to DigitalOcean Spaces (different failure domain from the droplet), 7 archives retained locally, all Broward images mirrored. Restore tested from the bucket copy, counts matched live exactly |
 | Backups run but silently stop working | False confidence — the failure is only discovered when a restore is attempted | Every run records status in `backup_runs`. The Overview shows **red** when the job is absent, errored, or has not run in 48h, and **amber** when it is working but not reaching off-box storage. Snapshots are integrity-checked and row-count-asserted before they may rotate an older one away |
+| A backup is taken while `normalize.py` is mid-run | The snapshot restores a dashboard showing **zeros**, and passes verification, so the failure is invisible until a restore is attempted | **Open — confirmed live 22 Sep 2026.** `amo-20260916-031501.db.gz`, one of the seven currently retained, holds `aom_events_clean` = 0. `aom_events_clean` is empty for ~90 minutes of every rebuild (§6.5), and the row-count assertion keys on a table that stays full, so an empty one rotates a good snapshot away. The 03:15 slot does not collide with the 08:30 cron rebuild — it collided with a **manual** one. Fix: assert non-zero `aom_events_clean` in `run_backup.sh` and refuse to run while a normalize lock is held |
+| A headline figure counts the wrong thing and nobody notices | Numbers go outward that overstate the dataset — the entity count included thousands of homeowners as if they were lenders, for an unknown period before 20 Sep 2026 | **Partly open.** Fixed at source by the 16 and 19 Sep party fixes (§7.4 item −6), and §7.2 now records the query behind each published figure. But nothing asserts that a figure still measures what its label claims; this one was caught only because the whole table was re-derived by hand |
 | Weak default password | Unauthorised access | `AMO_PASSWORD`/`AMO_SECRET` must be set in the production `.env` |
 | A search returns more results than the county will serve | **Documents silently missing on the busiest days.** The portal caps a search at ~500 index rows. The collector splits a date range into smaller chunks until it fits, but it cannot split below a single day — so on 23 days between 11 Jan 2023 and 3 Feb 2026 it stored what it was given and moved on. Those days hold 109–145 documents each against a daily average of 59, consistent with truncation | **Open.** The affected days are recorded as `CAPPED` in `collection_log`, so they are identifiable. Recovering them needs a narrower search axis than date — party name or book range |
 | A collection window fails and is never retried | A one-off failure becomes permanent data loss | **Partly open.** Failed windows *are* retried, but `run_weekly.sh` only looks back 10 days, so a window that fails ages out of retry range within roughly one run. Windows the county reports as genuinely empty stay retry-eligible indefinitely by design |
