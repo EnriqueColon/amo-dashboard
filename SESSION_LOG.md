@@ -4,6 +4,57 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-09-23 — canonicalize() now treats an internal comma as punctuation
+
+**Found while answering a data question, not from a bug report.** Ranking lender↔borrower
+relationships out of `credit_facility_events` showed `CITY NATIONAL BANK OF FLORIDA` and
+`CITY NATIONAL BANK, OF FLORIDA` as two lenders. One TG Capital facility sat under the comma'd
+form, so the bank's own ranking was split.
+
+**Root cause.** `canonicalize()` stripped only TRAILING punctuation (`[\s,;\.]+$`, inside the
+suffix loop). An internal comma survived every pass, and no amount of suffix stripping could
+reunite the two spellings. Fix is one line near the top of `canonicalize()`:
+`s = re.sub(r'\s*,\s*', ' ', s)`.
+
+**Space, not delete — deliberately.** `entity_names.squash()` deletes punctuation, which is why
+the facility `*_key` columns never showed this split. Deleting would map `HERNANDEZ,ROLANDO` to
+`HERNANDEZROLANDO` and still miss the spaced form. Replacing with a space reaches it.
+
+**Blast radius measured against production before committing, not estimated.** Across all 26,208
+canonical entities in `entity_nodes` + both `aom_events_*` tables: **32 collision groups, 33
+entities merged away**, each one read and confirmed to be the same real party (person names
+recorded `SURNAME,FIRSTNAME`; commas before legal suffixes — `NEXBANK, SSB`, `WASHINGTON MUTUAL
+BANK, FA`; trust series designators; `EQUICREDIT, OF AMERICA`). **Zero false merges.** Unlike the
+leading-digit strip this cannot fabricate an entity — it only merges names already identical
+apart from commas.
+
+**Tests.** New `collector/tests/check_internal_commas.py` — 8 merge groups, 3 split groups, plus
+the `facility_brand_key()` path that actually carried the bug. Verified it FAILS against a pre-fix
+copy of `normalize.py` (3/3 pairs split) and passes after, so it is not a tautology. The 45,262-name
+`canonicalize_baseline.tsv` moved exactly ONE entry (`MICHELLE ESPINOSA, ISOLINA SOUTO LIVING
+TRUST`), edited in place rather than regenerated — the generator reads a DB, the local one is
+0 bytes, and regenerating there would have silently replaced a 45k-name guard with nothing.
+9 of 12 collector checks pass; the other 3 fail only on `database not found` (need the droplet DB).
+
+**Not yet on production.** `normalize.py` rebuilds `credit_facility_events` and `aom_events_clean`,
+so nothing changes until the code is deployed and normalize re-runs — `30 8 * * *` picks it up
+automatically the night after a deploy. After that run, also run
+`collector/tests/check_entity_names_parity.py` **on the droplet** — it compares the two name
+systems, my change touches one of them, and it cannot run locally without the DB.
+
+**Left alone, deliberately.** Two facility keys split on spacing, not commas — `BGI CAP I LLC` vs
+`BGICAP I LLC`, and `SAFE HARBOR EQUITY DISTRESSED DEBT FUND 3 L P` vs `... 3 LP`. Different root
+cause (OCR/LLM spacing in the source name), so not folded into this fix.
+
+**Still open from the same query:** two `credit_facility_events` rows carry LLM hedging prose in
+`lender_brand` instead of a name — `IMPLIED AS THE LENDER IN THE FACILITY, BUT NOT EXPLICITLY NAMED
+IN THE AGREEMENT TITLE` and `IMPLIED, BUT NOT EXPLICITLY NAMED IN THE EXCERPT`. They count as fake
+lenders in any per-borrower exclusivity math (they are what drop Atlantis and NWL below 100%).
+That is an extraction-prompt problem and touches `FACILITY_SYSTEM_PROMPT`, so it needs
+`verify_integration.py` at 21/21 first — not attempted here.
+
+---
+
 ## 2026-09-22 — Droplet exposed to Claude as MCP tools; production figures re-derived
 
 **Context.** Owner asked what MCP is, then whether a specific droplet could be connected to Claude.

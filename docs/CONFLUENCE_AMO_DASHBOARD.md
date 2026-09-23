@@ -1,6 +1,6 @@
 # AMO Tracker — Mortgage Assignment Intelligence Dashboard
 
-> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 22 Sep 2026
+> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 23 Sep 2026
 > **Production URL:** `http://165.22.35.75:5000` (single shared password)
 > **Repository:** `amo-dashboard` (`origin/main`)
 
@@ -788,6 +788,7 @@ AMO_DB_PATH=./prod_snapshot.db collector/.venv/bin/python3 collector/tests/check
 |---|---|
 | `check_county_isolation.py` | No NULL counties; no CFN under two counties; key formats stay disjoint; derived tables agree with `assignments` about county; **rebuilt tables still declare `county`** |
 | `check_canonicalize_baseline.py` | Name canonicalization output has not drifted (baseline in `canonicalize_baseline.tsv`) |
+| `check_internal_commas.py` | An internal comma is punctuation, not content — `CITY NATIONAL BANK, OF FLORIDA` and `CITY NATIONAL BANK OF FLORIDA` are one entity, and `HERNANDEZ,ROLANDO` reaches the spaced spelling. Also asserts the **converse**: street-numbered property LLCs and two banks sharing a leading word stay apart. Offline. Exists because this split the bank's own lender ranking in the Credit Facilities tab and nothing was watching (23 Sep 2026) |
 | `check_entity_names_parity.py` | The shared address book reproduces the legacy normalize functions exactly |
 | `check_alias_scope.py` | Alias scoping rules behave — note aliases are applied **after** suffix stripping |
 | `check_broward_heartbeat.py` | The Broward daily job's heartbeat separates "ran and found nothing new" (normal every weekend) from "stopped running". Stubs the SFTP layer — no network needed |
@@ -1087,7 +1088,7 @@ confirmed. Commit messages are written as statements of what changed and why
 
 ---
 
-## 7. Current status — as of 21 Sep 2026
+## 7. Current status — as of 23 Sep 2026
 
 ### 7.1 Overall
 
@@ -1145,6 +1146,11 @@ documents read = `pdf_extractions WHERE status='OK'`; entities = the Overview's 
 > entity. Two deliberate fixes (16 Sep "party fix", 19 Sep weekend QC fixes) corrected both. No rows
 > were lost — `aom_events_clean` grew over the same window — and no canonical name was blanked.
 > **10,431 is the trustworthy figure; 21,517 should not be cited again.**
+>
+> **Expect ~10,398 after the next deploy.** The comma fix in §7.4 item −7 merges 33 entities that
+> were duplicated by punctuation alone. Same cause as the OCR-variant merging described above, so
+> the figure is moving for the same reason and in the same direction — it is not a new discrepancy.
+> The drop lands on the first nightly `normalize.py` run after the code ships, not before.
 
 **Loan transfers rose from 46,081 to 55,704 on 15 Sep 2026 — see the note below. This is a
 correction, not new data.**
@@ -1336,6 +1342,29 @@ endpoints healthy across all three county scopes.
 | Droplet MCP tools (`tools/droplet-mcp/`) | 🟢 **New 22 Sep 2026** — seven named tools over SSH (§6.4a). Developer-machine only; nothing installed on the droplet, no new credential, no change to how production runs. Smoke-tested against live: read-only tools returned, `db_query` write rejected by SQLite, both guarded tools refused without `confirm` |
 
 ### 7.4 Known gaps and open items
+
+**−8. NEW 23 Sep 2026 — two credit-facility rows name the LLM's hedging instead of a lender.**
+`credit_facility_events.lender_brand` contains, literally, `IMPLIED AS THE LENDER IN THE FACILITY,
+BUT NOT EXPLICITLY NAMED IN THE AGREEMENT TITLE` and `IMPLIED, BUT NOT EXPLICITLY NAMED IN THE
+EXCERPT`. The extractor's uncertainty language reached the name column, so each behaves as a
+one-off lender: they are what drop the Atlantis and NWL 2016 Evergreen borrower relationships below
+100% exclusivity in any per-borrower ranking. Only 2 rows of 370, so headline counts are unaffected,
+but any "how many lenders does this borrower use" figure is wrong by one for those two.
+**Not fixed** — the cause is in `FACILITY_SYSTEM_PROMPT`, which cannot be edited without re-running
+`collector/research/scripts/verify_integration.py` at 21/21 first (§6.7). A server-side guard that
+rejects a `lender_brand` containing a sentence would be the cheaper interim fix.
+
+**−7. ✅ FIXED 23 Sep 2026 (pending deploy + one normalize run) — an internal comma split entities
+in two.** `canonicalize()` stripped only trailing punctuation, so `CITY NATIONAL BANK, OF FLORIDA`
+never met `CITY NATIONAL BANK OF FLORIDA` and the bank's own ranking in the Credit Facilities tab
+was split across two rows. Measured across all 26,208 canonical entities before committing:
+**32 groups, 33 entities merged away, zero false merges** — person names recorded
+`SURNAME,FIRSTNAME`, commas before legal suffixes (`NEXBANK, SSB`), trust series designators.
+Guarded by the new `check_internal_commas.py` (§6.6), which was verified to fail against a pre-fix
+copy of the module. **Nothing changes on the site until the code is deployed and `normalize.py`
+re-runs** — the nightly `30 8 * * *` job picks it up automatically the night after a deploy.
+After that run, also run `check_entity_names_parity.py` **on the droplet**: it compares the two
+name systems, this change touches one of them, and it cannot run locally without the database.
 
 **−6. RESOLVED 22 Sep 2026 — the entity count fell from 21,517 to 10,431 because the old number was
 inflated.** Checked against the full backup series (seven nightly snapshots plus the manual

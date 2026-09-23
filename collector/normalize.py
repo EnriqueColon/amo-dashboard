@@ -1075,6 +1075,25 @@ def canonicalize(name: str) -> str:
     
     s = name.strip().upper()
 
+    # Internal commas are punctuation, not brand content, and the county index
+    # places them inconsistently: "CITY NATIONAL BANK, OF FLORIDA" alongside
+    # "CITY NATIONAL BANK OF FLORIDA", "HERNANDEZ,ROLANDO" alongside
+    # "HERNANDEZ ROLANDO". Only TRAILING punctuation was stripped (further
+    # down, inside the suffix loop), so every such pair survived as two
+    # separate entities that no amount of suffix stripping could reunite.
+    #
+    # Replace with a SPACE rather than delete: that is what lets the
+    # no-space form "HERNANDEZ,ROLANDO" reach the same key as the spaced one.
+    # entity_names.squash() deletes instead, which is the opposite trade and
+    # the reason the facility *_key columns never showed this split.
+    #
+    # Unlike the leading-digit strip above, this CANNOT fabricate an entity:
+    # it merges only names already identical apart from commas, so the blast
+    # radius is exactly enumerable. Measured against production 2026-09-23 —
+    # 17 groups in aom_events_clean and one lender brand, every one manually
+    # confirmed to be the same real entity.
+    s = re.sub(r'\s*,\s*', ' ', s)
+
     # Strip leading punctuation and OCR junk, but KEEP leading digits.
     #
     # This used to be r'^[^A-Z]+', which also ate the number in a company name.
