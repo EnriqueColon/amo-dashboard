@@ -36,11 +36,35 @@ TRUST`), edited in place rather than regenerated — the generator reads a DB, t
 0 bytes, and regenerating there would have silently replaced a 45k-name guard with nothing.
 9 of 12 collector checks pass; the other 3 fail only on `database not found` (need the droplet DB).
 
-**Not yet on production.** `normalize.py` rebuilds `credit_facility_events` and `aom_events_clean`,
-so nothing changes until the code is deployed and normalize re-runs — `30 8 * * *` picks it up
-automatically the night after a deploy. After that run, also run
-`collector/tests/check_entity_names_parity.py` **on the droplet** — it compares the two name
-systems, my change touches one of them, and it cannot run locally without the DB.
+**Shipped as a PULL ONLY, then scheduled.** Owner asked for it to land at 9 PM Eastern tonight, with
+his laptop closed — which rules out the `amo-droplet` MCP server entirely, since that runs on the Mac
+and SSHes out. It had to be droplet cron ([[pipeline-runs-continuously]]).
+
+- **`git pull` on the droplet, no build, no restart.** `dist/index.cjs` was already OLDER than HEAD
+  because the email roll-up (`d0d3f97`) is deliberately unbuilt. **Running the MCP `deploy` tool
+  would have built and shipped that roll-up as a side effect of this unrelated fix.** The four
+  missing commits touch only docs, `tools/droplet-mcp/` and `collector/`, so a pull carries zero
+  runtime change; confirmed `dist` still stamped 19 Sep afterwards.
+- **One-off cron `0 1 24 9 *`** → the ordinary `run_nightly_normalize.sh`. 01:00 UTC = 9 PM Eastern
+  (droplet is `Etc/UTC`, no DST — confirmed on the box, not assumed). Crontab backed up to
+  `collector/crontab.before_comma_fix.20260923T144723Z`; entry marked REMOVE AFTER.
+- **Unattended-execution checks, done rather than assumed:** script executable; `pm2` resolves under
+  cron's stripped `PATH` (`env -i PATH=/usr/bin:/bin` → `/usr/bin/pm2`) — the failure mode the
+  script's own header warns about; `.env` readable; `normalize.py` imports under the droplet venv and
+  `canonicalize()` merges the two City National spellings there; no normalize lock held; `cron`
+  enabled + active; full crontab re-read intact.
+- **Timing:** rebuild takes ~90 min (last four nightlies 86–97), so ~01:00→02:30, clear of the 03:15
+  backup. The `pgrep` guard covers any overlap with the 08:30 nightly, which will simply run again.
+- **`check_entity_names_parity.py` now PASSES on the droplet** — the one check that needs the DB and
+  could not run locally. That closes the last open verification item.
+
+**Found while checking the above — the email hold is not what the notes said.** The droplet does NOT
+"still run the old template": `rollupReport.ts` has been on disk since 22 Sep 22:08 UTC and
+`sendWeeklyReport.ts` imports `buildRollupReport`. Since the cron runs it through `tsx` from SOURCE,
+the roll-up is what would go out. **What actually holds it is `REPORT_EMAIL_ENABLED`, unset in
+`.env`** — `run_weekly.sh` wraps the entire email step in that check, so Friday 06:00 sends nothing.
+The hold is real but rests on one env var, and **flipping it to `1` sends the ROLL-UP, not the old
+15-day template.** To genuinely revert, repoint `sendWeeklyReport.ts` at `server/email/report.ts`.
 
 **Left alone, deliberately.** Two facility keys split on spacing, not commas — `BGI CAP I LLC` vs
 `BGICAP I LLC`, and `SAFE HARBOR EQUITY DISTRESSED DEBT FUND 3 L P` vs `... 3 LP`. Different root

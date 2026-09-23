@@ -1354,17 +1354,31 @@ but any "how many lenders does this borrower use" figure is wrong by one for tho
 `collector/research/scripts/verify_integration.py` at 21/21 first (§6.7). A server-side guard that
 rejects a `lender_brand` containing a sentence would be the cheaper interim fix.
 
-**−7. ✅ FIXED 23 Sep 2026 (pending deploy + one normalize run) — an internal comma split entities
-in two.** `canonicalize()` stripped only trailing punctuation, so `CITY NATIONAL BANK, OF FLORIDA`
+**−7. ✅ FIXED 23 Sep 2026, CODE ON THE DROPLET, REBUILD SCHEDULED 01:00 UTC 24 Sep (9 PM Eastern
+23 Sep) — an internal comma split entities in two.** `canonicalize()` stripped only trailing punctuation, so `CITY NATIONAL BANK, OF FLORIDA`
 never met `CITY NATIONAL BANK OF FLORIDA` and the bank's own ranking in the Credit Facilities tab
 was split across two rows. Measured across all 26,208 canonical entities before committing:
 **32 groups, 33 entities merged away, zero false merges** — person names recorded
 `SURNAME,FIRSTNAME`, commas before legal suffixes (`NEXBANK, SSB`), trust series designators.
 Guarded by the new `check_internal_commas.py` (§6.6), which was verified to fail against a pre-fix
-copy of the module. **Nothing changes on the site until the code is deployed and `normalize.py`
-re-runs** — the nightly `30 8 * * *` job picks it up automatically the night after a deploy.
-After that run, also run `check_entity_names_parity.py` **on the droplet**: it compares the two
-name systems, this change touches one of them, and it cannot run locally without the database.
+copy of the module.
+
+**Deployed as a `git pull` only — no `npm run build`, no `pm2 restart`.** Deliberate: the fix is
+Python in `collector/`, the Node bundle does not contain it, and `dist/index.cjs` was (and is) older
+than HEAD because the 15/30/360 email roll-up is being held unbuilt (§4.1a). A full deploy would
+have built and shipped that roll-up as a side effect. Verified after the pull that `dist/index.cjs`
+still carries its 19 Sep timestamp.
+
+**A one-off cron entry applies it at 01:00 UTC 24 Sep** (= 9 PM Eastern, 23 Sep; the droplet clock
+is UTC with no DST) by re-running the ordinary `run_nightly_normalize.sh`, rather than waiting for
+the 08:30 nightly. Marked `REMOVE AFTER` in the crontab; the previous crontab is saved at
+`collector/crontab.before_comma_fix.*`. The rebuild takes ~90 min (last four nightlies: 86–97 min),
+so it finishes ~02:30 and clears the 03:15 backup. The script's own `pgrep` guard prevents it
+colliding with the 08:30 run, and the script restarts PM2 only on success, so a failure leaves the
+dashboard serving the last good data.
+
+`check_entity_names_parity.py` — the one check that needs the database and could not run locally —
+**was run on the droplet after the pull and PASSES**, so the two name systems are still in parity.
 
 **−6. RESOLVED 22 Sep 2026 — the entity count fell from 21,517 to 10,431 because the old number was
 inflated.** Checked against the full backup series (seven nightly snapshots plus the manual
