@@ -7,7 +7,7 @@
     "dev": "NODE_ENV=development tsx server/index.ts",
     "build": "tsx script/build.ts",
     "start": "NODE_ENV=production node dist/index.cjs",
-    "check": "tsc && tsx script/check-metric-directions.ts && tsx script/check-fdic-window.ts",
+    "check": "tsc && tsx script/check-metric-directions.ts && tsx script/check-fdic-window.ts && tsx script/check-email-exclusions.ts",
     "check:types": "tsc",
     "check:metrics": "tsx script/check-metric-directions.ts",
     "check:fdic-window": "tsx script/check-fdic-window.ts",

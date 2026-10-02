@@ -213,6 +213,25 @@ Two rules keep the comparisons honest:
 
 It hides Wilmington Savings, MERS, Fannie Mae and Freddie Mac, exactly as the Reporting tab does.
 
+**And since 2 Oct 2026 it also hides five large firms that the dashboard still shows** — Wells Fargo,
+JPMorgan Chase, Freedom Mortgage, Bank of America and Rocket Mortgage — at the owner's request, so
+the recipients see the market they compete in rather than the market's biggest names. **This is the
+one place the email and the Reporting tab deliberately disagree**, and it is a reversal of the 17 Sep
+decision to share one list precisely so they could not. Expect "the email says 440 and the dashboard
+says 526" to be asked; it is not a bug. The email states the five firms in its own footer so a
+recipient is never comparing numbers without being told. Measured on 2 Oct, this removes **19.5% of
+the 15-day rows, 36.0% of the 30-day rows and 24.6% of the 360-day rows**.
+
+The list lives in `server/email/exclusions.ts`, separate from `server/reporting/exclusions.ts` on
+purpose — consolidating them "for consistency" would silently rewrite the dashboard. Two tables need
+two matching rules: loan transfers match exactly on canonical names (safe only because `normalize.py`
+folds every variant into one spelling), while `credit_facility_events` keys are **not** brand-collapsed
+(production holds both `JPMORGAN CHASE BANK NA` and `JPMORGAN CHASE BANK NATIONAL ASSOCIATION`), so
+those are matched by squashing to letters and digits and testing containment. The Lending
+Relationships tab's own query is untouched; the email filters its result. `npm run check` runs
+`script/check-email-exclusions.ts`, which fails if a name variant ever escapes the exact match or if
+one of the five leaks into the reporting list.
+
 Charts are built from table cells with background colours, never SVG or images, because Outlook
 desktop renders HTML with the Word engine and often blocks images.
 

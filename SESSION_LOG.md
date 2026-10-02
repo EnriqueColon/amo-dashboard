@@ -51,6 +51,32 @@ section (stacked bar per window + percentage table) is gone, along with everythi
 clean; preview regenerated off live droplet data to confirm the section is absent and the sections
 either side still render.
 
+**Template change 2 — five large firms hidden from the EMAIL ONLY** (owner, same session): Wells
+Fargo, JPMorgan Chase, Freedom Mortgage, Bank of America, Rocket Mortgage. **They stay in the tool** —
+that was explicit, and it is why the list is a new `server/email/exclusions.ts` rather than an
+addition to `server/reporting/exclusions.ts`.
+
+- **Impact measured before writing it, not after:** removes **19.5%** of the 15-day rows, **36.0%** of
+  the 30-day rows, **24.6%** of the 360-day rows. Every headline number in the email moves.
+- **This is the one place the email and the dashboard now deliberately disagree** — a reversal of the
+  17 Sep decision to share one list so they could not. The email's footer names the five firms, so a
+  recipient comparing it against the dashboard is told why the totals differ.
+- **Two tables, two matching rules.** `aom_events_clean` matches exactly on canonical names — safe
+  because `normalize.py` has folded every variant into one spelling each (verified: WELLS FARGO 4,357
+  appearances, JPMORGAN CHASE 3,818, FREEDOM MORTGAGE 2,196, BANK OF AMERICA 1,124, ROCKET MORTGAGE
+  785, and nothing else contains those strings). `credit_facility_events` keys are **not**
+  brand-collapsed — production holds both `JPMORGAN CHASE BANK NA` and `JPMORGAN CHASE BANK NATIONAL
+  ASSOCIATION` — so exact match would have missed; those are squashed to letters/digits and tested by
+  containment, which also folds "JP MORGAN" into "JPMORGAN" for free.
+- `queryGroupedFacilities` (the Lending Relationships tab's own query) is untouched; the email filters
+  its RESULT, and reduces the "of N relationships on record" count to match so it cannot advertise
+  rows it then refuses to list.
+- **New guard: `script/check-email-exclusions.ts`, wired into `npm run check`.** Both failure modes
+  here are silent: a new canonical variant walks past the exact match and the firm reappears, or
+  someone consolidates the two lists and rewrites the dashboard. 23 assertions; the DB-backed two skip
+  loudly with no database. `CHASE HOME LENDING` is in the must-NOT-match set on purpose — real
+  counterparty, shares a word with JPMorgan Chase, not something the owner asked to remove.
+
 **Open, for the rest of the template discussion:** truncated-name
 duplicates still split firms across rows — "CITY NATIONAL BANK OF FLORIDA" vs "CITY NATIONAL BANK".
 The 23 Sep comma fix closed a different class. The roll-up's top-8 lists make this more visible than

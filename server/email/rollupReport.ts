@@ -24,7 +24,11 @@
 // always shown with labels or a table beside them).
 import type Database from 'better-sqlite3';
 import { queryGroupedFacilities } from '../lending/facilities';
-import { REPORTING_EXCLUDE } from '../reporting/exclusions';
+// EMAIL_EXCLUDE, not REPORTING_EXCLUDE: the email hides five large firms the
+// dashboard still shows (Wells Fargo, JPMorgan Chase, Freedom Mortgage, Bank of
+// America, Rocket Mortgage) at the owner's request, 2 Oct 2026. See
+// server/email/exclusions.ts for why the lists are deliberately separate.
+import { EMAIL_EXCLUDE, EMAIL_ONLY_EXCLUDED_LABELS, isEmailExcludedParty } from './exclusions';
 import { loanRows, COUNTED_LOAN_AMOUNT, LOAN_REPEAT_MIN_AMOUNT } from '../reporting/loanVolume';
 
 const DASHBOARD_URL = 'http://165.22.35.75:5000';
@@ -153,7 +157,7 @@ export function buildRollupReport(db: Database.Database, sendDate: string): Roll
     SELECT cfn, rec_date, county, assignor_canon AS seller, assignee_canon AS buyer, txn_type,
            loan_amount, property_address, rec_book, rec_page
     FROM aom_events_clean
-    WHERE rec_date >= ? AND rec_date <= ? AND txn_type != 'SELF_ASSIGN' AND ${REPORTING_EXCLUDE}
+    WHERE rec_date >= ? AND rec_date <= ? AND txn_type != 'SELF_ASSIGN' AND ${EMAIL_EXCLUDE}
   `).all(earliest, sendDate) as Row[];
 
   const inWin = (r: Row, days: number, back = 0) => {
@@ -171,7 +175,7 @@ export function buildRollupReport(db: Database.Database, sendDate: string): Roll
     if (!cs.length) return 0;
     const parts = cs.map(c => `(county = '${c}' AND rec_date BETWEEN ? AND ?)`).join(' OR ');
     const params = cs.flatMap(c => { const r = range(asOf, c, days, back); return [r.from, r.to]; });
-    const where = `(${parts}) AND txn_type != 'SELF_ASSIGN' AND ${REPORTING_EXCLUDE}`;
+    const where = `(${parts}) AND txn_type != 'SELF_ASSIGN' AND ${EMAIL_EXCLUDE}`;
     const row = db.prepare(`SELECT SUM(${COUNTED_LOAN_AMOUNT}) AS v FROM ${loanRows('aom_events_clean', where)}`)
       .get(...params) as any;
     return row?.v || 0;
@@ -279,7 +283,7 @@ export function buildRollupReport(db: Database.Database, sendDate: string): Roll
       SELECT cfn, rec_date, county, assignor_canon AS seller, assignee_canon AS buyer, loan_amount,
              ${COUNTED_LOAN_AMOUNT} AS counted,
              COUNT(*) OVER (PARTITION BY loan_amount) AS filings
-      FROM ${loanRows('aom_events_clean', `(${dealParts}) AND txn_type != 'SELF_ASSIGN' AND loan_amount > 0 AND ${REPORTING_EXCLUDE}`)}
+      FROM ${loanRows('aom_events_clean', `(${dealParts}) AND txn_type != 'SELF_ASSIGN' AND loan_amount > 0 AND ${EMAIL_EXCLUDE}`)}
     ) WHERE counted > 0 ORDER BY loan_amount DESC LIMIT 6`).all(...dealParams) as any[];
 
   // 52 calendar weeks (Mon–Sun) ending with the week of the latest data.
@@ -298,7 +302,13 @@ export function buildRollupReport(db: Database.Database, sendDate: string): Roll
   weeks[51].partial = counties.some(c => asOf[c] < weeks[51].end);
 
   // ── Lending relationships: the ones filed most recently ─────────────────
-  const { total: relTotal, rows: relAll } = queryGroupedFacilities(db, { limit: 5000, offset: 0 });
+  // queryGroupedFacilities is the Lending Relationships tab's own query and is
+  // left alone — the hidden firms are filtered out of its RESULT here, so the
+  // dashboard keeps showing them. The count in the section heading is reduced to
+  // match, or it would advertise relationships the email then refuses to list.
+  const { total: rawRelTotal, rows: rawRelAll } = queryGroupedFacilities(db, { limit: 5000, offset: 0 });
+  const relAll = (rawRelAll as any[]).filter(r => !isEmailExcludedParty(r.lender, r.borrower));
+  const relTotal = rawRelTotal - (rawRelAll.length - relAll.length);
   const relRecent = [...relAll].sort((a: any, b: any) => String(b.last_date).localeCompare(String(a.last_date))).slice(0, 5);
 
   // ── Attachments ───────────────────────────────────────────────────────────
@@ -599,6 +609,9 @@ export function buildRollupReport(db: Database.Database, sendDate: string): Roll
       using only counties with complete data in both (Broward loan data begins ${since.BROWARD ? fmtDay(since.BROWARD) + ', ' + since.BROWARD.slice(0, 4) : '—'}).
       Stated volume counts only transfers that state an amount (about 57%) and each loan once.
       Excluded, as on the dashboard's Reporting tab: self-transfers, MERS, Wilmington Savings, Fannie Mae and Freddie Mac.
+      <b style="color:${INK_2};">This report also leaves out ${EMAIL_ONLY_EXCLUDED_LABELS.length} large firms</b> —
+      ${EMAIL_ONLY_EXCLUDED_LABELS.slice(0, -1).map(esc).join(', ')} and ${esc(EMAIL_ONLY_EXCLUDED_LABELS.slice(-1)[0])} —
+      so the figures here are smaller than the dashboard's, which still includes them.
       Attached: every transfer in the last 30 days, and every lending relationship on record.
     </td></tr></table>
   </td></tr>
