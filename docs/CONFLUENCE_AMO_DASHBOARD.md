@@ -235,15 +235,17 @@ one of the five leaks into the reporting list.
 Charts are built from table cells with background colours, never SVG or images, because Outlook
 desktop renders HTML with the Word engine and often blocks images.
 
-**Status 2 Oct 2026 — written, on the droplet, and sending nothing.** The roll-up has been on the
-droplet since 22 Sep and the scripts run from source via `tsx`, so it *is* what would go out; the
-earlier note that the droplet "still holds the previous 15-day template" was wrong and reasoned from
-the unbuilt `dist/` rather than from what cron actually executes. What holds the send is a single
-environment variable: **`REPORT_EMAIL_ENABLED` is unset in `/opt/amo-dashboard/.env`**, and the send
-script skips everything without it. Setting it to `1` sends the roll-up.
+**Status 2 Oct 2026 — LIVE. `REPORT_EMAIL_ENABLED=1` is set, and the next send is Monday 5 Oct
+07:00 ET to `andres@` and `david@`.** The owner opened the gate deliberately after reviewing the
+template. `.env` was backed up to `.env.before_email_enable.20261002T143231Z` first; removing the
+variable (or setting it to anything but `1`) switches the send off again with no code change.
 
-**The last real send was 21 Sep 13:00 UTC**, to `andres@` and `david@`, using the old 15-day
-template. Nothing has been emailed since. The roll-up has never reached a real recipient.
+Earlier notes claiming the droplet "still holds the previous 15-day template" were wrong and reasoned
+from the unbuilt `dist/` rather than from what cron executes — the scripts run from source via `tsx`,
+so the roll-up has been the live template since 22 Sep.
+
+**Monday 5 Oct will be the roll-up's first send to a real recipient.** Before that: the last real
+send was 21 Sep 13:00 UTC, to the same two people, using the old 15-day template.
 
 **Schedule moved to Monday 07:00 Eastern on 2 Oct 2026**, at the owner's request. The send used to be
 step 5 of `run_weekly.sh`, which tied the send day to the Friday collection day; it is now
@@ -1365,7 +1367,8 @@ endpoints healthy across all three county scopes.
 | Direction of transfer (Miami-Dade) | 🟡 **Fix built 18 Sep 2026, applied in the 19 Sep rebuild** — `document_direction.py`; review list in `direction_decisions` (no screen yet) |
 | Stored document text (`document_text`) | 🟡 **Filling 18–19 Sep 2026** — every Miami-Dade loan transfer re-read and kept (~1.7 KB/doc compressed); future audits need no re-download |
 | Weekend progress page (`/weekend`) | 🟢 Deployed 18 Sep 2026 — read-only view of the weekend run |
-| Weekly emailed report ("AMO Market Monitor") | 🟡 **Scheduled Monday 07:00 ET, but switched off (2 Oct 2026).** The 15/30/360-day roll-up is on the droplet and is what cron would execute — the scripts run from source via `tsx`, so the unbuilt `dist/` is irrelevant to the email and the earlier "still sends the previous 15-day template" note was wrong. Moved out of `run_weekly.sh` into `send_weekly_email.sh` on its own cron entry (§6.5). **`REPORT_EMAIL_ENABLED` is unset, so nothing sends.** Last real send: 21 Sep, old template, to `andres@`/`david@`. The roll-up has never reached a real recipient; the owner is reviewing its content first |
+| Broward county feed lag | 🟡 **The county publishes 3–6 business days late, and that lag doubled around 23 Sep 2026** — Broward's records stopped at 25 Sep for over a week. **Not a harvest failure:** every day on the feed was taken within hours of appearing, verified by listing the feed directly (09-25 data was published 01 Oct). The defect was that nothing said so — the daily job reported `status=ok` and "every day on the feed has been harvested", both true, while the figures aged. Now measured and warned above 5 business days (`collector/broward_images.py`), pinned by `collector/tests/check_feed_lag.py`, and the weekly email carries a self-clearing notice. **Getting Broward nearer real-time would need portal scraping — not built** |
+| Weekly emailed report ("AMO Market Monitor") | 🟢 **LIVE as of 2 Oct 2026 — sends Monday 07:00 ET.** The 15/30/360-day roll-up is on the droplet and is what cron would execute — the scripts run from source via `tsx`, so the unbuilt `dist/` is irrelevant to the email and the earlier "still sends the previous 15-day template" note was wrong. Moved out of `run_weekly.sh` into `send_weekly_email.sh` on its own cron entry (§6.5). **`REPORT_EMAIL_ENABLED=1` is now set**, so Monday 5 Oct is the roll-up's first send to a real recipient. Template changed the same day at the owner's request: transaction-mix section removed, and five large firms hidden from the email only (§4.1a). Last previous send: 21 Sep, old template, same two recipients |
 | County-aware server + client selector | 🟢 Deployed |
 | Per-county document links | 🟢 Deployed |
 | Endpoint county scoping | 🟢 Deployed — all document endpoints |

@@ -77,6 +77,52 @@ addition to `server/reporting/exclusions.ts`.
   loudly with no database. `CHASE HOME LENDING` is in the must-NOT-match set on purpose — real
   counterparty, shares a word with JPMorgan Chase, not something the owner asked to remove.
 
+**BROWARD: NOT BROKEN — the county publishes late, and my first read of it was wrong.** I reported
+the feed as "stopped advancing, window frozen at 25 Sep" from a single log line. Listing the SFTP
+directory directly (`Official_Records_Download`, file mtimes) shows it advancing one day at a time
+with a growing lag:
+
+| record date | published | lag |
+|---|---|---|
+| Mon 21 Sep | Thu 24 Sep | 3 days |
+| Tue 22 Sep | Fri 25 Sep | 3 days |
+| Wed 23 Sep | Tue 29 Sep | 6 days |
+| Thu 24 Sep | Wed 30 Sep | 6 days |
+| Fri 25 Sep | Thu 01 Oct | 6 days |
+
+So the lag roughly **doubled around 23 Sep** and nothing noticed. **There is nothing to fix in our
+collection** — every day is harvested within hours of appearing, and the records for 28 Sep onward do
+not exist on the feed yet. Closing the gap to real-time would need portal scraping, which is a
+project, not a change. **Lesson: a single snapshot of a sliding window cannot distinguish "stopped"
+from "slow" — read the source's own timestamps.**
+
+**What WAS fixed is the blindness.** `broward_images.py` now measures the county's publishing lag on
+every run, logs it, and warns above 5 **business** days (`9a2d0eb`). It stays `status=ok` — the job
+did all it could, and failing it would fire the alarm that exists for permanent image loss. The lag
+rides in the existing `detail` column, so the live `broward_runs` table needs no migration, and
+`detail` is already what the Overview banner shows. Business days, not calendar: a healthy Friday feed
+read on Monday would otherwise read 3 days behind and cry wolf every Monday — the exact failure
+`record_run()`'s docstring was written for. `collector/tests/check_feed_lag.py` pins it (13
+assertions, including the Monday case and this incident).
+
+**And the email now says so itself** (`18bd0fa`): a county more than 5 business days behind gets an
+amber "Please read first" box above the Pulse. Conditional and self-clearing — renders nothing when
+every county is current, so it never needs removing. Threshold matches the collector's; keep them
+equal. Verified by pinning `REPORT_SEND_DATE=2026-10-05`: it fires with "Broward records only reach
+Sep 25, 6 business days before this report". Today it correctly stays silent — Broward is exactly 5
+behind, at the threshold, not over it.
+
+**EMAIL IS NOW LIVE.** `REPORT_EMAIL_ENABLED=1` appended to `/opt/amo-dashboard/.env` at the owner's
+instruction, after he saw the preview. `.env` backed up to `.env.before_email_enable.20261002T143231Z`,
+both `chmod 600`. **Monday 5 Oct 07:00 ET → `andres@` + `david@`** (code default; `REPORT_RECIPIENTS`
+still unset, deliberately). Verified: Graph `--check` passes (the client secret had not been exercised
+since 21 Sep and has not expired); 11:00 UTC Mon 5 Oct = 07:00 EDT so the first firing sends and the
+12:00 one exits on the hour guard; the gate is read out of `.env` by the script under `env -i`, i.e.
+cron's own environment; 407 transfers, so the 0-row refusal will not trigger. **The one path NOT
+exercised is `--send` itself** — the 21 Sep send went through `weekend/monday_email.sh`, so this
+wrapper's send branch has never run. It differs from the tested preview branch only by the `--send`
+flag.
+
 **Open, for the rest of the template discussion:** truncated-name
 duplicates still split firms across rows — "CITY NATIONAL BANK OF FLORIDA" vs "CITY NATIONAL BANK".
 The 23 Sep comma fix closed a different class. The roll-up's top-8 lists make this more visible than
