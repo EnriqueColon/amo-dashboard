@@ -44,7 +44,14 @@ droplet "still sends the previous 15-day template". It does not: the scripts run
 `tsx`, so the roll-up on disk since 22 Sep is what cron executes, and the unbuilt `dist/` is
 irrelevant to the email. That note had reasoned from `dist/` rather than from what cron runs.
 
-**Open, for the template discussion the owner opened (deferred to the next session):** truncated-name
+**Template change 1 — "What kind of activity" removed** (owner, same session). The transaction-mix
+section (stacked bar per window + percentage table) is gone, along with everything only it used: the
+`MIX` palette, `mixRow`/`mixRows`/`mixTable`, and the per-window `mix`/`mixCounty` counts in `stats`.
+`txn_type` is still read for the `SELF_ASSIGN` filter and still ships in the attached CSV. `tsc`
+clean; preview regenerated off live droplet data to confirm the section is absent and the sections
+either side still render.
+
+**Open, for the rest of the template discussion:** truncated-name
 duplicates still split firms across rows — "CITY NATIONAL BANK OF FLORIDA" vs "CITY NATIONAL BANK".
 The 23 Sep comma fix closed a different class. The roll-up's top-8 lists make this more visible than
 the old long tables did, and it affects the dashboard, not just the email.

@@ -184,11 +184,16 @@ year, rather than reading a fortnight in isolation.
 
 What it covers, in order: a plain-English "Pulse" paragraph; three headline cards (transfers, change
 vs the prior period, stated dollar volume, transfers per business day, active sellers); a 52-week
-trend chart; pace per business day; the transaction mix; the most active sellers and buyers with a
-momentum multiplier against each firm's own 360-day norm; firms heating up and cooling off; the top
-seller→buyer relationships; the largest loans of the last 30 days; and the most recently filed
-lending relationships. The last 30 days of transfers and every lending relationship are attached as
-CSVs.
+trend chart; pace per business day; the most active sellers and buyers with a momentum multiplier
+against each firm's own 360-day norm; firms heating up and cooling off; the top seller→buyer
+relationships; the largest loans of the last 30 days; and the most recently filed lending
+relationships. The last 30 days of transfers and every lending relationship are attached as CSVs.
+
+A **"What kind of activity" section** — the share of transfers by transaction type in each window,
+as a stacked bar plus a percentage table — sat between the pace chart and the sellers table until
+**2 Oct 2026, when the owner had it removed**. Nothing else in the email breaks transfers down by
+`txn_type`, so the whole block went: the palette, both builders and the per-window counts. The
+column is still read for the `SELF_ASSIGN` filter and still rides along in the attached CSV.
 
 **Miami-Dade and Broward are held apart throughout.** The headline cards, the transaction mix, the
 sellers and buyers tables and the top relationships each carry their own county breakdown, and the

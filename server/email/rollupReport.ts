@@ -19,9 +19,9 @@
 // Email constraints shape every chart: no JavaScript, and Outlook desktop
 // renders with the Word engine (no SVG, no flexbox, images often blocked), so
 // every chart is built from table cells with background colours and fixed
-// heights, and carries its numbers as text. Colours: county and transaction
-// palettes validated with the dataviz skill's validator (all checks pass; the
-// sub-3:1 slots are always shown with labels or a table beside them).
+// heights, and carries its numbers as text. The county palette is validated
+// with the dataviz skill's validator (all checks pass; the sub-3:1 slots are
+// always shown with labels or a table beside them).
 import type Database from 'better-sqlite3';
 import { queryGroupedFacilities } from '../lending/facilities';
 import { REPORTING_EXCLUDE } from '../reporting/exclusions';
@@ -47,14 +47,10 @@ const COUNTIES = ['MIAMI-DADE', 'BROWARD'];
 // Recency ramp for the 52-week chart: older weeks → last 30 days → last 15 days.
 // One hue, light→dark; validated as an ordinal ramp.
 const RECENCY = { older: '#86b6ef', d30: '#3987e5', d15: '#184f95' };
-// Transaction mix, categorical slots 1-5 in fixed order.
-const MIX: Array<{ key: string; label: string; color: string; desc: string }> = [
-  { key: 'MARKET_TRANSFER',   label: 'Market transfer', color: '#2a78d6', desc: 'institution → institution' },
-  { key: 'ORIGINATION',       label: 'Origination',     color: '#eb6834', desc: 'lender entering the market' },
-  { key: 'INSTITUTIONAL_OUT', label: 'Inst. out',       color: '#1baf7a', desc: 'institution → non-institution' },
-  { key: 'PRIVATE',           label: 'Private',         color: '#eda100', desc: 'neither side an institution' },
-  { key: 'MERS_RELEASE',      label: 'MERS release',    color: '#e87ba4', desc: 'registry record-keeping' },
-];
+// The transaction-mix palette lived here until 2 Oct 2026. The "What kind of
+// activity" section it coloured was removed at the owner's request; nothing
+// else in the email breaks transfers down by txn_type. The column itself is
+// still read — it drives the SELF_ASSIGN filter and rides along in the CSV.
 
 const FONT = `-apple-system,'Segoe UI',Helvetica,Arial,sans-serif`;
 const NUM = `font-variant-numeric:tabular-nums;`;
@@ -201,19 +197,10 @@ export function buildRollupReport(db: Database.Database, sendDate: string): Roll
       const start = from < since[c] ? since[c] : from;
       pace[c] = (byCounty[c] || 0) / Math.max(1, weekdays(start, to));
     }
-    const mix: Record<string, number> = {};
-    for (const r of cur) mix[r.txn_type] = (mix[r.txn_type] || 0) + 1;
-    // The same mix held apart by county, so a shift in one county is not
-    // averaged away by the other.
-    const mixCounty: Record<string, Record<string, number>> = {};
-    for (const r of cur) {
-      const m = mixCounty[r.county] || (mixCounty[r.county] = {});
-      m[r.txn_type] = (m[r.txn_type] || 0) + 1;
-    }
     return {
       w, cur, n: cur.length, cmp, change, vol,
       volChange: volPrev > 0 ? (volCmp - volPrev) / volPrev : null,
-      byCounty, pace, mix, mixCounty,
+      byCounty, pace,
       sellers: new Set(cur.map(r => r.seller)).size,
       buyers: new Set(cur.map(r => r.buyer)).size,
     };
@@ -481,37 +468,9 @@ export function buildRollupReport(db: Database.Database, sendDate: string): Roll
       ${stats.map(s => hbar(s.w.label, s.pace[c], maxPace, COUNTY_COLOR[c], s.pace[c].toFixed(1))).join('')}
     </table>`).join('');
 
-  // Chart 3 — transaction mix, 100% stacked, one row per window.
-  const mixRow = (label: string, mix: Record<string, number>, n: number, sub = false) => {
-    const total = Math.max(1, n);
-    let used = 0;
-    const segs = MIX.map((t, i) => {
-      const cnt = mix[t.key] || 0;
-      let p = Math.round((cnt / total) * 100);
-      if (i === MIX.length - 1) p = Math.max(0, 100 - used);
-      used += p;
-      return p > 0 ? `<td width="${p}%" height="${sub ? 10 : 16}" bgcolor="${t.color}" style="background:${t.color};border-right:2px solid ${PAPER};font-size:1px;line-height:1px;">&nbsp;</td>` : '';
-    }).join('');
-    return `<tr>
-      <td width="92" style="padding:${sub ? '2px 10px 2px 12px' : '4px 10px 4px 0'};font-size:${sub ? 10 : 11}px;color:${sub ? MUTED : INK_2};white-space:nowrap;">${label}</td>
-      <td style="padding:${sub ? 2 : 4}px 0;"><table width="100%" cellpadding="0" cellspacing="0"><tr>${segs}</tr></table></td>
-    </tr>`;
-  };
-  // Each window as one bar, and — when both counties have data — the same
-  // window again as a thinner bar per county directly beneath it.
-  const mixRows = (s: typeof s15) => mixRow(s.w.label, s.mix, s.n)
-    + (multiCounty ? counties.map(c => mixRow(COUNTY_LABEL[c], s.mixCounty[c] || {}, s.byCounty[c] || 0, true)).join('') : '');
-  const mixTable = `
-    <table width="100%" cellpadding="0" cellspacing="0" style="margin:10px 0 0;font-size:12px;${NUM}">
-      <tr>
-        <td style="padding:5px 0;font-size:10px;letter-spacing:0.05em;text-transform:uppercase;color:${MUTED};border-bottom:1px solid ${HAIR};">Type</td>
-        ${stats.map(s => `<td align="right" style="padding:5px 0 5px 8px;font-size:10px;letter-spacing:0.05em;text-transform:uppercase;color:${MUTED};border-bottom:1px solid ${HAIR};">${s.w.short}</td>`).join('')}
-      </tr>
-      ${MIX.map(t => `<tr>
-        <td style="padding:5px 0;border-bottom:1px solid ${HAIR};color:${INK};">${swatch(t.color)}&nbsp;${t.label} <span style="color:${MUTED};">· ${t.desc}</span></td>
-        ${stats.map(s => `<td align="right" style="padding:5px 0 5px 8px;border-bottom:1px solid ${HAIR};color:${INK};">${Math.round(((s.mix[t.key] || 0) / Math.max(1, s.n)) * 100)}%</td>`).join('')}
-      </tr>`).join('')}
-    </table>`;
+  // Chart 3 was the transaction mix — a 100% stacked bar per window plus a
+  // percentage table. Removed 2 Oct 2026 at the owner's request. The windows,
+  // the leaderboards and the pace chart never depended on it.
 
   // Leaderboards
   const momentumBadge = (x: number) => {
@@ -618,9 +577,6 @@ export function buildRollupReport(db: Database.Database, sendDate: string): Roll
   ${section('52-week trend', 'Loan transfers per week, both counties. The darker the column, the more recent the window it belongs to.', trendChart)}
 
   ${section('Pace by window', 'Average loan transfers per business day — the fairest way to compare windows of different lengths.', paceChart)}
-
-  ${section('What kind of activity', 'Share of transfers by transaction type in each window.',
-    `<table width="100%" cellpadding="0" cellspacing="0">${stats.map(mixRows).join('')}</table>${mixTable}`)}
 
   ${section('Most active sellers', 'Ranked by the last 30 days. <b>Pace</b> = the last 30 days against the firm\'s own 360-day average (1.0× = usual).', board3('Seller', topSellers))}
 
