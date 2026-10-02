@@ -118,10 +118,22 @@ both `chmod 600`. **Monday 5 Oct 07:00 ET → `andres@` + `david@`** (code defau
 still unset, deliberately). Verified: Graph `--check` passes (the client secret had not been exercised
 since 21 Sep and has not expired); 11:00 UTC Mon 5 Oct = 07:00 EDT so the first firing sends and the
 12:00 one exits on the hour guard; the gate is read out of `.env` by the script under `env -i`, i.e.
-cron's own environment; 407 transfers, so the 0-row refusal will not trigger. **The one path NOT
-exercised is `--send` itself** — the 21 Sep send went through `weekend/monday_email.sh`, so this
-wrapper's send branch has never run. It differs from the tested preview branch only by the `--send`
-flag.
+cron's own environment; 407 transfers, so the 0-row refusal will not trigger. **`--send` now proven too.** The owner approved a real test send to his own addresses, so the
+wrapper's send branch is no longer untested. Guarded the way `monday_email.sh` did it — **dry run
+first, confirm the `To:` line, then send** — because `REPORT_RECIPIENTS` is not in `.env`, so a
+caller-exported value survives the `set -a; . ./.env` and a typo would have reached andres@/david@.
+Dry run read exactly `mktinfo@safeharborcp.com, enriquec012@outlook.com`; the send then reported
+`Sent via Microsoft Graph` to those two, wrapper exit 0.
+
+**Monday re-verified after the test**, since the override lived only in that one shell: `.env` still
+has no `REPORT_RECIPIENTS` (so Monday falls back to the code default), a no-override dry run reads
+`andres@safeharborcp.com, david@safeharborcp.com`, `REPORT_EMAIL_ENABLED=1`, the cron entry is
+intact, the hour guard still refuses an off-hour run, and `cron` is active.
+
+**No double-send risk from the two firings, checked rather than assumed.** If Monday's 08:30 UTC
+nightly normalize overruns, the 11:00 instance waits for it (up to 3h) and sends late — but the 12:00
+instance evaluates the hour guard at 08:00 ET, not 07:00, and exits immediately. Exactly one send
+either way, so no lock file is needed.
 
 **Open, for the rest of the template discussion:** truncated-name
 duplicates still split firms across rows — "CITY NATIONAL BANK OF FLORIDA" vs "CITY NATIONAL BANK".
