@@ -4,6 +4,53 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-10-02 — the weekly email moves to Monday 07:00 ET; template review opened
+
+**State found, after checking the box rather than the notes.** No email has gone out since
+**21 Sep 13:00 UTC** (old 15-day template, to `andres@` + `david@`). The 28 Sep roll-up send the owner
+planned on 23 Sep **never happened** — nothing was ever scheduled for it, and `weekend/monday_email.sh`
+is hard-guarded to `2026-09-21` so it cannot fire again. `REPORT_EMAIL_ENABLED` is still unset in
+`/opt/amo-dashboard/.env`, so this morning's Friday run (finished 10:57 UTC) skipped the email step
+silently, as every run has. **The roll-up has never reached a real recipient.**
+
+**Also found: SSH to the droplet was dead at session start** — `Permission denied (publickey)`, and the
+`amo-droplet` MCP tools with it. Cause was the Mac, not the droplet: `ssh-add -l` reported "no
+identities", so the agent had been emptied (reboot). `ssh-add --apple-load-keychain` restored it from
+the Keychain with no re-entry of the passphrase. Worth knowing before debugging the droplet again —
+the MCP server recovers `SSH_AUTH_SOCK` from launchd but cannot repopulate an empty agent.
+
+**Owner's decision: send Monday 07:00 Eastern.** The send was step 5 of `run_weekly.sh`, which tied
+the send day to the Friday 06:00 UTC collection day. Split it out:
+
+- **New `collector/send_weekly_email.sh`** — the gate, the `normalize.py` wait, `set -a` env sourcing
+  and the `tsx` call, with timestamped log lines and distinct messages for exit 2 (empty report) vs a
+  real failure. `DRY_RUN=1` exercises the whole path in preview mode; `FORCE=1` skips the hour guard.
+- **`run_weekly.sh` step 5 is now a comment** pointing at it. Friday collects and rebuilds; Monday
+  only sends.
+- **Cron `0 11,12 * * 1` — two firings, one send.** No single UTC hour is 07:00 Eastern year-round
+  (11:00 UTC = 07:00 EDT, 12:00 UTC = 07:00 EST), and the box is `Etc/UTC` with no DST. `CRON_TZ=`
+  would be tidier, but **this cron build's support for it is unverified** — `cron 3.0pl1-184ubuntu2`
+  ships no man page and `strings /usr/sbin/cron` contains no `CRON_TZ` at all — and a scheduling
+  feature that silently does nothing would move the send an hour without anyone noticing. So cron
+  fires at both candidate hours and the script's Eastern-hour guard admits exactly one. Both
+  conversions verified on the droplet with GNU `date`, not assumed: 2 Oct 11:00 UTC → 07:00 EDT,
+  2 Nov 12:00 UTC → 07:00 EST.
+
+**The gate stays shut.** `REPORT_EMAIL_ENABLED` is deliberately left unset — the owner is reviewing
+the template before anyone receives the roll-up, so the new schedule runs and sends nothing.
+
+**Two stale claims in the docs corrected while here.** §4.1a and the §7 status table both said the
+droplet "still sends the previous 15-day template". It does not: the scripts run from source via
+`tsx`, so the roll-up on disk since 22 Sep is what cron executes, and the unbuilt `dist/` is
+irrelevant to the email. That note had reasoned from `dist/` rather than from what cron runs.
+
+**Open, for the template discussion the owner opened (deferred to the next session):** truncated-name
+duplicates still split firms across rows — "CITY NATIONAL BANK OF FLORIDA" vs "CITY NATIONAL BANK".
+The 23 Sep comma fix closed a different class. The roll-up's top-8 lists make this more visible than
+the old long tables did, and it affects the dashboard, not just the email.
+
+---
+
 ## 2026-09-23 — canonicalize() now treats an internal comma as punctuation
 
 **Found while answering a data question, not from a bug report.** Ranking lender↔borrower

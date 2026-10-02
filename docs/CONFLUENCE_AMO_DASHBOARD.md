@@ -1,6 +1,6 @@
 # AMO Tracker — Mortgage Assignment Intelligence Dashboard
 
-> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 23 Sep 2026
+> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 2 Oct 2026
 > **Production URL:** `http://165.22.35.75:5000` (single shared password)
 > **Repository:** `amo-dashboard` (`origin/main`)
 
@@ -174,7 +174,8 @@ they respected the selector.
 
 ### 4.1a The weekly email — "AMO Market Monitor"
 
-Goes to the named recipients **after** Friday's data collection, so both counties are current.
+Goes to the named recipients **Monday at 07:00 Eastern**, reading the data Friday's collection run
+left behind.
 
 Since 21 Sep 2026 it is a **roll-up over three horizons** — the last 15 days, the last 30 days and the
 last 360 days — each compared with the period of equal length immediately before it. The owner asked
@@ -210,10 +211,22 @@ It hides Wilmington Savings, MERS, Fannie Mae and Freddie Mac, exactly as the Re
 Charts are built from table cells with background colours, never SVG or images, because Outlook
 desktop renders HTML with the Word engine and often blocks images.
 
-**Status 21 Sep 2026:** the roll-up is committed and previewed against live data, but **not yet
-deployed** — the droplet still holds the previous 15-day template. The scripts run from source via
-`tsx`, so a `git pull` on the droplet is enough to change what Friday sends; no rebuild is needed.
-The last send was the Monday run on 21 Sep 13:00 UTC, which used the old template.
+**Status 2 Oct 2026 — written, on the droplet, and sending nothing.** The roll-up has been on the
+droplet since 22 Sep and the scripts run from source via `tsx`, so it *is* what would go out; the
+earlier note that the droplet "still holds the previous 15-day template" was wrong and reasoned from
+the unbuilt `dist/` rather than from what cron actually executes. What holds the send is a single
+environment variable: **`REPORT_EMAIL_ENABLED` is unset in `/opt/amo-dashboard/.env`**, and the send
+script skips everything without it. Setting it to `1` sends the roll-up.
+
+**The last real send was 21 Sep 13:00 UTC**, to `andres@` and `david@`, using the old 15-day
+template. Nothing has been emailed since. The roll-up has never reached a real recipient.
+
+**Schedule moved to Monday 07:00 Eastern on 2 Oct 2026**, at the owner's request. The send used to be
+step 5 of `run_weekly.sh`, which tied the send day to the Friday collection day; it is now
+`collector/send_weekly_email.sh` on its own cron entry (§6.5). Monday deliberately follows Friday's
+collection: Miami-Dade is collected only in that weekly run, so a Monday report reads Miami-Dade
+through Friday and Broward through Sunday — which costs nothing, because each county's windows end on
+its own latest recorded date.
 
 The old 15-day builder remains at `server/email/report.ts`, unused, until the roll-up has sent
 cleanly a few times.
@@ -724,7 +737,8 @@ All installed via `crontab -e` on the droplet.
 | `*/20 * * * *` | `run_facility_tick.sh` | One tick of the OpenAI Batch state machine: poll in-flight jobs, ingest finished ones, top back up to 4 concurrent batches of 500 documents. Resume-safe. |
 | `30 8 * * *` | `run_nightly_normalize.sh` | Rebuild derived tables, then `pm2 restart` to clear the cache. **Skips the restart if normalize fails**, so a failure leaves the last good data serving. |
 | `30 15,19,23 * * *` | `run_broward_daily.sh` (`BROWARD_INGEST_INDEX=1`) | Broward index → images → extraction → retention report + heartbeat. **Time-critical.** Runs three times a day on purpose — see "Broward's publication time moves" below. Holds a `flock` so runs cannot overlap; a skipped run exits 0. |
-| `0 6 * * 5` | `run_weekly.sh` | Miami-Dade: collect last 10 days → extract PDFs → normalize → enrich. Sources `/opt/amo-dashboard/.env` itself and **aborts loudly up front if `OPENAI_API_KEY` is missing** (fix `2441222`, 23 Aug 2026 — cron provides no environment; before the fix the run half-succeeded: collection worked, extraction silently died, see §7.4). |
+| `0 6 * * 5` | `run_weekly.sh` | Miami-Dade: collect last 10 days → extract PDFs → normalize → enrich. Sources `/opt/amo-dashboard/.env` itself and **aborts loudly up front if `OPENAI_API_KEY` is missing** (fix `2441222`, 23 Aug 2026 — cron provides no environment; before the fix the run half-succeeded: collection worked, extraction silently died, see §7.4). **No longer sends the email** — that moved out on 2 Oct 2026. |
+| `0 11,12 * * 1` | `send_weekly_email.sh` | The "AMO Market Monitor" email (§4.1a). **Two firings, one send:** the box is Etc/UTC with no DST, so no single UTC hour is 07:00 Eastern all year — 11:00 UTC is 07:00 EDT, 12:00 UTC is 07:00 EST. The script checks the Eastern hour and lets exactly one through. `CRON_TZ` would be tidier but this cron build's support for it is unverified, and a scheduling feature that silently fails would shift the send an hour unnoticed. Waits for any running `normalize.py`, and sends nothing unless `REPORT_EMAIL_ENABLED=1`. |
 | `15 3 * * *` | `run_backup.sh` | Verified snapshot of the database + Broward images → local rotation (7 kept) → DigitalOcean Spaces. Records every run in `backup_runs`; the Overview banner reads it. |
 
 **One-off, 18–21 Sep 2026 (remove after):** `5 6 18 9 *` `collector/weekend/run_weekend.sh` (re-read →
@@ -732,9 +746,9 @@ waits for fixes → `apply_weekend_fixes.sh` → email check) and `0 13 21 9 *`
 `collector/weekend/monday_email.sh` (Monday 09:00 ET send, only if both checks passed). Progress at
 `/weekend` or `cat /opt/amo-dashboard/collector/weekend/STATUS`.
 
-**Not yet installed:** a weekly emailed report (`server/scripts/sendWeeklyReport.ts`), planned to run
-right after `run_weekly.sh` on the same Friday 06:00 UTC slot. Built and preview-tested locally as of
-19 Aug 2026 but not yet wired into cron — see §7.4 item 9.
+**Installed but gated:** the weekly emailed report is wired into cron as of 2 Oct 2026 (the
+`0 11,12 * * 1` row above), but `REPORT_EMAIL_ENABLED` is unset in `.env`, so each Monday firing logs
+`SKIPPED` and sends nothing. One variable stands between the schedule and a live send — see §4.1a.
 
 #### Two things about these jobs that must not be forgotten
 
@@ -1327,7 +1341,7 @@ endpoints healthy across all three county scopes.
 | Direction of transfer (Miami-Dade) | 🟡 **Fix built 18 Sep 2026, applied in the 19 Sep rebuild** — `document_direction.py`; review list in `direction_decisions` (no screen yet) |
 | Stored document text (`document_text`) | 🟡 **Filling 18–19 Sep 2026** — every Miami-Dade loan transfer re-read and kept (~1.7 KB/doc compressed); future audits need no re-download |
 | Weekend progress page (`/weekend`) | 🟢 Deployed 18 Sep 2026 — read-only view of the weekend run |
-| Weekly emailed report ("AMO Market Monitor") | 🟡 **Roll-up rebuilt 21 Sep 2026** — three horizons (15 / 30 / 360 days) with per-county breakdown throughout; committed and previewed against live data. **Correction 22 Sep 2026: the commit *is* on the droplet** (`d0d3f97`, `git pull` done), but `dist/index.cjs` still dates from 19 Sep, so it was never built and the live site still sends the previous 15-day template (§4.1a). Deploy is on hold at the owner's instruction, so this is intended — but "not yet pulled" was the wrong description of it |
+| Weekly emailed report ("AMO Market Monitor") | 🟡 **Scheduled Monday 07:00 ET, but switched off (2 Oct 2026).** The 15/30/360-day roll-up is on the droplet and is what cron would execute — the scripts run from source via `tsx`, so the unbuilt `dist/` is irrelevant to the email and the earlier "still sends the previous 15-day template" note was wrong. Moved out of `run_weekly.sh` into `send_weekly_email.sh` on its own cron entry (§6.5). **`REPORT_EMAIL_ENABLED` is unset, so nothing sends.** Last real send: 21 Sep, old template, to `andres@`/`david@`. The roll-up has never reached a real recipient; the owner is reviewing its content first |
 | County-aware server + client selector | 🟢 Deployed |
 | Per-county document links | 🟢 Deployed |
 | Endpoint county scoping | 🟢 Deployed — all document endpoints |
