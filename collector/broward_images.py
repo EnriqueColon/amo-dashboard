@@ -38,7 +38,7 @@ import re
 import struct
 import sys
 import zlib
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(__file__))
 from database import get_conn  # noqa: E402
@@ -374,6 +374,40 @@ def available_zips(sftp) -> list[tuple[str, str]]:
     return sorted(out)
 
 
+# How far behind the county's publishing may fall before the daily job says so.
+# The normal lag is ~3 business days (see record_run below, which has documented
+# that since this table was added). It doubled to 6 calendar days around
+# 2026-09-23 and nothing noticed for over a week: every run reported `status=ok`
+# and "✅ every day currently on the feed has been harvested", which was TRUE —
+# we had harvested everything the county had published — while Broward's figures
+# in the dashboard and the weekly email quietly went stale. "Up to date with the
+# feed" and "up to date with reality" are different claims, and the job was only
+# ever checking the first one.
+#
+# 5 business days leaves the normal ~3 well clear of the warning.
+MAX_FEED_LAG_BUSINESS_DAYS = int(os.environ.get('BROWARD_MAX_FEED_LAG_DAYS', '5'))
+
+
+def business_days_between(start: str, end: str) -> int:
+    """Business days from `start` to `end`, both YYYY-MM-DD, excluding `start`.
+
+    Business days rather than calendar days because the feed only ever publishes
+    on them: measured in calendar days, every Monday looks like a 3-day
+    regression and the warning would cry wolf weekly — the exact failure
+    record_run's docstring warns about.
+    """
+    a = datetime.strptime(start, '%Y-%m-%d').date()
+    b = datetime.strptime(end, '%Y-%m-%d').date()
+    if b <= a:
+        return 0
+    n = 0
+    while a < b:
+        a += timedelta(days=1)
+        if a.weekday() < 5:
+            n += 1
+    return n
+
+
 def show_status(sftp, from_feed: bool = False,
                 doc_types: set[str] | None = None) -> dict | None:
     """Print the retention report and return it as a summary for record_run().
@@ -418,6 +452,23 @@ def show_status(sftp, from_feed: bool = False,
     else:
         log.info('✅ every day currently on the feed has been harvested')
 
+    # How far behind the county itself is. Nothing we do can speed this up — the
+    # records do not exist on the feed yet — but it decides whether Broward's
+    # figures are worth comparing against Miami-Dade's today, and it must not be
+    # reported as a success.
+    today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    lag = business_days_between(zips[-1][0], today)
+    log.info(f'County publishing lag: newest day on the feed is {zips[-1][0]}, '
+             f'{lag} business day(s) behind {today}')
+    if lag > MAX_FEED_LAG_BUSINESS_DAYS:
+        log.warning(
+            f'BROWARD IS {lag} BUSINESS DAYS BEHIND (normal is ~3, warn above '
+            f'{MAX_FEED_LAG_BUSINESS_DAYS}). This is the county publishing late, '
+            f'not a harvest failure — every day on the feed is accounted for '
+            f'above. But Broward figures on the dashboard and in the weekly '
+            f'email stop at {zips[-1][0]}, so they are NOT comparable with '
+            f'Miami-Dade until the feed catches up.')
+
     return {
         'feed_first':     zips[0][0],
         'feed_last':      zips[-1][0],
@@ -425,6 +476,8 @@ def show_status(sftp, from_feed: bool = False,
         'days_pending':   days_pending,
         'docs_pending':   at_risk,
         'oldest_pending': oldest_pending,
+        'feed_lag_days':  lag,
+        'feed_lag_over':  lag > MAX_FEED_LAG_BUSINESS_DAYS,
     }
 
 
@@ -491,6 +544,15 @@ def main() -> int:
             log.error(f'status check failed: {exc}')
             status = 'failed'
             detail = f'{detail}; feed unreachable: {exc}'.lstrip('; ')
+        # A publishing lag rides in `detail` rather than a new column, so this
+        # needs no migration of the live broward_runs table — and `detail` is
+        # already what the Overview banner displays. The run still counts as
+        # `ok`: the job did everything it could, and flipping it to `failed`
+        # would fire the alarm that exists for permanent image loss.
+        if summary and summary.get('feed_lag_over'):
+            note = (f"county publishing {summary['feed_lag_days']} business days "
+                    f"behind — Broward data stops at {summary['feed_last']}")
+            detail = f'{detail}; {note}'.lstrip('; ')
         record_run(status, started, detail, summary)
         return 0 if status == 'ok' else 1
 
