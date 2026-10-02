@@ -56,6 +56,24 @@ const RECENCY = { older: '#86b6ef', d30: '#3987e5', d15: '#184f95' };
 // else in the email breaks transfers down by txn_type. The column itself is
 // still read — it drives the SELF_ASSIGN filter and rides along in the CSV.
 
+// A county whose data is more than this many business days old gets a notice at
+// the top of the email. Added 2 Oct 2026: Broward's index arrives from the
+// county 3-6 business days late and that lag doubled in late September, so the
+// first real send of this template would have carried Broward figures stopping
+// a week earlier with nothing but a date in the header to say so. Each county's
+// windows already END on its own latest date, so the arithmetic was never wrong
+// — but a reader seeing "Last 15 days" reasonably assumes it runs up to now.
+//
+// Deliberately conditional and self-clearing: it appears only while a county is
+// actually behind and vanishes when the feed catches up, so nobody has to
+// remember to take it out. 5 business days matches
+// MAX_FEED_LAG_BUSINESS_DAYS in collector/broward_images.py — keep them equal,
+// or the email stays silent about a lag the collector is already warning about.
+const STALE_AFTER = 5;
+const WARN_BG = '#fdf6e3';
+const WARN_EDGE = '#c98a00';
+const WARN_INK = '#6b4800';
+
 const FONT = `-apple-system,'Segoe UI',Helvetica,Arial,sans-serif`;
 const NUM = `font-variant-numeric:tabular-nums;`;
 
@@ -91,6 +109,16 @@ function csv(v: any): string {
   if (v == null) return '';
   const s = String(v);
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+// Business days from `from` to `to`, excluding `from`. Mirrors
+// business_days_between() in collector/broward_images.py — see STALE_AFTER.
+function businessDaysBetween(from: string, to: string): number {
+  let n = 0;
+  for (let t = ms(from) + DAY; t <= ms(to); t += DAY) {
+    const w = new Date(t).getUTCDay();
+    if (w !== 0 && w !== 6) n++;
+  }
+  return n;
 }
 function weekdays(from: string, to: string): number {
   let n = 0;
@@ -554,6 +582,28 @@ export function buildRollupReport(db: Database.Database, sendDate: string): Roll
   </table>`;
 
   const coverageLine = counties.map(c => `${COUNTY_LABEL[c]} through ${fmtDay(asOf[c])}`).join(' · ');
+
+  // ── Stale-county notice ───────────────────────────────────────────────────
+  // See STALE_AFTER. Renders nothing when every county is current, which is the
+  // normal case and the reason this can be left in permanently.
+  const stale = counties
+    .map(c => ({ c, behind: businessDaysBetween(asOf[c], sendDate) }))
+    .filter(x => x.behind > STALE_AFTER)
+    .sort((a, b) => b.behind - a.behind);
+  const staleNotice = !stale.length ? '' : `
+  <tr><td style="padding:22px 32px 0 32px;">
+    <table width="100%" cellpadding="0" cellspacing="0" bgcolor="${WARN_BG}" style="background:${WARN_BG};border-left:3px solid ${WARN_EDGE};border-radius:0 8px 8px 0;">
+      <tr><td style="padding:12px 16px;font-size:13px;line-height:1.55;color:${WARN_INK};">
+        <span style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;font-weight:700;color:${WARN_EDGE};">Please read first</span><br>
+        ${stale.map(x => `<b>${COUNTY_LABEL[x.c]} records only reach ${fmtDay(asOf[x.c])}</b>, ${x.behind} business days before this report.`).join(' ')}
+        The county publishes its index several days after the fact and is currently running late, so
+        ${stale.length === 1 ? `${COUNTY_LABEL[stale[0].c]}'s` : 'those counties’'} figures below are
+        <b>not comparable</b> with ${counties.filter(c => !stale.some(x => x.c === c)).map(c => COUNTY_LABEL[c]).join(' or ') || 'the other counties'}
+        this week, and ${stale.length === 1 ? 'its' : 'their'} windows end on that earlier date rather
+        than on today. Nothing is missing from our side — the records have not been published yet.
+      </td></tr>
+    </table>
+  </td></tr>`;
   const subject = `AMO Market Monitor — ${fmtDay(sendDate)}: ${fmtInt(s15.n)} transfers in 15 days`
     + (s15.change != null ? ` (${s15.change >= 0 ? '+' : '−'}${Math.abs(Math.round(s15.change * 100))}%)` : '');
 
@@ -571,6 +621,8 @@ export function buildRollupReport(db: Database.Database, sendDate: string): Roll
     <div style="font-size:22px;font-weight:700;color:#ffffff;margin:6px 0 4px;line-height:1.25;">Mortgage assignment activity — Miami-Dade &amp; Broward</div>
     <div style="font-size:12px;color:#cde2fb;">${fmtDayY(sendDate)} &nbsp;·&nbsp; Data ${coverageLine}</div>
   </td></tr>
+
+  ${staleNotice}
 
   <tr><td style="padding:22px 32px 0 32px;">
     <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f6fe;border-left:3px solid ${COUNTY_COLOR['MIAMI-DADE']};border-radius:0 8px 8px 0;">
