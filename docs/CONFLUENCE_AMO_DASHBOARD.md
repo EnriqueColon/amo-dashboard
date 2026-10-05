@@ -1,6 +1,6 @@
 # AMO Tracker — Mortgage Assignment Intelligence Dashboard
 
-> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 2 Oct 2026
+> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 5 Oct 2026
 > **Production URL:** `http://165.22.35.75:5000` (single shared password)
 > **Repository:** `amo-dashboard` (`origin/main`)
 
@@ -244,8 +244,11 @@ Earlier notes claiming the droplet "still holds the previous 15-day template" we
 from the unbuilt `dist/` rather than from what cron executes — the scripts run from source via `tsx`,
 so the roll-up has been the live template since 22 Sep.
 
-**Monday 5 Oct will be the roll-up's first send to a real recipient.** Before that: the last real
-send was 21 Sep 13:00 UTC, to the same two people, using the old 15-day template.
+**Confirmed delivered: Monday 5 Oct 2026, 11:00:01 UTC = 07:00:01 EDT**, to `andres@` and `david@`,
+in 8 seconds — the roll-up's first send to a real recipient. The second cron firing exited on the
+hour guard as designed, so they received one email. Subject: *"AMO Market Monitor — Oct 5: 407
+transfers in 15 days (+7%)"*, Miami-Dade through 1 Oct, Broward through 28 Sep. Before that, the last
+real send was 21 Sep, to the same two people, using the old 15-day template.
 
 **Schedule moved to Monday 07:00 Eastern on 2 Oct 2026**, at the owner's request. The send used to be
 step 5 of `run_weekly.sh`, which tied the send day to the Friday collection day; it is now

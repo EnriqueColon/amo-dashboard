@@ -4,6 +4,42 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-10-05 — the roll-up sent for real, on schedule, first time
+
+**It worked.** `collector/email.log`:
+
+```
+2026-10-05T11:00:01Z [weekly-email] start (Eastern 2026-10-05 07:00 EDT)
+Sent via Microsoft Graph to andres@safeharborcp.com, david@safeharborcp.com
+2026-10-05T11:00:09Z [weekly-email] done
+2026-10-05T12:00:01Z [weekly-email] start (Eastern 2026-10-05 08:00 EDT)
+2026-10-05T12:00:01Z [weekly-email] not the send hour (Eastern 08:00, want 07:00) — exiting
+```
+
+**Every design decision from 2 Oct held in production:** 11:00 UTC landed on 07:00 EDT to the second,
+the two-firings/one-send guard worked (the 12:00 run exited on the hour check, so the recipients got
+one email), and the 8-second runtime means the `normalize.py` wait never engaged. **This is the
+roll-up's first delivery to a real recipient** — every previous roll-up was a preview.
+
+**What went out** (reproduced with `REPORT_SEND_DATE=2026-10-05`; nothing has touched the data since
+the send, the next Broward ingest being 15:30 UTC): subject *"AMO Market Monitor — Oct 5: 407
+transfers in 15 days (+7%)"*, Miami-Dade through 1 Oct, Broward through 28 Sep, 407 transfers, 147
+lending relationships. No transaction-mix section, none of the five excluded firms, footer disclosure
+present.
+
+**The amber Broward notice correctly did NOT fire.** Broward advanced to 28 Sep over the weekend,
+exactly as the publishing-lag table predicted, putting it 5 business days behind — at the threshold,
+not over it, and within the county's normal 3–6 range. The collector agrees: its own log reads
+`County publishing lag: newest day on the feed is 2026-09-28, 4 business day(s) behind 2026-10-04`.
+So the conditional notice behaved as designed on its first live Monday: silent when the lag is
+ordinary. It remains unproven *in production* in the firing direction — the only time it has rendered
+is the pinned-date test on 2 Oct.
+
+**The `(+0%)` subject cosmetic did not appear** — this week's change was +7%. Still unfixed and still
+only visible when a window comes out exactly flat.
+
+---
+
 ## 2026-10-02 — the weekly email moves to Monday 07:00 ET; template review opened
 
 **State found, after checking the box rather than the notes.** No email has gone out since
