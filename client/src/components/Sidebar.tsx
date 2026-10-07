@@ -6,10 +6,10 @@ import { FilterHint } from '@/components/FilterHint';
 import { COUNTY_DEF } from '@/lib/filterDefinitions';
 
 const NAV = [
-  // Marked at the owner's request (7 Oct 2026) while the chat is being trialled in
-  // production. Drop the suffix once the first round of real questions has been reviewed.
+  // "Beta" badge at the owner's request (7 Oct 2026) while the chat is being trialled in
+  // production. Drop it once the first round of real questions has been reviewed.
   // It is also the landing page: "/" redirects here (see App.tsx).
-  { href: '/ask',              icon: MessageSquare,label: 'Ask the Data (TESTING/NOTDEPLOYED)', group: 'main' },
+  { href: '/ask',              icon: MessageSquare,label: 'Ask the Data',       group: 'main', badge: 'Beta' },
   { href: '/overview',         icon: BarChart2,    label: 'Overview',           group: 'main' },
   { href: '/reporting',        icon: LayoutList,   label: 'Reporting',          group: 'analysis' },
   { href: '/targets',          icon: Crosshair,    label: 'Targets',            group: 'analysis' },

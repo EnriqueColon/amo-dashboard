@@ -198,8 +198,8 @@ export default function Chat() {
           <div>
             <h1 className="text-xl font-semibold flex items-center gap-2 flex-wrap">
               Ask the Data
-              <span className="text-[10px] font-bold uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-300 rounded px-1.5 py-0.5" title="Trial in production — answers are being reviewed; the page may change or go away">
-                TESTING / NOT DEPLOYED
+              <span className="text-[10px] font-bold uppercase tracking-wider bg-primary/15 text-primary border border-primary/30 rounded px-1.5 py-0.5" title="Beta — answers are being reviewed; the page may change">
+                Beta
               </span>
             </h1>
             <p className="text-sm text-muted-foreground mt-0.5">
