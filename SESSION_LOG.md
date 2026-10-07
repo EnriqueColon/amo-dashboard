@@ -4,9 +4,13 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
-## 2026-10-07 (evening) — "Ask the Data": chat over the database with GPT-6 Astra — BUILT, NOT DEPLOYED
+## 2026-10-07 (evening) — "Ask the Data": chat over the database with GPT-6 Astra — DEPLOYED 18:19 UTC as a labelled trial
 
-User asked whether users could type questions into a chatbox and get ChatGPT-style answers from the data; answer was yes, then "get started", model "a strong one — Astra or another". Built end to end in one session. **Not deployed and not yet run against the real model** (no `OPENAI_API_KEY` on the dev machine).
+User asked whether users could type questions into a chatbox and get ChatGPT-style answers from the data; answer was yes, then "get started", model "a strong one — Astra or another". Built end to end in one session, then deployed at the user's instruction with the tab labelled **"Ask the Data (TESTING/NOTDEPLOYED)"** (their wording; page header carries a matching amber badge; `cb76b6d`). **Not yet run against the real model** — no `OPENAI_API_KEY` on the dev machine; first real questions are the user's next step.
+
+### Deploy record (18:11–18:20 UTC, over SSH with per-step approval)
+- `git pull` ok → **`npm run build` FAILED**: Vite could not resolve the new `react-markdown`/`remark-gfm` because `npm install` had not been run. **`script/build.ts` does `rm dist` BEFORE building**, so production was left with no `dist/` on disk while PM2 served the old bundle from memory (44 min uptime, online) — a restart at that moment would have downed the site. Fixed forward: `npm install` (98 packages) → `npm run build` ok (`dist/index.cjs` 927 kB). **Rule added to CLAUDE.md / .cursor rule / Confluence §6.4: `npm install` when package.json changed; never restart until `dist/index.cjs` exists.**
+- Env push: `eval "$(grep -E '^\s*(export\s+)?OPENAI_API_KEY=' .env)" && export OPENAI_API_KEY` → `pm2 restart amo-dashboard --update-env && pm2 save`. Verified: `pm2 env 0` has `OPENAI_API_KEY` (1) and both `MI_*` (2); log shows `serving on port 5000` with no "OPENAI_API_KEY not set" warning; `/api/chat/config` → 401 unauthenticated (route exists, gated); `/login` → 200; 4 python3 backfill processes untouched.
 
 ### What was built
 - **Model: `gpt-6-astra`** (verified via web search: OpenAI flagship released 3–4 Sep 2026, `$10/M in · $50/M out`, 1.05M context, `reasoning_effort` low…max, tool calling on Chat Completions). Default in `server/chat/openai.ts`; overridable with `OPENAI_CHAT_MODEL` (`gpt-6-sol` = $2/$10 is the budget fallback), `OPENAI_CHAT_REASONING_EFFORT` (default `medium`; `none` omits the param), `OPENAI_BASE_URL` (gateway/mock).

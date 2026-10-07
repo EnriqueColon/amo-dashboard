@@ -281,8 +281,10 @@ private-credit activity), date coverage, monthly assignment volume chart, and th
 Sellers / Most Connected leaderboards.
 *Start here to see whether the data is current — the date range and last-collected date are the fastest health check.*
 
-#### Ask the Data (`/ask`) — built 7 Oct 2026, not yet deployed
-A chat box. Type a question in plain English — *"who were the top acquirers in 2025 and how does that
+#### Ask the Data (`/ask`) — deployed 7 Oct 2026 as a trial; the tab reads "Ask the Data (TESTING/NOTDEPLOYED)"
+The suffix is deliberate — the owner's marker that the page is live for evaluation, not yet a
+supported part of the tool. Drop it (`client/src/components/Sidebar.tsx`, `pages/Chat.tsx`) once the
+first round of real questions has been reviewed. A chat box. Type a question in plain English — *"who were the top acquirers in 2025 and how does that
 compare to 2024?"*, *"which banks provide warehouse lines, and to whom?"*, *"what does CFN 2025R123456
 say?"* — and a language model (OpenAI **GPT-6 Astra** by default) answers from this database, the way
 ChatGPT would, with the figures streamed in as it writes.
@@ -794,6 +796,11 @@ cd /opt/amo-dashboard && git pull && npm run build && pm2 restart amo-dashboard
 
 - **Build before restart.** Restarting first just relaunches the old bundle.
 - **`git pull` alone changes nothing on the live site.** The server runs a compiled bundle.
+- **If `package.json` changed, `npm install` before `npm run build`.** The build script deletes
+  `dist/` *first*, so a build that fails on a missing dependency leaves no bundle on disk — the site
+  keeps serving only because PM2 holds the old one in memory, and the next restart would take it down.
+  This happened on the 7 Oct 2026 Ask the Data deploy (`react-markdown`/`remark-gfm` were new); the
+  fix is simply `npm install && npm run build`, and never restart until `dist/index.cjs` exists.
 - **Do not kill running Python backfills** when restarting the Node app; they are unrelated processes.
 - Long one-off scripts must be started detached, or a dropped SSH session kills them:
 
@@ -817,9 +824,10 @@ pm2 restart amo-dashboard --update-env && pm2 save
 pm2 logs amo-dashboard --lines 20 --nostream
 ```
 
-**Deploying Ask the Data (pending)** is the same shape, with one variable the collectors already have
-in `.env`. Note that line is written `export OPENAI_API_KEY=…` (confirmed 7 Oct 2026), so a plain
-`grep '^OPENAI_API_KEY='` finds nothing — evaluate just that one line instead:
+**Ask the Data went in this way on 7 Oct 2026 18:19 UTC** (kept here as the worked example for the
+next server-side variable). The one variable the collectors already had in `.env` is written
+`export OPENAI_API_KEY=…`, so a plain `grep '^OPENAI_API_KEY='` finds nothing — evaluate just that
+one line instead (and `npm install` first when `package.json` changed, see above):
 
 ```bash
 cd /opt/amo-dashboard && git pull && npm run build
@@ -1559,11 +1567,11 @@ endpoints healthy across all three county scopes.
 | Automated backups | 🟢 **Live off-box 17 Aug 2026** — nightly verified snapshot → DigitalOcean Spaces (`amo-dashboard-backups-ec`, NYC3). Re-verified 7 Oct 2026: eight consecutive `status=ok` runs, ~148MB per archive. **Hardened 7 Oct 2026** — waits out a running `normalize.py`, asserts the derived tables separately, and records a `degraded` status that cannot count as good or rotate a complete archive away (§7.5). Only one restore has ever been performed (17 Aug); another drill is the open item, not a credential |
 | Entity naming / name variants | 🟡 **Legal-suffix class closed 7 Oct 2026** — bare `COMPANY`, `LIMITED` and spaced `L P` now strip, merging 119 canonical names that no amount of suffix stripping could previously reunite (Bank of New York Mellon Trust had broken 179/178). Pinned by `check_company_suffix.py`. **Still split:** geographic qualifiers (correctly — see §7.6 item 9), state abbreviations, OCR digit-for-letter, and a bare trailing `&` |
 | Droplet MCP tools (`tools/droplet-mcp/`) | 🟢 **New 22 Sep 2026** — seven named tools over SSH (§6.4a). Developer-machine only; nothing installed on the droplet, no new credential, no change to how production runs. Smoke-tested against live: read-only tools returned, `db_query` write rejected by SQLite, both guarded tools refused without `confirm` |
-| Ask the Data (`/ask`, `POST /api/chat`) | 🟡 **Built 7 Oct 2026, NOT deployed** — chat over the database with GPT-6 Astra and ten read-only lookups (§4.3). Verified locally against the 21 Sep production snapshot: all ten tools return correct shapes, the SQL guard rejects writes / multi-statements / PRAGMA, and the full streaming loop (parallel tool calls assembled from fragments → results fed back → markdown answer streamed) ran end to end in the browser against a mock of OpenAI's streaming protocol. **Not yet exercised against the real model** — no OpenAI key on the dev machine. Deploy needs the one-time `OPENAI_API_KEY --update-env` step (§6.4) |
+| Ask the Data (`/ask`, `POST /api/chat`) | 🟡 **DEPLOYED 7 Oct 2026 18:19 UTC as a trial** (`cb76b6d`; tab labelled "TESTING/NOTDEPLOYED" at the owner's request) — chat over the database with GPT-6 Astra and ten read-only lookups (§4.3). `OPENAI_API_KEY` pushed into PM2's env (`--update-env`, `MI_*` confirmed intact), no startup warning, route 401 unauthenticated, backfill processes untouched. Verified before deploy against the 21 Sep production snapshot: all ten tools return correct shapes, the SQL guard rejects writes / multi-statements / PRAGMA, and the full streaming loop ran end to end in the browser against a mock of OpenAI's streaming protocol. **Still not exercised against the real model** — the first real questions are the owner's next step; the `[chat]` PM2 log line per request gives rounds and tokens. Deploy hiccup: build failed once because `npm install` was skipped (§6.4) |
 
 ### 7.4 Known gaps and open items
 
-**−10. BUILT 7 Oct 2026, NOT DEPLOYED — Ask the Data has not met the real model yet, and has no spend
+**−10. DEPLOYED 7 Oct 2026 18:19 UTC as a labelled trial — Ask the Data has not met the real model yet, and has no spend
 cap.** Everything up to the OpenAI call is verified (§7.3); what is not is how `gpt-6-astra` actually
 behaves on the prompt — which tools it reaches for, whether it respects the data traps, how many
 rounds a typical question takes and therefore what it costs. First deploy should be followed by a
