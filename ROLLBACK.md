@@ -1,3 +1,51 @@
+# Rollback — FDIC Data Analytics sourced from Market Intelligence (branch, NOT deployed)
+
+**State as of 7 Oct 2026:** branch `feat/market-intelligence-source`, not merged into `main`, not on
+the droplet. Production still runs the FDIC-API proxy (`server/fdic.ts`, `GET /api/fdic/financials`).
+
+## What the change touches — and what it cannot touch
+
+| Piece | Touches prod data? | Revert |
+|---|---|---|
+| `server/market-intelligence.ts` + `/api/mi/*` routes | **No.** Reads a remote API, writes nothing | Revert the branch |
+| Removal of `server/fdic.ts`, `/api/fdic/financials`, `shared/fdic-window.ts`, `script/check-fdic-window.ts`, `client/src/lib/fdic-ratio-helpers.ts` | No | Revert the branch — they come back verbatim |
+| `MarketAnalytics.tsx`, `InstitutionProfileDrawer.tsx`, glossary text | No | Revert the branch |
+| Two new env vars `MI_BASE_URL`, `MI_ANALYTICS_API_KEY` | No. Unused by the old code, harmless if left in place | Leave or delete; nothing else reads them |
+
+There is **no schema change, no migration, no collector change and no `normalize.py` run**. The
+SQLite database is not involved on either side of this switch, so the revert path is purely a code
+redeploy — the only production state that moves is the Node bundle and PM2's environment.
+
+## Reverting after a deploy
+
+```bash
+cd /opt/amo-dashboard
+git log --oneline -5                       # find the merge commit of feat/market-intelligence-source
+git revert -m 1 <merge-sha>                # or: git revert <sha>..<sha> for a squash/rebase merge
+npm run build && pm2 restart amo-dashboard # build BEFORE restart
+```
+
+Then open FDIC Data Analytics once: the old page calls `/api/fdic/financials` directly against the
+FDIC API and needs no key, so a blank page afterwards means the build did not land (check
+`date -r dist/index.cjs` against `git log -1`), not a data problem. The 7-day response cache holds
+only `/api/mi/*` keys from the new code and `/api/fdic/*` from the old; they never collide, so no
+cache bust is needed either way.
+
+## Guardrails
+
+- The server **refuses to pretend**: with either variable missing it logs
+  `Market Intelligence is not configured…` at startup and every `/api/mi/*` answers 503; with a
+  wrong key the upstream 401 passes through. Neither is cached. The page renders "Market Intelligence
+  unavailable" and **no figures** — there is no code path that shows a stale number next to a new label.
+- Deploy sequence (from SESSION_LOG 7 Oct): add the two lines to `.env`, `export` **only those two** in
+  the shell, `pm2 restart amo-dashboard --update-env && pm2 save`. Do not `source .env` wholesale
+  under `--update-env` — `ecosystem.config.cjs` and `.env` are both known to disagree with the
+  `AMO_PASSWORD` PM2 actually holds (below), and a wholesale push would change the dashboard password.
+- `peer-metrics.ts` and `script/check-metric-directions.ts` remain and `npm run check` still runs the
+  direction guardrail. `check:fdic-window` is gone with the window it guarded.
+
+---
+
 # Rollback — Broward County expansion (ACTIVE workstream)
 
 **Broward is FULLY DEPLOYED as of 2026-08-10** — index, images, extraction, normalization and the

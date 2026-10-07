@@ -4,6 +4,117 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-10-07 (later) — FDIC Data Analytics now reads Market Intelligence (branch, NOT deployed)
+
+**Branch `feat/market-intelligence-source`, not merged, not deployed.** Commits: `0bcc0b3` (server
+client + routes, FDIC proxy removed), `7b31815` (page, drawer, glossary, dead code removed), plus the
+docs commit after this. The AMO pipeline and `collector/` are untouched. Nothing on the droplet changed.
+
+### What changed
+
+- **The page no longer computes FDIC analytics.** `server/fdic.ts` and `GET /api/fdic/financials` are
+  gone, as are `shared/fdic-window.ts`, `script/check-fdic-window.ts` (`npm run check` no longer runs
+  it) and `client/src/lib/fdic-ratio-helpers.ts`. `client/src/lib/peer-metrics.ts` and
+  `script/check-metric-directions.ts` **stay** — the drawer's peer percentiles still rank the loaded
+  cohort client-side, now over API rows. One code path, no second source of numbers.
+- **`server/market-intelligence.ts`**: typed client for the Market Analytics data API
+  (`MI_BASE_URL` + `MI_ANALYTICS_API_KEY` from `process.env`, read at call time). Bearer header
+  server-side only — the key never reaches the browser. Responses cached in `server/cache.ts` for the
+  same 7 days, key `mi:<endpoint>` + query (scope, band, cert, include); **only `ok:true` is cached**, so a
+  401/502 is never served from cache. Upstream status and `{ok:false,error}` pass straight through;
+  non-JSON or a network failure is a 502; 60 s timeout. Both variables missing → startup warning
+  `Market Intelligence is not configured…` and every `/api/mi/*` answers **503** with that message.
+  Routes (all behind the global `checkAuth`): `/api/mi/meta`, `/api/mi/screening?scope=`,
+  `/api/mi/visuals?scope=`, `/api/mi/cohort-watch?scope=`, `/api/mi/behavior-signals?scope=&band=`,
+  `/api/mi/institution/:cert` (cert must be 1–7 digits; `?include=narrative` forwarded). `X-MI-Cache:
+  HIT|MISS` header for debugging.
+- **Contract saved**: `docs/market-intelligence-meta.json` = `GET /api/analytics/v1/meta`,
+  `contractVersion 2026-10-07`, quarter `20260630`. 52 state scopes + National, 7 asset bands, 7
+  signal definitions (`key/label/side/meaning/rule`), CRE category labels. **Signal labels and
+  meanings come from `meta.signals` at runtime — nothing is hardcoded.**
+- **`client/src/pages/MarketAnalytics.tsx`**: scope selector built from `meta.scopes`; rows/kpis/
+  nplSummary from `/api/mi/screening`; **Opportunity / Earnings / Vulnerability are real, sortable
+  columns** (percentile ranks within the loaded scope; default sort Opportunity desc, stable so API
+  order holds on ties); **Signals** column shows each bank's fired signals as chips (title = meaning +
+  rule). Header: "Data as of Q2 2026 · Source: FDIC Call Report via Market Intelligence". Every
+  previous column, the Columns menu, NPL & Loans cards, Cohort Summary, DefTerm/FilterHint glossary
+  and the look are kept. Behaviour signals: **National always fetches the 7 asset bands in parallel**
+  and merges `byCert`; a state is one call. A failed source renders **"Market Intelligence
+  unavailable" + the upstream error + "No figures are shown until the source answers"**, with every
+  figure a dash and the table empty.
+- **`InstitutionProfileDrawer.tsx`** loads `/api/mi/institution/<cert>` for a single bank: eight-
+  quarter **Trend** table with verdict banner (CET1 column hidden when `leverageOnly`), **Acquisition
+  History**, and a new **Balance-Sheet Actions** card — chips for `behavior.latest.fired`,
+  `behavior.reading.text` as paragraphs, the nonaccrual **roll-forward** (8 quarters) and
+  **latest-by-category** tables ($ thousands → $K/$M/$B, sign first), and a **Generate narrative**
+  button that is the only thing sending `?include=narrative` (OpenAI call upstream).
+- Glossary: Opportunity/Earnings/Vulnerability Score and Balance-Sheet Signals added to `DefTerm`;
+  the scope note and KPI narrative reworded to say Market Intelligence computes the figures.
+
+### Verification (local build, real key, upstream live)
+
+- **(a) wrong key** → page shows "Market Intelligence unavailable — Unauthorized.", 0 rows, no `$`
+  or `%` anywhere, no key in the server log or any response.
+- **(b) Florida top 3 by Opportunity**, page vs. `/api/mi/screening?scope=Florida` stable-sorted:
+  **35430 OPTIMUMBANK 75.1 · 24156 OCEAN BANK 74.9 · 59278 LOCALITY BANK 74.9** — identical, in order
+  (the 74.9 tie keeps API order in both).
+- **(c) CERT 35541** (BCB Community Bank, NJ) drawer chips = **HFS transfer, Realized sale** =
+  `behavior.latest.fired` `["hfsTransfer","realizedSale"]`. Trend 8 rows, 3 acquisitions (Indus
+  American 2018, Allegiance Community 2011, Pamrapo Savings 2010), roll-forward 8 + 3 category rows.
+- **(d) National**: exactly 7 band calls, largest **897,708 B** (`100m-250m`), all under 1 MB.
+  **But `/api/mi/screening?scope=National` is 1,467,717 B on its own** — that endpoint has no band
+  parameter upstream, so it cannot be split client-side, and the Express app has no `compression`
+  middleware, so it crosses the wire uncompressed. Reported as a miss; options are gzip middleware
+  here (~5× smaller, a one-liner) or a band/paging parameter on the upstream screening endpoint.
+- **(e) `npm run build`** and `tsc --noEmit` pass.
+
+### Things learned the hard way
+
+- **Per-band `behavior-signals` responses repeat the scope-wide counts** (`institutionCount` 4,603,
+  `currentCount` 4,309, `unjudgedCount` 27 in every band); only `summaries` are per band. Summing
+  them read "1,455 of 30,163 institutions". Take the counts from one band, sum nothing.
+- **A scope change fired the band fetches twice** — the effect ran once with the old payload and once
+  with the new. The screening state now carries its `scope`, and both the effect and the rendered
+  figures ignore a payload whose scope is not the selected one (which also stops Florida's numbers
+  sitting under a "New Jersey" heading for the second the new scope loads).
+- **The browser kept the old `index.html`** after a rebuild — hash-named bundle, same URL, old asset
+  reference — so a fix looked unapplied. Check `document.scripts[0].src` against `dist/public/index.html`
+  before debugging the fix.
+- Two stray backticks after a JSX `)` typecheck as a **tagged-template call** (`TS2349 Type 'Element'
+  has no call signatures`) — a misleading error for a typo.
+- **Market Intelligence's National screening cohort is 1,102 institutions** (`kpis.institutionsScreened`;
+  1,010 rows survive its filters) while its signal cohort is 4,309 — the national screen is still a
+  large-bank screen, now by the source's own choice rather than FDIC's 10,000-row cap. The cohort
+  line says exactly which count it is.
+
+### Deploying this (when the owner says so)
+
+1. Merge the branch; on the droplet `git pull && npm run build`.
+2. Add `MI_BASE_URL=https://market-intelligence-tool-gilt.vercel.app` and `MI_ANALYTICS_API_KEY=…` to
+   `/opt/amo-dashboard/.env`. **PM2 does not read `.env`** (only the cron wrappers source it) and a
+   plain `pm2 restart` keeps the env it already holds, so the two variables must be pushed in:
+   `export MI_BASE_URL=… MI_ANALYTICS_API_KEY=…` in the shell, then
+   **`pm2 restart amo-dashboard --update-env && pm2 save`**. Export only those two — do not
+   `source .env` wholesale, because `--update-env` would also push `.env`'s `AMO_PASSWORD` over the
+   one PM2 holds (they are known to differ; see ROLLBACK). Then confirm login still works and
+   `pm2 logs amo-dashboard --lines 20` shows **no** "Market Intelligence is not configured" line.
+3. **Figures now change only when Market Intelligence's own cache refreshes** (its daily job, keyed by
+   FDIC quarter) — and then up to **7 days later here**, because `/api/mi/*` sits in the same 7-day
+   response cache. To pick up a new quarter immediately: `POST /api/cache/bust` from a logged-in
+   session or `pm2 restart amo-dashboard`.
+
+### Open
+
+- Decide on `compression` middleware (fixes (d) for National screening; also shrinks every other
+  JSON endpoint). Not added — it is a change to every response, not to this page.
+- `/api/mi/visuals` and `/api/mi/cohort-watch` are proxied but **not rendered** — the page kept its
+  own layout, which has no counterpart for them. Rendering them is new UI, not a port.
+- The `?include=narrative` button exists and works; whether its OpenAI cost belongs in this tool is the
+  owner's call.
+- **Rollback** is a branch revert — no data, schema or pipeline involvement. Details in ROLLBACK.md.
+
+---
+
 ## 2026-10-07 — two real fixes, two stale doc claims, and a cron cleanup
 
 Session opened as "review the docs, where did we leave off". Four items were picked up: a production

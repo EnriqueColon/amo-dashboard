@@ -413,22 +413,67 @@ tracks its filing activity. Each row links straight through to that firm's filin
 Seeded in bulk from `collector/targets_seed.csv`.
 
 #### FDIC Data Analytics (`/market-analytics`)
-Bank fundamentals pulled live from the FDIC API, proxied through the server. CRE concentration,
-construction/multifamily/non-residential loan mix, NPL and noncurrent ratios, ROA/ROE, efficiency,
-capital. Includes a **cohort summary** and a **target screening list** — used to spot banks under
-balance-sheet pressure whose filing behaviour is worth watching.
 
-**Read the cohort line under the screening list.** When a state is selected, the screen covers every
-FDIC-reporting institution in that state (Florida: all 91). **Nationally it does not** — FDIC caps a
-response at 10,000 rows and returns them largest-first, so the national view is the ~1,113 biggest
-institutions, all above roughly $0.95B in assets, out of ~4,450 that file. Community banks under $1B
-are therefore **absent from the national screen**, and the peer percentiles in the institution drawer
-are relative to whichever cohort is loaded, not to all US banks. The tab states this rather than
-implying a complete screen; the fix is the planned cached data layer, not a bigger page request.
+> **Changing (7 Oct 2026, on branch `feat/market-intelligence-source`, not yet deployed).** The
+> paragraphs below describe the page as it will be once that branch is deployed. Production today
+> still runs the previous version, which queried the FDIC API directly — see the end of this section
+> for what differs.
 
-Peer and trend figures need **eight quarters** of history (a trailing-twelve-month figure against the
-one before it), and FDIC publishes a quarter months after it closes — as of Aug 2026 the newest data
-available was Q1 2026. That is why the query reaches back 27 months.
+Bank screening, scores and balance-sheet signals from FDIC Call Report data, **served by the Market
+Intelligence tool** — the same figures as its *Market Analytics* tab, rendered in this dashboard's
+layout. This app no longer computes any FDIC analytics itself; it reads the Market Analytics data API
+through the server and shows what it gets. The header states the quarter the figures describe
+("Data as of Q2 2026") and the line **"Source: FDIC Call Report via Market Intelligence"**.
+
+What is on the page, top to bottom:
+
+- **Scope selector** — United States or any state (52 state-level scopes, from the API's own list).
+- **NPL & Loans** — total loans, nonaccrual dollars and ratio, CRE loans, CRE/assets, total assets
+  for the scope.
+- **Cohort Summary** — institutions screened and the average NPL, noncurrent, reserve-coverage and
+  CRE-concentration ratios.
+- **Target Screening List** — one row per bank, ranked by **Opportunity Score** by default, with
+  **Earnings** and **Vulnerability** scores as sortable columns beside it. The three scores are
+  **percentile ranks within the selected scope** (0–100), computed by Market Intelligence; the
+  glossary (hover any underlined header) explains each. A **Signals** column shows the
+  **balance-sheet signals** that fired for the bank in the latest quarter as chips — e.g. *HFS
+  transfer*, *Realized sale*, *CRE charge-off spike*, *Foreclosure route*, *Modification build* —
+  seven in all, defined by the source, with the plain-language meaning and the rule on
+  hover. Every column from before (CRE mix, NPL, noncurrent, ROA/ROE, efficiency, capital, NI YoY) is
+  still there and the **Columns** menu still chooses which show.
+- **Institution drawer** (click a row) — the structural, earnings and peer-positioning panels as
+  before, plus three sections from the source: an **eight-quarter Trend** with a one-line verdict,
+  **Acquisition History**, and **Balance-Sheet Actions** — the fired signals, a plain-English reading
+  of what the bank did with its CRE book this quarter, and the nonaccrual **roll-forward** (prior
+  balance → new → charge-offs → to OREO → unexplained exit → current, in dollars, eight quarters and
+  the latest quarter by CRE category). A **Generate narrative** button asks the source for a written
+  eight-quarter summary; it is the only thing on the page that triggers an LLM call upstream, and it
+  only happens when pressed.
+
+**Read the cohort line under the screening list.** It says how many institutions the source covers
+in the scope and how many survive its screen (Florida: 85 of 92). **Nationally the screening cohort
+is about 1,100 institutions** — Market Intelligence's own national screen is a large-bank screen —
+while its balance-sheet *signals* cover ~4,300. Peer percentiles in the drawer are relative to
+whichever cohort is loaded, not to all US banks. The page states the count it actually screened
+rather than implying a complete one.
+
+**When do the numbers change?** Only when Market Intelligence's cache refreshes — a daily job on its
+side, keyed by FDIC quarter — and then within up to seven days here, because the server keeps API
+responses for a week (§5.6). FDIC publishes a quarter months after it closes, so "latest" is typically
+one to two quarters behind today. If a new quarter has landed upstream and this page still shows the
+old one, a cache bust (§6.8) brings it forward immediately.
+
+**If the page says "Market Intelligence unavailable"**, the source did not answer (wrong or missing
+key, or the service is down). The page deliberately shows **no figures at all** in that state rather
+than a stale set — every card reads `—` and the table is empty — so nothing on screen can be mistaken
+for current data. The message under the heading is the upstream error; "Unauthorized" means the key
+in `.env` is wrong (§6.2).
+
+*What differs from the version in production today:* the old page queried the FDIC BankFind API
+itself and computed ratios locally; its national screen was the ~1,113 largest banks because of
+FDIC's 10,000-row response cap; the Opportunity/Earnings/Vulnerability columns were hardcoded to 0
+and hidden; there were no signals, trend, acquisition or balance-sheet sections in the drawer; and
+the figures refreshed whenever FDIC's API did.
 
 #### Clean Transactions (`/clean-events`)
 The verified `LOAN_TRANSFER` dataset, one row per confirmed transfer, with document-derived names,
@@ -518,8 +563,14 @@ health page** — gaps or `FAILED` rows here mean the pipeline missed a window.
         │
         │  Express + better-sqlite3  (~50 endpoints, 7-day in-memory cache)
         ▼
-     React client  ─── FDIC API (proxied server-side)
+     React client  ─── Market Intelligence data API (proxied server-side, bearer key held on the server)
 ```
+
+The FDIC Data Analytics page is the one tab whose figures do not come from the SQLite database. On
+the `feat/market-intelligence-source` branch (7 Oct 2026, not yet deployed) the server forwards
+`/api/mi/*` to the Market Intelligence tool's Market Analytics API, adds the bearer key, and caches
+successful answers for the usual seven days; the key never reaches the browser. In production today
+the same tab still proxies the public FDIC BankFind API instead.
 
 ### 5.2 Components
 
@@ -548,13 +599,14 @@ amo-dashboard/
 │   ├── db.ts           schema + idempotent migrations, run at startup
 │   ├── auth.ts         single-password HMAC cookie gate
 │   ├── cache.ts        in-memory TTL response cache
-│   └── fdic.ts         FDIC API proxy + transformation
+│   └── market-intelligence.ts   Market Analytics API client + /api/mi/* routes (branch; replaces fdic.ts)
 ├── shared/
-│   └── fdic-window.ts  the FDIC quarter window — one contract, server + client
+│   └── schema.ts
+├── docs/
+│   └── market-intelligence-meta.json   saved copy of the API's /meta — the contract this app consumes
 ├── script/
 │   ├── build.ts               vite (client) + esbuild (server bundle)
-│   ├── check-metric-directions.ts   guardrail (see §6.6)
-│   └── check-fdic-window.ts         guardrail (see §6.6)
+│   └── check-metric-directions.ts   guardrail (see §6.6)
 ├── collector/
 │   ├── collect_live.py            Miami-Dade portal collector
 │   ├── broward_collect.py         Broward SFTP index collector
@@ -616,6 +668,10 @@ All expensive endpoints are cached in process memory.
 - Key = request path + sorted query string, so every county/filter/page combination caches separately.
 - `POST /api/cache/bust` clears it; `GET /api/cache/stats` reports live/expired counts.
 - A `pm2 restart` also clears it, because the cache is in memory.
+- Market Intelligence responses (`/api/mi/*`, branch) share the same cache and TTL under keys
+  `mi:<endpoint>` + scope/band/cert. **Only `ok:true` bodies are stored** — an upstream 401/502/503 is
+  never cached, so a bad key cannot leave a week-long error behind once corrected, and a working key
+  cannot be masked by a cached failure.
 
 > ⚠️ **The single most common operational mistake in this project:** changing data without clearing
 > the cache. The database is correct and the dashboard still shows the old numbers — for up to a
@@ -681,8 +737,13 @@ System dependencies for OCR: `poppler-utils` and `tesseract-ocr`
 | `GRAPH_CLIENT_ID` | `server/email/graphMailer.ts` | Azure application (client) ID — **not yet set** |
 | `GRAPH_CLIENT_SECRET` | `server/email/graphMailer.ts` | Azure client secret value — **not yet set** |
 | `REPORT_RECIPIENTS` | `sendWeeklyReport.ts` | Comma-separated; default `andres@safeharborcp.com,david@safeharborcp.com` |
+| `MI_BASE_URL` | `server/market-intelligence.ts` | Market Intelligence tool, `https://market-intelligence-tool-gilt.vercel.app`. **Required** for FDIC Data Analytics on the `feat/market-intelligence-source` branch |
+| `MI_ANALYTICS_API_KEY` | `server/market-intelligence.ts` | Bearer key for its Market Analytics data API. **Required**; server-side only, never sent to the browser or written to a log. Missing → startup warning and `/api/mi/*` answers 503; wrong → the page says "Market Intelligence unavailable — Unauthorized." |
 
-Production values live in `/opt/amo-dashboard/.env`, sourced by every cron wrapper.
+Production values live in `/opt/amo-dashboard/.env`, sourced by every cron wrapper. **The Node
+process under PM2 does not read `.env`** — PM2 holds the environment it was started with, and a plain
+`pm2 restart` keeps it. A variable that is new to the server (the two `MI_*` ones, for instance) has
+to be pushed in once: see §6.4. `.env.example` in the repo lists every variable with a blank value.
 
 ### 6.3 Production environment
 
@@ -714,6 +775,27 @@ nohup python3 -u collector/normalize.py > /tmp/normalize.log 2>&1 & disown
 ```
 
 `-u` is not optional in practice — without unbuffered output, a healthy quiet run looks stalled.
+
+**Deploying the Market Intelligence switch (`feat/market-intelligence-source`) — one extra step.** The
+server needs two new environment variables, and PM2 will not pick them up from `.env` on its own:
+
+```bash
+cd /opt/amo-dashboard && git pull && npm run build
+# 1. add MI_BASE_URL=… and MI_ANALYTICS_API_KEY=… to /opt/amo-dashboard/.env (cron wrappers read it)
+# 2. push ONLY those two into the PM2-held environment and persist it:
+export MI_BASE_URL="$(grep '^MI_BASE_URL=' .env | cut -d= -f2-)"
+export MI_ANALYTICS_API_KEY="$(grep '^MI_ANALYTICS_API_KEY=' .env | cut -d= -f2-)"
+pm2 restart amo-dashboard --update-env && pm2 save
+# 3. verify — no "Market Intelligence is not configured" line, and login still works:
+pm2 logs amo-dashboard --lines 20 --nostream
+```
+
+Do **not** `source .env` wholesale before `--update-env`: `.env` and `ecosystem.config.cjs` are both
+known to hold an `AMO_PASSWORD` that differs from the one PM2 is actually running with (§7.6), and a
+wholesale push would silently change the dashboard password. Export the two variables and nothing
+else. After this the figures on FDIC Data Analytics change only when Market Intelligence's own daily
+cache job refreshes (keyed by FDIC quarter), and then within up to seven days here unless the response
+cache is cleared (§5.6, §6.8).
 
 ### 6.4a Droplet operations as MCP tools
 
@@ -856,31 +938,23 @@ a writer that forgot to carry the `county` column. It is asserted rather than tr
 **TypeScript-side gates** — these need no database and run in about a second:
 
 ```bash
-npm run check              # tsc + both guardrails below
+npm run check              # tsc + the metric-direction guardrail
 npm run check:metrics      # just the metric-direction guardrail
-npm run check:fdic-window  # just the FDIC window guardrail
 ```
 
 | Check | Asserts |
 |---|---|
 | `script/check-metric-directions.ts` | Every risk metric points the way it claims to: each peer threshold table's colours agree with its declared `direction`, a bank that is worst on all four metrics colours red on all four, and the CRE/capital scale gets redder as concentration rises. Includes a **negative control** — it feeds itself a deliberately inverted table and fails if it does not catch it |
-| `script/check-fdic-window.ts` | The FDIC query window is wide enough for the metrics computed from it — the 27-month window must yield at least 8 **published** quarters, simulated across 24 dates spanning a year so the result does not depend on today. Models FDIC's publication lag explicitly. **Negative controls: both 18 and 24 months must still fail** |
 
-The window guardrail exists because of a second bug in the same family, and AMO **did** have this one
-(24 Aug 2026). Year-over-year metrics compare the newest four quarters against the four behind them,
-so they need eight — but the query window was 18 months, which returns five. The precondition was
-unsatisfiable, so `netIncomeYoYPct` was `null` for every institution in every region from the day it
-shipped, and the **NI YoY %** column rendered `—` everywhere. Nothing threw, and a column of
-em-dashes is indistinguishable from an upstream FDIC gap, which is why it lasted.
-
-Two things make it worth a permanent check. First, the fix is coupled: FDIC returns one row per
-institution **per quarter** and caps a response at 10,000 rows sorted by assets descending, so
-widening the window to 27 months without also raising the row limit would have cut the national
-cohort from ~1,000 institutions to ~561 and pushed the asset floor from $1.07B to $2.23B — buying the
-metric by quietly shrinking the screen. Second, the obvious width is wrong: `8 × 3 = 24` months
-returns only seven quarters when today falls just after a quarter close, so the guardrail rejects 24
-as well as 18. The window now lives in **`shared/fdic-window.ts`** as a contract imported by both the
-server that builds the query and the client that slices quarters out of it.
+**Retired with the Market Intelligence switch (branch, 7 Oct 2026): `script/check-fdic-window.ts`.**
+It asserted that the FDIC query window was wide enough for the metrics computed from it, after a
+real bug (24 Aug 2026) in which an 18-month window could never yield the eight quarters that
+year-over-year net income needs, so **NI YoY %** was blank for every institution from the day it
+shipped — nothing threw, and a column of em-dashes reads like an upstream gap. The lesson in the
+risk register (§7.5) stands; the window itself no longer exists in this codebase, because the page
+no longer builds FDIC queries. Any such precondition now lives in Market Intelligence, which is where
+the equivalent check belongs. `peer-metrics.ts` stays, so the direction guardrail still applies — the
+drawer still ranks the loaded cohort client-side, over API rows.
 
 The metric-direction guardrail exists because of a related bug found in the sibling FDIC tool (24 Aug 2026):
 **CET1 and CRE-to-capital point in opposite directions but look identical at a call site.** Higher
@@ -906,9 +980,16 @@ helpers exist.
 **The `@shared/*` path alias works in the client but NOT in the server bundle.** It is declared in
 `tsconfig.json` and `vite.config.ts`, so an aliased import inside `server/` typechecks cleanly and
 then fails `npm run build` — `script/build.ts` bundles the server with esbuild, which is given no
-alias configuration. Server code must import shared modules **relatively** (`../shared/…`), as
-`server/fdic.ts` does. Worth confirming any new shared import actually landed in the bundle rather
-than trusting `tsc`.
+alias configuration. Server code must import shared modules **relatively** (`../shared/…`). Worth confirming any new
+shared import actually landed in the bundle rather than trusting `tsc`.
+
+**`/api/mi/*` is a pass-through, not a place to compute.** `server/market-intelligence.ts` forwards
+five Market Intelligence endpoints 1:1, caches only `ok:true` bodies, and returns upstream status and
+error text unchanged. Do not add scoring, screening or signal logic on either side of it — the whole
+point of the switch was one source of numbers. The contract this app relies on is the saved
+`docs/market-intelligence-meta.json` (`contractVersion`, scopes, asset bands, signal definitions);
+if the upstream `contractVersion` changes, re-save that file and diff it before touching the UI.
+Signal labels and meanings are read from `meta.signals` at runtime, never hardcoded.
 
 **`aom_events_clean` rows are unpacked positionally** in `normalize.py` (`entries[0][8]` and
 similar). The `county` column is appended **last** in the source query on purpose. Inserting a column
@@ -1149,6 +1230,13 @@ confirmed. Commit messages are written as statements of what changed and why
 151,824 filings indexed (Miami-Dade through 1 Oct, Broward through 30 Sep), Broward's feed lag back
 to a normal 4 business days with every available day harvested, eight consecutive successful
 off-box backups, and the weekly email delivered to real recipients for the first time on Mon 5 Oct.
+
+**In flight (7 Oct 2026, later session): FDIC Data Analytics re-sourced to Market Intelligence.**
+Built and verified locally on branch `feat/market-intelligence-source` — not merged, not deployed.
+The page keeps its layout and gains real Opportunity/Earnings/Vulnerability scores, balance-sheet
+signals, and trend/acquisition/roll-forward sections in the drawer; the app stops computing FDIC
+analytics itself. Deploy needs two environment variables pushed into PM2 (§6.4). One verification
+target missed: the national screening response is 1.47 MB uncompressed (§7.4 item −3a).
 
 **Four items were closed or corrected on 7 Oct 2026, and two of them turned out to be stale
 documentation rather than open work:**
@@ -1415,13 +1503,36 @@ endpoints healthy across all three county scopes.
 | County audit — all pages/endpoints | 🟢 Complete 11 Aug 2026 |
 | Repo hygiene — WAL files untracked | 🟢 Resolved 11 Aug 2026 — droplet `git status` clean |
 | Entity normalization / duplicate manager | 🟢 Deployed 6 Aug 2026 |
-| FDIC analytics | 🟡 Live, **one fix pending deploy** (24 Aug 2026). Audited for the CET1/CRE direction inversion found in the sibling tool — **clean**; peer-ranking logic consolidated into `client/src/lib/peer-metrics.ts` behind a direction guardrail. A **real** bug was found and fixed: the 18-month query window could not satisfy the 8-quarter year-over-year comparison, so **NI YoY % was blank for every institution since it shipped** — window now 27 months and row limit raised together, verified live (0 → 990 of 1,215 national). National coverage remains asset-truncated by design (~1,113 of ~4,450; the tab now says so). Composite opportunity/earnings/vulnerability scores are still hardcoded to `0` and unused — AMO has no composite ranking |
+| FDIC analytics | 🟡 **Being re-sourced — branch `feat/market-intelligence-source`, built and verified locally 7 Oct 2026, not deployed.** The page will read the Market Intelligence tool's Market Analytics API via `/api/mi/*` instead of querying FDIC itself: real Opportunity/Earnings/Vulnerability percentile scores (previously hardcoded `0` and hidden), balance-sheet signal chips, and trend / acquisition / roll-forward sections in the drawer; `server/fdic.ts`, the FDIC window and its guardrail are removed. Verified: Florida top-3 by Opportunity matches the API in order (35430, 24156, 59278); CERT 35541 chips equal `behavior.latest.fired`; a wrong key shows "Market Intelligence unavailable" and no figures; National loads signals in seven sub-1 MB band calls; build passes. **Miss:** national screening is one 1.47 MB uncompressed response (no band parameter upstream, no gzip here). Production today still runs the 24 Aug FDIC-direct version (NI YoY fix deployed with it; national screen ~1,113 largest banks by FDIC's response cap) |
 | Deal Intelligence page | ⚫ **Retired 11 Aug 2026** — page and its 8 endpoints removed together |
 | Automated backups | 🟢 **Live off-box 17 Aug 2026** — nightly verified snapshot → DigitalOcean Spaces (`amo-dashboard-backups-ec`, NYC3). Re-verified 7 Oct 2026: eight consecutive `status=ok` runs, ~148MB per archive. **Hardened 7 Oct 2026** — waits out a running `normalize.py`, asserts the derived tables separately, and records a `degraded` status that cannot count as good or rotate a complete archive away (§7.5). Only one restore has ever been performed (17 Aug); another drill is the open item, not a credential |
 | Entity naming / name variants | 🟡 **Legal-suffix class closed 7 Oct 2026** — bare `COMPANY`, `LIMITED` and spaced `L P` now strip, merging 119 canonical names that no amount of suffix stripping could previously reunite (Bank of New York Mellon Trust had broken 179/178). Pinned by `check_company_suffix.py`. **Still split:** geographic qualifiers (correctly — see §7.6 item 9), state abbreviations, OCR digit-for-letter, and a bare trailing `&` |
 | Droplet MCP tools (`tools/droplet-mcp/`) | 🟢 **New 22 Sep 2026** — seven named tools over SSH (§6.4a). Developer-machine only; nothing installed on the droplet, no new credential, no change to how production runs. Smoke-tested against live: read-only tools returned, `db_query` write rejected by SQLite, both guarded tools refused without `confirm` |
 
 ### 7.4 Known gaps and open items
+
+**−9. OPEN 7 Oct 2026 — FDIC Data Analytics switch to Market Intelligence is built on a branch and
+awaits a deploy decision; one verification target was missed.**
+
+Branch `feat/market-intelligence-source` (see §4.3 for the page, §6.4 for the deploy step,
+`ROLLBACK.md` for the revert). Four of the five acceptance checks passed exactly — Florida's top three
+by Opportunity are the API's top three in order (CERTs 35430, 24156, 59278), CERT 35541's
+Balance-Sheet Actions chips are precisely `behavior.latest.fired` (`hfsTransfer`, `realizedSale`), a
+wrong key produces "Market Intelligence unavailable" with no figures, and the build passes. The fifth
+asked that the national view load with **no single response over 1 MB**: the seven per-band signal
+calls comply (largest 898 KB), but **`/api/mi/screening?scope=National` is 1.47 MB by itself.** That
+endpoint has no band or paging parameter upstream, so it cannot be split from this side, and the
+Express app sends JSON uncompressed. Two honest fixes, neither applied without a decision: add
+`compression` middleware here (roughly 5× smaller, but it changes every response the server sends,
+not just this page), or ask for a band parameter on the upstream screening endpoint.
+
+Also open from the same work: `/api/mi/visuals` and `/api/mi/cohort-watch` are proxied but not
+rendered, because this page's layout has no component for them — rendering them would be new UI,
+not a port, and the brief was to keep this app's layout. The drawer's **Generate narrative** button
+triggers an OpenAI call on the Market Intelligence side; whether that cost belongs in this tool is
+the owner's call. And once deployed, the page's figures move only when Market Intelligence's daily
+cache job refreshes — plus up to seven days of this server's own response cache — so "the numbers
+have not changed" is expected most weeks, not a fault.
 
 **−7a. CLOSED 7 Oct 2026 — bare `COMPANY` and `LIMITED` were treated as brand content, splitting
 firms permanently.** `canonicalize()` already stripped `CORPORATION`, `INCORPORATED`, `LTD`, `CO`
@@ -1557,8 +1668,10 @@ text; a screen for the direction review list; stop the lending-relationship read
 filter does not separate anything; login returns 500 on an empty request; Freddie Mac is split by the
 spelling "FEDERAL HOME LOAN MTG" (now typed GSE, not yet merged).
 
-**−3. ✅ FIXED 24 Aug 2026 (pending deploy) — the FDIC "NI YoY %" column had never worked, and the
-national screen is narrower than it looks.**
+**−3. ✅ FIXED 24 Aug 2026, deployed since — the FDIC "NI YoY %" column had never worked, and the
+national screen is narrower than it looks.** *(Superseded on the `feat/market-intelligence-source`
+branch, item −9: the query window, its guardrail and the FDIC response cap all leave this codebase
+with the switch. Kept for the record — the lesson is in §7.5.)*
 
 Two findings in the FDIC tab, from auditing a sibling tool's bug report against this codebase.
 
@@ -1872,7 +1985,8 @@ healthy (640 rows, 57% carrying loan amounts).
 |---|---|---|
 | Broward image feed missed for >10 days | **Permanent, unrecoverable data loss** | Cron polls three times daily (15:30/19:30/23:30 UTC) so a moving publication time cannot outrun it; `flock` prevents overlap; ~10-day buffer. The Overview keys on the **per-run heartbeat** in `broward_runs` — red for "job stopped or failed", separately red for "images pending on the feed". Reworked 24 Aug 2026; the previous 48h-since-last-harvest rule false-alarmed every Monday |
 | An alarm that fires on a healthy system | The reader learns to dismiss it, so the **real** alert is ignored too | Liveness is measured from the job's own recorded runs, never inferred from when upstream data last arrived — upstream sources have their own calendars (Broward publishes business days only, ~3 days behind). "Never run" is deliberately **not** treated as a stoppage |
-| A derived metric's input window cannot satisfy its own precondition | The field is `null` **forever**, renders as `—`, and is indistinguishable from missing upstream data. Cost AMO a permanently blank NI YoY column; cost the sibling tool a silently redistributed score weight | `script/check-fdic-window.ts` asserts the window yields enough published quarters, with 18mo and 24mo as negative controls. The window is a single shared constant (`shared/fdic-window.ts`) imported by both the query builder and its consumer, so the two cannot drift |
+| A derived metric's input window cannot satisfy its own precondition | The field is `null` **forever**, renders as `—`, and is indistinguishable from missing upstream data. Cost AMO a permanently blank NI YoY column; cost the sibling tool a silently redistributed score weight | In production today: `script/check-fdic-window.ts` asserts the window yields enough published quarters, with 18mo and 24mo as negative controls. **On the Market Intelligence branch the window and the check leave this codebase** — the metric is computed upstream, where the equivalent precondition now has to be asserted. What this app keeps is the display-side rule: a source that does not answer shows *no* figures rather than dashes that could pass for data |
+| The analytics source and this page disagree | An analyst quotes a score or a signal that the Market Intelligence tool itself does not show | `/api/mi/*` is a 1:1 pass-through with no computation on this side; only `ok:true` responses are cached; the page's columns are the API's fields under the API's names. Verified by sorting the raw API rows and comparing the top three to the page (§7.4 item −9). The remaining gap is time, not logic: this server caches for 7 days, so after an upstream refresh the two can differ for up to a week until a cache bust |
 | A deploy silently fails | Production keeps running old code while checks look fine | `git pull` prints `Updating <old>..<new>` AFTER an abort — **verify by effect** (`git log --oneline -1` on the droplet, or grep `dist/index.cjs`), not by output. Bit us 11 Aug 2026. **Improved 22 Sep 2026:** `git_state` (§6.4a) reports the `dist/index.cjs` build time against the commit time, so a pulled-but-not-built box is visible in one call instead of being inferred; `deploy` performs pull + build + restart as one operation so the build cannot be skipped |
 | A published figure is stale or measured differently from what the tool shows | A non-developer quotes a number outward that the dashboard contradicts | **Partly open.** §7.2 now records the exact query behind each figure so the next reviewer can reproduce them, and `db_query` (§6.4a) makes re-checking cheap. But nothing *asserts* the page and the Overview agree — the 21,517 → 10,431 entity discrepancy (§7.4 item −6) was found by hand, and only because the figures were being re-derived for this review |
 | PM2 restarted mid-normalize | Dashboard shows zeros for up to 7 days | Nightly wrapper restarts only on success; documented in `ROLLBACK.md` and here |
@@ -2004,7 +2118,8 @@ healthy (640 rows, 57% carrying loan amounts).
 | `GET /api/reporting` · `/export` · `/chart` · `/participants` | Reporting tab + CSV |
 | `PATCH /api/reporting/:cfn/review` | Review workflow |
 | `GET /api/targets` · `POST` · `DELETE` | Watchlist |
-| `GET /api/fdic/financials` | FDIC proxy |
+| `GET /api/fdic/financials` | FDIC proxy — **production today; removed on the Market Intelligence branch** |
+| `GET /api/mi/meta` · `/api/mi/screening?scope=` · `/api/mi/visuals?scope=` · `/api/mi/cohort-watch?scope=` · `/api/mi/behavior-signals?scope=&band=` · `/api/mi/institution/:cert[?include=narrative]` | Market Intelligence pass-through (branch) — 1:1 with its Market Analytics data API, bearer key added server-side, `ok:true` cached 7 days, 503 when unconfigured |
 | `GET /api/collection-log` | Pipeline health |
 | `POST /api/cache/bust` · `GET /api/cache/stats` | Cache control |
 
@@ -2018,7 +2133,8 @@ scope and the applied scope cannot drift).
 |---|---|---|
 | Miami-Dade Clerk Official Records | Web portal, automated via Playwright | Login required; 499-record server cap per query, handled by recursive chunk splitting |
 | Broward County Records, Taxes & Treasury | Public SFTP `BCFTP.Broward.org:22` (`crpublic`/`crpublic`) | No login, no captcha, no scraping. Yearly exports 1978→last completed year (index only) + daily files with images (~10-day retention) |
-| FDIC BankFind | Public REST API, proxied server-side | Bank financial fundamentals |
+| FDIC BankFind | Public REST API, proxied server-side | Bank financial fundamentals — **production today; replaced on the Market Intelligence branch** |
+| Market Intelligence tool — Market Analytics data API | `https://market-intelligence-tool-gilt.vercel.app/api/analytics/v1/*`, bearer key, contract saved at `docs/market-intelligence-meta.json` | FDIC Call Report screening, scores, balance-sheet signals and per-institution trend/history (branch). Refreshes on its own daily job, keyed by FDIC quarter |
 | OpenAI | `gpt-4.1-nano`, Chat Completions + Batch API | Document extraction and entity classification fallback |
 
 ### Internal documents
