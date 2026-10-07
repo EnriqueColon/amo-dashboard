@@ -120,6 +120,19 @@ which is the identical commit, so `origin/main` (still `82111ff`) is behind both
    response cache. To pick up a new quarter immediately: `POST /api/cache/bust` from a logged-in
    session or `pm2 restart amo-dashboard`.
 
+### Follow-up the same afternoon — trend charts in the bank drawer (`4e0f5f4`)
+
+Owner asked for "the same trending graphs as the MIT tool" on the bank card. The MIT tool's UI is
+behind its own password, so the charts were built from every series the institution API returns
+rather than by looking: four Recharts small multiples in the Trend card (asset quality NPL/noncurrent/
+reserve; capital leverage/CET1/total RBC, the last two dropped for CBLR filers; CRE exposure with
+dashed 300% / 100% interagency guidance reference lines; earnings ROA/NIM) and a CRE problem-asset
+balance chart (nonaccrual, modifications, OREO, HFS in $) from `behavior.points` in Balance-Sheet
+Actions. Verified on CERT 35541 — the balance chart agrees with the roll-forward table (OREO appears
+in Q3 2025 when $20.1M transferred). Also gated the signals note on the scope-checked payload, which
+removed a one-frame flash of the previous state's count under a new heading. **If a specific MIT
+chart is not among these, it is a one-line addition to `TREND_PANELS`.**
+
 ### Open
 
 - Decide on `compression` middleware (fixes (d) for National screening; also shrinks every other

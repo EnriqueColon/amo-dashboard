@@ -440,9 +440,12 @@ What is on the page, top to bottom:
   hover. Every column from before (CRE mix, NPL, noncurrent, ROA/ROE, efficiency, capital, NI YoY) is
   still there and the **Columns** menu still chooses which show.
 - **Institution drawer** (click a row) — the structural, earnings and peer-positioning panels as
-  before, plus three sections from the source: an **eight-quarter Trend** with a one-line verdict,
+  before, plus three sections from the source: an **eight-quarter Trend** with a one-line verdict
+  and four trend charts (asset quality; capital; CRE exposure against the 300% / 100% interagency
+  guidance lines; earnings) above the quarter table,
   **Acquisition History**, and **Balance-Sheet Actions** — the fired signals, a plain-English reading
-  of what the bank did with its CRE book this quarter, and the nonaccrual **roll-forward** (prior
+  of what the bank did with its CRE book this quarter, a chart of the **CRE problem-asset balances**
+  (nonaccrual, modifications, OREO, held-for-sale by quarter), and the nonaccrual **roll-forward** (prior
   balance → new → charge-offs → to OREO → unexplained exit → current, in dollars, eight quarters and
   the latest quarter by CRE category). A **Generate narrative** button asks the source for a written
   eight-quarter summary; it is the only thing on the page that triggers an LLM call upstream, and it
