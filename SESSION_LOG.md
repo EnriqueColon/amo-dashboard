@@ -25,7 +25,12 @@ numbers any more.
 request IDs logged in the terminal) while the branch push succeeded minutes earlier. Not a protection
 rule — a server-side 500 on the ref. **The droplet was fast-forwarded from the branch ref instead**,
 which is the identical commit, so `origin/main` (still `82111ff`) is behind both the droplet and local
-`main`. **Open: re-run `git push origin main` once GitHub recovers** — it is a plain fast-forward.
+`main`. Resolved ~17:01 UTC: GitHub recovered and `main` pushed as a plain fast-forward; `origin/main`,
+the droplet and local `main` have been in step since.
+
+**Production at close of session: `a20c840`** (switch + drawer trend charts + docs), PM2 online, both
+`MI_*` variables held, owner confirmed the charts render after a hard reload (the old tab had kept the
+pre-deploy `index.html`; `max-age=0` on the page does not reload an already-open SPA).
 
 ### What changed
 
