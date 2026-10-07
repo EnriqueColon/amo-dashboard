@@ -302,6 +302,15 @@ this page (never sum `facility_amount`, entity figures are cross-county, Broward
 missing amounts are unknown not zero, collection gaps are not market stops), and it is told to state
 the county and date window it used. The active **county selector** is passed in as its default scope.
 
+**Voice** (tuned 7 Oct 2026 evening after the first real answers read as "robotic"): it is asked to
+say one plain sentence about what it is about to look up *before* the lookups run (so the 10–20 s of
+tool time is not silence), and to **interpret** rather than just report — compare to a baseline,
+name what drove the number, flag anything surprising, in a sentence or two — fetching the prior
+period itself when that makes the answer land. The rigour rules are unchanged: every figure from a
+tool, CFNs cited, real traps flagged. All of this lives in `server/chat/prompt.ts` (`ANSWER_STYLE`);
+change the wording there, then the normal `npm run build` → `pm2 restart` (the prompt is bundled
+into `dist/index.cjs`; no client or database change is involved).
+
 Expect it to be wrong sometimes — the page says so under the box. Open the lookups and check the
 underlying page before relying on a number. The conversation lives in the browser tab only; **New
 chat** clears it. Nothing is written to the database, and the OpenAI key never reaches the browser

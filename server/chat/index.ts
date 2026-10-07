@@ -163,6 +163,10 @@ export function registerChatRoutes(app: Express) {
           outputs.push({ type: 'function_call_output', call_id: call.callId, output: serializeToolResult(result) });
         }
         if (abort.signal.aborted) break;
+        // The prompt asks the model to say what it is about to look up before
+        // calling tools. That preamble and the eventual answer stream into the
+        // same message, so put a paragraph break between them.
+        if (text.trim() && !/\n\s*\n\s*$/.test(text)) sse(res, 'delta', { text: '\n\n' });
         input = outputs;
       }
 
