@@ -105,6 +105,8 @@ export default function MarketAnalytics() {
       setLoading(true)
       setError(undefined)
       setScreening(null)
+      setSignals(null) // the old scope's signal counts must not sit under the new heading
+      setSignalsError(undefined)
       setAsOf(null)
       setSelectedInstitution(null)
       setCompareRows([])
@@ -197,10 +199,11 @@ export default function MarketAnalytics() {
   }, [payload, rows.length, regionDisplay])
 
   const signalsNote = useMemo(() => {
+    if (!payload) return null // payload is scope-gated; nothing from the previous scope may show
     if (signalsError) return `Balance-sheet signals unavailable: ${signalsError}`
     if (!signals) return null
     return `${signals.firedCount.toLocaleString('en-US')} of ${signals.currentCount.toLocaleString('en-US')} institutions fired at least one balance-sheet signal in ${asOfQuarter}.`
-  }, [signals, signalsError, asOfQuarter])
+  }, [payload, signals, signalsError, asOfQuarter])
 
   const sortButton = (col: { label: string; term: string; sortKey?: SortKey }) => col.sortKey ? (
     <button type="button" className="cursor-pointer border-b border-dashed border-muted-foreground/50 hover:opacity-80 text-left font-normal flex items-center gap-1 text-xs"

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { Copy, X } from "lucide-react"
-import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
+import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -10,7 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { toast } from "@/hooks/use-toast"
 import {
   loadInstitution, loadMiMeta, signalsByKey, MiError, MI_UNAVAILABLE_TITLE,
-  type MiInstitution, type MiMeta, type MiRollForwardStep,
+  type MiInstitution, type MiMeta, type MiRollForwardStep, type MiTrendQuarter,
 } from "@/lib/market-intelligence"
 import {
   formatMoney,
@@ -637,6 +637,166 @@ const VERDICT_TONE: Record<string, string> = {
   deteriorating: "border-red-200 bg-red-50 text-red-900",
 }
 
+// ── Trend charts ─────────────────────────────────────────────────────────────
+//
+// Small multiples over the quarters the API returns, one panel per theme. The
+// series are the API's own fields; the panels only choose which to draw
+// together. Reference lines mark the 2006 interagency CRE-concentration
+// guidance (300% CRE / capital, 100% construction / capital) — supervisory
+// thresholds, not anything computed here.
+
+type TrendSeries = { key: Extract<keyof MiTrendQuarter, string>; label: string; color: string; decimals?: number }
+type TrendPanel = { title: string; hint: string; series: TrendSeries[]; references?: Array<{ y: number; label: string }>; unit: "pct" | "usd" }
+
+const TREND_PANELS: TrendPanel[] = [
+  {
+    title: "Asset quality",
+    hint: "% of loans. Rising NPL and noncurrent with a flat reserve is the stress pattern.",
+    unit: "pct",
+    series: [
+      { key: "nplPct", label: "NPL", color: "#dc2626" },
+      { key: "noncurrentPct", label: "Noncurrent", color: "#f59e0b" },
+      { key: "reservePct", label: "Reserve", color: "#0ea5e9" },
+    ],
+  },
+  {
+    title: "Capital",
+    hint: "% ratios. Leverage for every filer; CET1 and total risk-based only for banks outside the CBLR framework.",
+    unit: "pct",
+    series: [
+      { key: "leveragePct", label: "Leverage", color: "#0f766e", decimals: 1 },
+      { key: "cet1Pct", label: "CET1", color: "#2563eb", decimals: 1 },
+      { key: "totalRbcPct", label: "Total RBC", color: "#7c3aed", decimals: 1 },
+    ],
+  },
+  {
+    title: "CRE exposure",
+    hint: "% of capital. Dashed lines are the interagency guidance thresholds (300% CRE, 100% construction).",
+    unit: "pct",
+    series: [
+      { key: "creToCapitalPct", label: "CRE / capital", color: "#b45309", decimals: 0 },
+      { key: "constructionToCapitalPct", label: "Construction / capital", color: "#d97706", decimals: 0 },
+    ],
+    references: [
+      { y: 300, label: "300%" },
+      { y: 100, label: "100%" },
+    ],
+  },
+  {
+    title: "Earnings",
+    hint: "% of average assets (ROA) and of earning assets (NIM), annualised.",
+    unit: "pct",
+    series: [
+      { key: "roaPct", label: "ROA", color: "#16a34a" },
+      { key: "nimPct", label: "NIM", color: "#64748b" },
+    ],
+  },
+]
+
+/** Balance series from behavior.points — Call Report $ thousands. */
+const BALANCE_SERIES: Array<{ key: string; label: string; color: string }> = [
+  { key: "nonaccrualCre", label: "CRE nonaccrual", color: "#dc2626" },
+  { key: "modificationsCre", label: "CRE modifications", color: "#f59e0b" },
+  { key: "oreoCre", label: "CRE OREO", color: "#7c3aed" },
+  { key: "heldForSale", label: "Held for sale", color: "#0ea5e9" },
+]
+
+const CHART_AXIS_TICK = { fontSize: 10, fill: "#64748b" }
+
+function TrendPanelChart({ panel, points, leverageOnly }: { panel: TrendPanel; points: MiTrendQuarter[]; leverageOnly: boolean }) {
+  // Drop a series the bank never reports (CBLR filers have no CET1 / total RBC)
+  // rather than drawing an empty line and a dead legend entry.
+  const series = panel.series.filter((s) => {
+    if (leverageOnly && (s.key === "cet1Pct" || s.key === "totalRbcPct")) return false
+    return points.some((p) => p[s.key] != null)
+  })
+  if (series.length === 0) return null
+  const decimals = Math.max(...series.map((s) => s.decimals ?? 2))
+  return (
+    <div className="rounded-md border border-slate-200/80 p-3">
+      <p className="text-xs font-semibold text-slate-700">{panel.title}</p>
+      <p className="text-[11px] text-slate-500 leading-snug mb-1">{panel.hint}</p>
+      <ResponsiveContainer width="100%" height={170} debounce={0}>
+        <LineChart data={points} margin={{ top: 10, right: panel.references ? 34 : 12, bottom: 0, left: -12 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+          <XAxis dataKey="label" tick={CHART_AXIS_TICK} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+          <YAxis tick={CHART_AXIS_TICK} tickLine={false} axisLine={false} width={48} tickFormatter={(v: number) => `${v}%`} domain={["auto", "auto"]} />
+          <Tooltip
+            content={({ active, payload, label }) => {
+              if (!active || !payload?.length) return null
+              return (
+                <div className="rounded-md border border-slate-200 bg-white px-3 py-2 shadow-sm text-xs">
+                  <p className="font-medium text-slate-800 mb-1">{String(label)}</p>
+                  {payload.map((item) => (
+                    <div key={String(item.dataKey)} className="flex items-center justify-between gap-4 py-0.5">
+                      <span className="flex items-center gap-1.5 text-slate-600"><span className="inline-block h-2 w-2 rounded-full" style={{ background: item.color }} />{item.name}</span>
+                      <span className="tabular-nums">{formatPct(item.value as number | null, decimals)}</span>
+                    </div>
+                  ))}
+                </div>
+              )
+            }}
+          />
+          <Legend verticalAlign="top" align="right" iconType="plainline" iconSize={10} wrapperStyle={{ fontSize: "10px", color: "#475569", paddingBottom: "4px" }} />
+          {panel.references?.map((r) => (
+            <ReferenceLine key={r.y} y={r.y} stroke="#94a3b8" strokeDasharray="4 4" label={{ value: r.label, position: "right", fontSize: 9, fill: "#94a3b8" }} />
+          ))}
+          {series.map((s) => (
+            <Line key={s.key} type="monotone" name={s.label} dataKey={s.key} stroke={s.color} strokeWidth={2} dot={{ r: 2.5, strokeWidth: 0, fill: s.color }} activeDot={{ r: 4 }} connectNulls isAnimationActive={false} />
+          ))}
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
+function TrendCharts({ points, leverageOnly }: { points: MiTrendQuarter[]; leverageOnly: boolean }) {
+  if (points.length < 2) return null
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      {TREND_PANELS.map((panel) => <TrendPanelChart key={panel.title} panel={panel} points={points} leverageOnly={leverageOnly} />)}
+    </div>
+  )
+}
+
+function BalanceChart({ points }: { points: Array<Record<string, number | string | null>> }) {
+  const series = BALANCE_SERIES.filter((s) => points.some((p) => typeof p[s.key] === "number" && (p[s.key] as number) !== 0))
+  if (points.length < 2 || series.length === 0) return null
+  return (
+    <div className="rounded-md border border-slate-200/80 p-3">
+      <p className="text-xs font-semibold text-slate-700">CRE problem-asset balances</p>
+      <p className="text-[11px] text-slate-500 leading-snug mb-1">Quarter-end balances in dollars. Nonaccrual moving to OREO or held-for-sale is the bank acting; modifications building is pressure it has not yet acted on.</p>
+      <ResponsiveContainer width="100%" height={190} debounce={0}>
+        <LineChart data={points} margin={{ top: 10, right: 12, bottom: 0, left: -4 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+          <XAxis dataKey="label" tick={CHART_AXIS_TICK} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+          <YAxis tick={CHART_AXIS_TICK} tickLine={false} axisLine={false} width={56} tickFormatter={(v: number) => formatThousands(v)} />
+          <Tooltip
+            content={({ active, payload, label }) => {
+              if (!active || !payload?.length) return null
+              return (
+                <div className="rounded-md border border-slate-200 bg-white px-3 py-2 shadow-sm text-xs">
+                  <p className="font-medium text-slate-800 mb-1">{String(label)}</p>
+                  {payload.map((item) => (
+                    <div key={String(item.dataKey)} className="flex items-center justify-between gap-4 py-0.5">
+                      <span className="flex items-center gap-1.5 text-slate-600"><span className="inline-block h-2 w-2 rounded-full" style={{ background: item.color }} />{item.name}</span>
+                      <span className="tabular-nums">{formatThousands(item.value as number | null)}</span>
+                    </div>
+                  ))}
+                </div>
+              )
+            }}
+          />
+          <Legend verticalAlign="top" align="right" iconType="plainline" iconSize={10} wrapperStyle={{ fontSize: "10px", color: "#475569", paddingBottom: "4px" }} />
+          {series.map((s) => (
+            <Line key={s.key} type="monotone" name={s.label} dataKey={s.key} stroke={s.color} strokeWidth={2} dot={{ r: 2.5, strokeWidth: 0, fill: s.color }} activeDot={{ r: 4 }} connectNulls isAnimationActive={false} />
+          ))}
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
 function RollForwardRow({ step, first }: { step: MiRollForwardStep; first: string }) {
   return (
     <TableRow>
@@ -741,6 +901,7 @@ export function InstitutionDetailSections({ cert }: { cert: string }) {
             <div className={`rounded-md border px-3 py-2 text-xs ${verdictTone}`}>
               <span className="font-semibold">{trend.verdict.heading}.</span> {trend.verdict.text}
             </div>
+            <TrendCharts points={trend.points} leverageOnly={trend.leverageOnly} />
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
@@ -838,6 +999,8 @@ export function InstitutionDetailSections({ cert }: { cert: string }) {
                 {behavior.reading.text.split(/\n{2,}/).map((para, i) => <p key={i}>{para}</p>)}
               </div>
             )}
+
+            {behavior.points?.length > 0 && <BalanceChart points={behavior.points} />}
 
             {behavior.rollForward?.length > 0 && (
               <div>
