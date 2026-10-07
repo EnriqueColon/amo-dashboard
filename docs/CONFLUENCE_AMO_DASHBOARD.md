@@ -275,13 +275,15 @@ Counties**. It is global — it applies to every page and persists across naviga
 
 Navigation is grouped into **Analysis** and **Data**.
 
-#### Overview (`/`)
-The landing page. Headline counts (total filings, unique entities, market transfers, self-assigns,
+#### Overview (`/overview`)
+Headline counts (total filings, unique entities, market transfers, self-assigns,
 private-credit activity), date coverage, monthly assignment volume chart, and the Top Acquirers / Top
 Sellers / Most Connected leaderboards.
-*Start here to see whether the data is current — the date range and last-collected date are the fastest health check.*
+*Go here to see whether the data is current — the date range and last-collected date are the fastest health check.*
+Until 7 Oct 2026 this was the landing page at `/`; `/` now redirects to Ask the Data (owner's
+request), and Overview is the second entry in the sidebar.
 
-#### Ask the Data (`/ask`) — deployed 7 Oct 2026 as a trial; the tab reads "Ask the Data (TESTING/NOTDEPLOYED)"
+#### Ask the Data (`/ask`) — the landing page since 7 Oct 2026; deployed as a trial, the tab reads "Ask the Data (TESTING/NOTDEPLOYED)"
 The suffix is deliberate — the owner's marker that the page is live for evaluation, not yet a
 supported part of the tool. Drop it (`client/src/components/Sidebar.tsx`, `pages/Chat.tsx`) once the
 first round of real questions has been reviewed. A chat box. Type a question in plain English — *"who were the top acquirers in 2025 and how does that

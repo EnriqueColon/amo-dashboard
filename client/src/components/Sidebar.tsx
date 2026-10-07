@@ -6,10 +6,11 @@ import { FilterHint } from '@/components/FilterHint';
 import { COUNTY_DEF } from '@/lib/filterDefinitions';
 
 const NAV = [
-  { href: '/',                 icon: BarChart2,    label: 'Overview',           group: 'main' },
   // Marked at the owner's request (7 Oct 2026) while the chat is being trialled in
   // production. Drop the suffix once the first round of real questions has been reviewed.
+  // It is also the landing page: "/" redirects here (see App.tsx).
   { href: '/ask',              icon: MessageSquare,label: 'Ask the Data (TESTING/NOTDEPLOYED)', group: 'main' },
+  { href: '/overview',         icon: BarChart2,    label: 'Overview',           group: 'main' },
   { href: '/reporting',        icon: LayoutList,   label: 'Reporting',          group: 'analysis' },
   { href: '/targets',          icon: Crosshair,    label: 'Targets',            group: 'analysis' },
   { href: '/market-analytics', icon: LineChart,    label: 'FDIC Data Analytics',group: 'analysis' },
@@ -92,7 +93,7 @@ export default function Sidebar() {
       {/* Nav */}
       <nav className="flex-1 py-2 px-1.5 overflow-y-auto">
         {NAV.map(({ href, icon: Icon, label, group, badge }: any) => {
-          const active = location === href || (href !== '/' && location.startsWith(href));
+          const active = location === href || location.startsWith(href + '/');
           const showGroupLabel = !collapsed && group !== lastGroup && GROUPS[group];
           if (group !== lastGroup) lastGroup = group;
 

@@ -1,4 +1,4 @@
-import { Switch, Route, Router } from 'wouter';
+import { Switch, Route, Router, Redirect } from 'wouter';
 import { useHashLocation } from 'wouter/use-hash-location';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from '@/lib/queryClient';
@@ -30,8 +30,10 @@ export default function App() {
             <Sidebar />
             <main className="flex-1 overflow-y-auto flex flex-col print:overflow-visible">
               <Switch>
-                <Route path="/" component={Dashboard} />
+                {/* Landing page is Ask the Data (owner's request, 7 Oct 2026). Overview lives at /overview. */}
+                <Route path="/">{() => <Redirect to="/ask" replace />}</Route>
                 <Route path="/ask" component={Chat} />
+                <Route path="/overview" component={Dashboard} />
                 <Route path="/clean-events" component={CleanEvents} />
                 <Route path="/market-analytics" component={MarketAnalytics} />
                 <Route path="/assignments" component={Assignments} />
