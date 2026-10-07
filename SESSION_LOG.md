@@ -4,11 +4,28 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
-## 2026-10-07 (later) — FDIC Data Analytics now reads Market Intelligence (branch, NOT deployed)
+## 2026-10-07 (later) — FDIC Data Analytics now reads Market Intelligence — DEPLOYED 16:56 UTC
 
-**Branch `feat/market-intelligence-source`, not merged, not deployed.** Commits: `0bcc0b3` (server
-client + routes, FDIC proxy removed), `7b31815` (page, drawer, glossary, dead code removed), plus the
-docs commit after this. The AMO pipeline and `collector/` are untouched. Nothing on the droplet changed.
+**Live on production at `dfd42f8`.** Commits: `0bcc0b3` (server client + routes, FDIC proxy removed),
+`7b31815` (page, drawer, glossary, dead code removed), `dfd42f8` (docs). The AMO pipeline and
+`collector/` are untouched. Owner approved the deploy at 12:52 ET ("lets push please").
+
+**Deploy as run:** ssh-agent checked first (was fine) → no `normalize.py` running → droplet
+`git fetch && git merge --ff-only origin/feat/market-intelligence-source` → `npm run build` (13 s) →
+`.env` backed up to `.env.before_mi.<stamp>` → the two `MI_*` lines piped from the local `.env` over
+ssh (never printed; key length 64 verified both ends) → `export` of **only** those two →
+`pm2 restart amo-dashboard --update-env && pm2 save`. Verified on-box with the password PM2 holds:
+login 302, `pm2 env` shows both `MI_*`, zero "not configured" lines, `/api/mi/meta` `ok:true` quarter
+`20260630` contract `2026-10-07`, `/api/mi/screening?scope=Florida` 85 rows with top-3 35430/24156/59278,
+`dist/index.cjs` has zero FDIC-API references. With a session, `/api/fdic/financials` now returns the
+SPA `index.html` like any unknown path (200 text/html; 401 JSON without a session) — nothing serves FDIC
+numbers any more.
+
+**GitHub returned `Internal Server Error` on every push to `main`** (three attempts, 16:53–16:56 UTC,
+request IDs logged in the terminal) while the branch push succeeded minutes earlier. Not a protection
+rule — a server-side 500 on the ref. **The droplet was fast-forwarded from the branch ref instead**,
+which is the identical commit, so `origin/main` (still `82111ff`) is behind both the droplet and local
+`main`. **Open: re-run `git push origin main` once GitHub recovers** — it is a plain fast-forward.
 
 ### What changed
 
@@ -87,7 +104,7 @@ docs commit after this. The AMO pipeline and `collector/` are untouched. Nothing
   large-bank screen, now by the source's own choice rather than FDIC's 10,000-row cap. The cohort
   line says exactly which count it is.
 
-### Deploying this (when the owner says so)
+### Deploying this (done 16:56 UTC — kept as the procedure for next time)
 
 1. Merge the branch; on the droplet `git pull && npm run build`.
 2. Add `MI_BASE_URL=https://market-intelligence-tool-gilt.vercel.app` and `MI_ANALYTICS_API_KEY=…` to

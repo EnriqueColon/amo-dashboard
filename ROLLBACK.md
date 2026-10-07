@@ -1,7 +1,9 @@
-# Rollback — FDIC Data Analytics sourced from Market Intelligence (branch, NOT deployed)
+# Rollback — FDIC Data Analytics sourced from Market Intelligence (DEPLOYED 7 Oct 2026 16:56 UTC)
 
-**State as of 7 Oct 2026:** branch `feat/market-intelligence-source`, not merged into `main`, not on
-the droplet. Production still runs the FDIC-API proxy (`server/fdic.ts`, `GET /api/fdic/financials`).
+**State:** production runs `dfd42f8` (the tip of `feat/market-intelligence-source`), fast-forwarded on
+the droplet from the branch ref because GitHub was returning 500s on pushes to `main`. `origin/main`
+may lag until that push is re-run. The pre-switch `.env` is at `/opt/amo-dashboard/.env.before_mi.*`.
+**Known-good anchor to revert to: `82111ff`** (the FDIC-direct page, deployed earlier the same day).
 
 ## What the change touches — and what it cannot touch
 
