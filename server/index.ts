@@ -4,6 +4,7 @@ import { serveStatic } from "./static";
 import { registerAuthRoutes, checkAuth } from "./auth";
 import { createServer } from "http";
 import { registerWeekendStatus } from "./weekend";
+import { warnIfMarketIntelligenceUnconfigured } from "./market-intelligence";
 
 const app = express();
 const httpServer = createServer(app);
@@ -66,6 +67,7 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  warnIfMarketIntelligenceUnconfigured(log);
   registerWeekendStatus(app);
   await registerRoutes(httpServer, app);
 

@@ -1,7 +1,7 @@
 import type { Express } from 'express';
 import type { Server } from 'http';
 import { getDb } from './db';
-import { fetchFDICFinancials } from './fdic';
+import { registerMarketIntelligenceRoutes } from './market-intelligence';
 import { queryGroupedFacilities } from './lending/facilities';
 import { buildActivityWorkbook } from './reporting/workbook';
 import { loanRows, COUNTED_LOAN_AMOUNT } from './reporting/loanVolume';
@@ -1257,12 +1257,11 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   // Reasoning is in SESSION_LOG.md; git history has the implementation
   // (added 197e947, unrouted by 3b1674a, removed here).
 
-  // ─── GET /api/fdic/financials ─────────────────────────────────────────────
-  app.get('/api/fdic/financials', async (req, res) => {
-    const state = typeof req.query.state === 'string' ? req.query.state : undefined;
-    const result = await fetchFDICFinancials(state);
-    res.json(result);
-  });
+  // ─── /api/mi/* — Market Intelligence (FDIC Data Analytics data source) ────
+  // The former /api/fdic/financials proxy and server/fdic.ts were removed on
+  // 2026-10-07 when the page switched to consuming the Market Intelligence
+  // analytics API. One source, one code path; see server/market-intelligence.ts.
+  registerMarketIntelligenceRoutes(app);
 
   // ═══════════════════════════════════════════════════════════════════════════
   // TARGETS (user watchlist of market participants)
