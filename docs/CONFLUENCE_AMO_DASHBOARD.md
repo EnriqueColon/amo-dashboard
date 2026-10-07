@@ -1,6 +1,6 @@
 # AMO Tracker — Mortgage Assignment Intelligence Dashboard
 
-> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 5 Oct 2026
+> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 7 Oct 2026
 > **Production URL:** `http://165.22.35.75:5000` (single shared password)
 > **Repository:** `amo-dashboard` (`origin/main`)
 
@@ -768,7 +768,7 @@ All installed via `crontab -e` on the droplet.
 | `30 15,19,23 * * *` | `run_broward_daily.sh` (`BROWARD_INGEST_INDEX=1`) | Broward index → images → extraction → retention report + heartbeat. **Time-critical.** Runs three times a day on purpose — see "Broward's publication time moves" below. Holds a `flock` so runs cannot overlap; a skipped run exits 0. |
 | `0 6 * * 5` | `run_weekly.sh` | Miami-Dade: collect last 10 days → extract PDFs → normalize → enrich. Sources `/opt/amo-dashboard/.env` itself and **aborts loudly up front if `OPENAI_API_KEY` is missing** (fix `2441222`, 23 Aug 2026 — cron provides no environment; before the fix the run half-succeeded: collection worked, extraction silently died, see §7.4). **No longer sends the email** — that moved out on 2 Oct 2026. |
 | `0 11,12 * * 1` | `send_weekly_email.sh` | The "AMO Market Monitor" email (§4.1a). **Two firings, one send:** the box is Etc/UTC with no DST, so no single UTC hour is 07:00 Eastern all year — 11:00 UTC is 07:00 EDT, 12:00 UTC is 07:00 EST. The script checks the Eastern hour and lets exactly one through. `CRON_TZ` would be tidier but this cron build's support for it is unverified, and a scheduling feature that silently fails would shift the send an hour unnoticed. Waits for any running `normalize.py`, and sends nothing unless `REPORT_EMAIL_ENABLED=1`. |
-| `15 3 * * *` | `run_backup.sh` | Verified snapshot of the database + Broward images → local rotation (7 kept) → DigitalOcean Spaces. Records every run in `backup_runs`; the Overview banner reads it. |
+| `15 3 * * *` | `run_backup.sh` | Verified snapshot of the database + Broward images → local rotation (7 kept) → DigitalOcean Spaces. Records every run in `backup_runs`; the Overview banner reads it. **Waits out a running `normalize.py` before snapshotting** (7 Oct 2026) — the derived tables are empty for ~90 minutes of a rebuild, and a snapshot taken then restores a dashboard of zeros. |
 
 **One-off, 18–21 Sep 2026 (remove after):** `5 6 18 9 *` `collector/weekend/run_weekend.sh` (re-read →
 waits for fixes → `apply_weekend_fixes.sh` → email check) and `0 13 21 9 *`
@@ -832,13 +832,23 @@ AMO_DB_PATH=./prod_snapshot.db collector/.venv/bin/python3 collector/tests/check
 | `check_county_isolation.py` | No NULL counties; no CFN under two counties; key formats stay disjoint; derived tables agree with `assignments` about county; **rebuilt tables still declare `county`** |
 | `check_canonicalize_baseline.py` | Name canonicalization output has not drifted (baseline in `canonicalize_baseline.tsv`) |
 | `check_internal_commas.py` | An internal comma is punctuation, not content — `CITY NATIONAL BANK, OF FLORIDA` and `CITY NATIONAL BANK OF FLORIDA` are one entity, and `HERNANDEZ,ROLANDO` reaches the spaced spelling. Also asserts the **converse**: street-numbered property LLCs and two banks sharing a leading word stay apart. Offline. Exists because this split the bank's own lender ranking in the Credit Facilities tab and nothing was watching (23 Sep 2026) |
+| `check_company_suffix.py` | Bare `COMPANY`, bare `LIMITED` and a spaced `L P` are legal suffixes, not brand content. Also asserts the **converse**, including the case that must NOT merge: `CITY NATIONAL BANK` and `CITY NATIONAL BANK OF FLORIDA` are two different real banks, because a geographic qualifier is not a legal suffix. Checks the `NWL` entity-type coupling in both directions. Offline. Exists because `\bCO\.?\b` cannot reach `COMPANY` across a word boundary, so every firm the county recorded both ways stayed split — Bank of New York Mellon Trust broke 179/178 (7 Oct 2026) |
 | `check_entity_names_parity.py` | The shared address book reproduces the legacy normalize functions exactly |
+| `check_backup_degraded.py` | A snapshot whose derived tables are empty is kept and uploaded, but never counts as good and never rotates a complete archive away. Runs the **real `run_backup.sh`** against a temporary database rather than restating its rules — the bug lived in the gap between what the script asserted and what it did with the result, so a test that re-stated the intended rule would have passed against the broken version. Against the pre-fix script it reproduces the 16 Sep incident exactly |
 | `check_alias_scope.py` | Alias scoping rules behave — note aliases are applied **after** suffix stripping |
 | `check_broward_heartbeat.py` | The Broward daily job's heartbeat separates "ran and found nothing new" (normal every weekend) from "stopped running". Stubs the SFTP layer — no network needed |
 | `check_facility_type.py` | The rules deciding whether a credit facility is a warehouse line, a syndicated deal or a business line of credit. **Offline — no API key, no network, instant**, unlike the integration gate. Includes a negative control. Exists because the model used to put 623 of 625 documents in one bucket and no test was watching that field |
 | `check_doc_category.py` | The rule that overturns an unsupported COLLATERAL verdict on an Assignment of Mortgage. Offline, no API key. Asserts both that it corrects the 9,604-document error AND that it never touches UCC filings or the generic-assignment rent problem, and that it can never *invent* a collateral verdict |
 | `check_doc_type_scope.py` | Non-assignment doc types (`FST`) never reach `aom_events_clean` or the entity signal sweep, while `AMO`/`ASG`/legacy `NULL` rows still do. Runs on an in-memory fixture **plus a negative control** — production had zero FST rows when it was written, so a live-only check would have passed while asserting nothing |
+| `check_leading_numbers.py` | A leading number is part of a company name, not junk to strip. Offline. Exists because stripping every leading non-letter turned `7190 HOLDINGS LLC` into `HOLDINGS` and collapsed **47 unrelated firms into one fictional "INVESTMENTS" entity** — 1,752 filings across 1,113 companies (14 Sep 2026). Only a leading *zero* is removed, and the test pins why magnitude was rejected as the discriminator |
+| `check_party_preference.py` | Which parties get reported, and what counts as a property address. The county index lists *every* party on a filing, so the Reporting table was showing the original borrower or MERS instead of the two institutions trading the loan — 12,068 of 55,839 rows (22%). Offline (16 Sep 2026) |
+| `check_extraction_completeness.py` | `status='OK'` in `pdf_extractions` actually means extracted. Exists because its absence cost **50,042 Miami-Dade documents three weeks of silent non-extraction** (22 Jul–15 Aug 2026): two jobs write that table and disagreed about what a row means, so pending work is now keyed on `raw_json IS NULL` rather than on row existence |
+| `check_feed_lag.py` | The Broward publishing-lag warning counts **business** days, not calendar days — a healthy Friday feed read on Monday must not cry wolf. 13 assertions including the Monday case and the 23 Sep 2026 incident (2 Oct 2026) |
 | `diff_name_systems.py`, `show_merge_proposals.py` | Diagnostics for reviewing name-matching decisions |
+
+All fifteen are run by hand — **`npm run check` covers only the TypeScript gates below**, so a new
+Python guardrail is easy to add and then forget. Four of these were missing from this table until
+7 Oct 2026 for that reason. A single entry point would be worth building (§7.6 item 10).
 
 `check_county_isolation.py` exists because the same bug has now been caught **three separate times**:
 a writer that forgot to carry the `county` column. It is asserted rather than trusted for that reason.
@@ -1131,9 +1141,34 @@ confirmed. Commit messages are written as statements of what changed and why
 
 ---
 
-## 7. Current status — as of 23 Sep 2026
+## 7. Current status — as of 7 Oct 2026
 
 ### 7.1 Overall
+
+🟢 **Live, healthy, and delivering.** Checked end to end on 7 Oct 2026: both counties flowing,
+151,824 filings indexed (Miami-Dade through 1 Oct, Broward through 30 Sep), Broward's feed lag back
+to a normal 4 business days with every available day harvested, eight consecutive successful
+off-box backups, and the weekly email delivered to real recipients for the first time on Mon 5 Oct.
+
+**Four items were closed or corrected on 7 Oct 2026, and two of them turned out to be stale
+documentation rather than open work:**
+- **Name variants (code).** `canonicalize()` was treating bare `COMPANY` and `LIMITED` as brand
+  content, permanently splitting every firm the county recorded both ways — Bank of New York Mellon
+  Trust broke 179/178. 119 canonical names merged (§7.4 item −7a).
+- **Backups (code).** A snapshot taken during a rebuild could retire a good archive in its favour.
+  Closed, and the fix deliberately does **not** suppress the backup itself (§7.5).
+- **Facility type over-labelling (docs).** Fixed in code on 12 Sep and the recompute has since been
+  applied in production; the page still described it as pending (§7.4 item 7).
+- **Off-box backups and the Azure app (docs).** Both had been done for weeks while §7.6 still
+  listed them as needing the owner. The page had been contradicting itself.
+
+**Also cleaned up on the droplet:** four expired one-off cron entries whose own comments said
+"REMOVE AFTER" — date-pinned to September with no year, so they would have re-fired in Sept 2027 —
+and a cron comment still claiming the weekly email was gated off. `dist/index.cjs` had also been
+18 days behind `HEAD`; harmless at the time because every commit since the last build touched only
+the email path, but it is the exact shape of the "deploy silently fails" risk, so it was rebuilt.
+
+#### Earlier context (18–21 Sep 2026)
 
 **18–21 Sep 2026: the QC audit's fixes are being applied over the weekend.** A read-only audit of the
 whole tool (17 Sep) and the owner's review of it produced six confirmed fixes
@@ -1370,8 +1405,8 @@ endpoints healthy across all three county scopes.
 | Direction of transfer (Miami-Dade) | 🟡 **Fix built 18 Sep 2026, applied in the 19 Sep rebuild** — `document_direction.py`; review list in `direction_decisions` (no screen yet) |
 | Stored document text (`document_text`) | 🟡 **Filling 18–19 Sep 2026** — every Miami-Dade loan transfer re-read and kept (~1.7 KB/doc compressed); future audits need no re-download |
 | Weekend progress page (`/weekend`) | 🟢 Deployed 18 Sep 2026 — read-only view of the weekend run |
-| Broward county feed lag | 🟡 **The county publishes 3–6 business days late, and that lag doubled around 23 Sep 2026** — Broward's records stopped at 25 Sep for over a week. **Not a harvest failure:** every day on the feed was taken within hours of appearing, verified by listing the feed directly (09-25 data was published 01 Oct). The defect was that nothing said so — the daily job reported `status=ok` and "every day on the feed has been harvested", both true, while the figures aged. Now measured and warned above 5 business days (`collector/broward_images.py`), pinned by `collector/tests/check_feed_lag.py`, and the weekly email carries a self-clearing notice. **Getting Broward nearer real-time would need portal scraping — not built** |
-| Weekly emailed report ("AMO Market Monitor") | 🟢 **LIVE as of 2 Oct 2026 — sends Monday 07:00 ET.** The 15/30/360-day roll-up is on the droplet and is what cron would execute — the scripts run from source via `tsx`, so the unbuilt `dist/` is irrelevant to the email and the earlier "still sends the previous 15-day template" note was wrong. Moved out of `run_weekly.sh` into `send_weekly_email.sh` on its own cron entry (§6.5). **`REPORT_EMAIL_ENABLED=1` is now set**, so Monday 5 Oct is the roll-up's first send to a real recipient. Template changed the same day at the owner's request: transaction-mix section removed, and five large firms hidden from the email only (§4.1a). Last previous send: 21 Sep, old template, same two recipients |
+| Broward county feed lag | 🟢 **Recovered — 4 business days as of 7 Oct 2026**, back inside the county's normal 3–6 range, with every one of the ten days on the feed harvested. The lag had roughly doubled around 23 Sep and held Broward at 25 Sep for over a week. **That was never a harvest failure:** every day was taken within hours of appearing, verified by listing the feed's own file timestamps (25 Sep data was published 1 Oct). The defect was that nothing said so — the daily job reported `status=ok` and "every day on the feed has been harvested", both true, while the figures aged. Now measured and warned above 5 business days (`collector/broward_images.py`), pinned by `collector/tests/check_feed_lag.py`, with a self-clearing notice in the weekly email. **Lesson: a single snapshot of a sliding window cannot distinguish "stopped" from "slow" — read the source's own timestamps.** Getting Broward nearer real-time would need portal scraping — not built |
+| Weekly emailed report ("AMO Market Monitor") | 🟢 **LIVE and delivering. First real send Mon 5 Oct 2026, 07:00 EDT** — 407 transfers in 15 days, to `andres@` + `david@`. Every design decision held: 11:00 UTC landed on 07:00 EDT to the second, the two-firings/one-send hour guard admitted exactly one, and the 8-second runtime meant the `normalize.py` wait never engaged. Runs from source via `tsx` on its own cron entry (§6.5), so `dist/` is irrelevant to it. Template per the owner's 2 Oct request: no transaction-mix section, five large firms hidden from the email only (§4.1a). **Unproven in one direction:** the late-records notice has never fired in production — Broward has stayed at or under the 5-business-day threshold — so its only render was a pinned-date test |
 | County-aware server + client selector | 🟢 Deployed |
 | Per-county document links | 🟢 Deployed |
 | Endpoint county scoping | 🟢 Deployed — all document endpoints |
@@ -1382,10 +1417,45 @@ endpoints healthy across all three county scopes.
 | Entity normalization / duplicate manager | 🟢 Deployed 6 Aug 2026 |
 | FDIC analytics | 🟡 Live, **one fix pending deploy** (24 Aug 2026). Audited for the CET1/CRE direction inversion found in the sibling tool — **clean**; peer-ranking logic consolidated into `client/src/lib/peer-metrics.ts` behind a direction guardrail. A **real** bug was found and fixed: the 18-month query window could not satisfy the 8-quarter year-over-year comparison, so **NI YoY % was blank for every institution since it shipped** — window now 27 months and row limit raised together, verified live (0 → 990 of 1,215 national). National coverage remains asset-truncated by design (~1,113 of ~4,450; the tab now says so). Composite opportunity/earnings/vulnerability scores are still hardcoded to `0` and unused — AMO has no composite ranking |
 | Deal Intelligence page | ⚫ **Retired 11 Aug 2026** — page and its 8 endpoints removed together |
-| Automated backups | 🟢 **Live off-box 17 Aug 2026** — nightly verified snapshot → DigitalOcean Spaces (`amo-dashboard-backups-ec`, NYC3). Restore verified from the bucket copy |
+| Automated backups | 🟢 **Live off-box 17 Aug 2026** — nightly verified snapshot → DigitalOcean Spaces (`amo-dashboard-backups-ec`, NYC3). Re-verified 7 Oct 2026: eight consecutive `status=ok` runs, ~148MB per archive. **Hardened 7 Oct 2026** — waits out a running `normalize.py`, asserts the derived tables separately, and records a `degraded` status that cannot count as good or rotate a complete archive away (§7.5). Only one restore has ever been performed (17 Aug); another drill is the open item, not a credential |
+| Entity naming / name variants | 🟡 **Legal-suffix class closed 7 Oct 2026** — bare `COMPANY`, `LIMITED` and spaced `L P` now strip, merging 119 canonical names that no amount of suffix stripping could previously reunite (Bank of New York Mellon Trust had broken 179/178). Pinned by `check_company_suffix.py`. **Still split:** geographic qualifiers (correctly — see §7.6 item 9), state abbreviations, OCR digit-for-letter, and a bare trailing `&` |
 | Droplet MCP tools (`tools/droplet-mcp/`) | 🟢 **New 22 Sep 2026** — seven named tools over SSH (§6.4a). Developer-machine only; nothing installed on the droplet, no new credential, no change to how production runs. Smoke-tested against live: read-only tools returned, `db_query` write rejected by SQLite, both guarded tools refused without `confirm` |
 
 ### 7.4 Known gaps and open items
+
+**−7a. CLOSED 7 Oct 2026 — bare `COMPANY` and `LIMITED` were treated as brand content, splitting
+firms permanently.** `canonicalize()` already stripped `CORPORATION`, `INCORPORATED`, `LTD`, `CO`
+and `LP`. It did not strip bare `COMPANY` or bare `LIMITED`, and `\bCO\.?\b` cannot reach `COMPANY`
+across a word boundary — so every firm the county recorded both ways stayed two entities, with no
+path for suffix stripping to ever reunite them.
+
+The scale was not marginal. **Bank of New York Mellon Trust broke 179/178** — a near-even split of
+one institution. Northern Trust 179/88, MCLP Asset 486/130, FDIC 622/14, Forethought Life Insurance
+129/13, MetLife 111/25. Measured across all **45,262** distinct recorded names: **120 collision
+groups, 119 canonical names merged away, 88 of them with real filings behind them**, and every one
+of those 88 was read and confirmed to be a single real company before the change was committed.
+
+Three couplings had to move with it, each of which fails silently:
+- **`LIMITED PARTNERSHIP` and `LIMITED LIABILITY` must be stripped as whole phrases, ahead of bare
+  `LIMITED`.** Word-by-word stripping leaves a dangling `... PARTNERSHIP` or the nonsense
+  `A FLORIDA LIABILITY`, which splits a firm a *second* way instead of merging it. Ordering is what
+  gathers all seven Cardinal Financial spellings into one.
+- **A spaced `L P`.** `\bLP\b` needs the letters joined and `\bL\.P\.\b` needs the period, so the
+  spelling the index also uses fell through both.
+- **`ENTITY_TYPE_PATTERNS` match the *canonical* name.** `NWL COMPANY` was listed under `TRUST`,
+  so dropping `COMPANY` would have quietly dropped **106 filings** to `OTHER`. Re-anchored to
+  `^NWL$` rather than `\bNWL\b`, because production also holds NWL Credit Holdings, NWL Credit
+  Investors I and II, and NWL 7600 Fisher Island Lender — separate entities, and not trusts.
+
+Like the 23 Sep comma fix, this can only merge names that were **already identical apart from the
+dropped word**, so the blast radius is exactly enumerable and it cannot fabricate an entity the way
+the old leading-digit strip did. Pinned by `collector/tests/check_company_suffix.py`, which asserts
+the converse too — including the case that must *not* merge. The email's five excluded firms were
+checked in both directions and are unaffected.
+
+**What this does not fix is §7.6 item 9**, and the owner's own example is the reason: `CITY NATIONAL
+BANK` and `CITY NATIONAL BANK OF FLORIDA` stay apart deliberately, because a geographic qualifier is
+not a legal suffix and City National Bank of Los Angeles is a different real bank.
 
 **−8. NEW 23 Sep 2026 — two credit-facility rows name the LLM's hedging instead of a lender.**
 `credit_facility_events.lender_brand` contains, literally, `IMPLIED AS THE LENDER IN THE FACILITY,
@@ -1711,16 +1781,28 @@ This had survived since the feature shipped because the verification gate compar
 against "not a facility" and never checked which type was chosen — *a field no test asserts is a
 field nothing protects*. `collector/tests/check_facility_type.py` now guards the rules offline.
 
-⏳ **Existing rows still carry the old labels** until the recompute in §6.8 is run — under a second,
-but it moves 260 documents out of the facility dataset and so is an owner's call. **The field-level
-defects described above (empty lender name, amount contradicting its own quote) are NOT fixed.**
+✅ **The recompute has been run.** Verified against production 7 Oct 2026: `credit_facility_events`
+holds **warehouse 304 · business line of credit 67 · syndicated 11**, against 623-of-625 warehouse
+and *zero* syndicated before the fix, and the distribution is spread across all four years rather
+than only recent ones — so old rows were relabelled, not just new ones. The 243 documents whose only
+named agreement was conveyancing boilerplate have left the facility dataset (625 → 382 rows). The
+original complaint is resolved at the row level too: every remaining Amerant warehouse row is to an
+LLC under an agreement literally named "Mortgage Warehouse Line of Credit and Security Agreement",
+and the consumer HELOCs now sit in their own bucket. **The field-level defects described above
+(empty lender name, amount contradicting its own quote) are NOT fixed.**
 
-**8a. Backups are taken and verified, but not yet off-box.** As of 15 Aug 2026 `run_backup.sh` runs
-nightly at 03:15, takes an online-API snapshot, integrity-checks it, asserts it is non-empty, gzips
-it and keeps the last 7 locally. The DigitalOcean Spaces upload is written and tested, but
-**dormant until a Space and access key exist** — the job reports `local_only` and the Overview shows
-an amber banner while that is true. Local-only backups do not address the actual risk, which is loss
-of the host. To activate, add to `/opt/amo-dashboard/.env`:
+**8a. ✅ RESOLVED — backups reach off-box storage nightly.** `run_backup.sh` runs at 03:15, takes an
+online-API snapshot, integrity-checks it, asserts it is non-empty, gzips it, keeps the last 7
+locally and uploads to `spaces:amo-dashboard-backups-ec`. Verified 7 Oct 2026: the eight most recent
+`backup_runs` rows all read `status=ok` with that remote, ~148MB per archive. This item and §7.6
+item 3 both described it as dormant long after the Space existed — the risk register row has said
+"Resolved 17 Aug 2026" since then, and the two disagreed.
+
+Two things still true and worth keeping. First, a snapshot whose **derived** tables are empty is now
+recorded as `degraded` rather than `ok`: it is still kept and uploaded, because the raw tables are
+the irreplaceable part and the derived ones rebuild in one `normalize.py` run, but it may not count
+as good or rotate a complete archive away (7 Oct 2026 — see §7.5 and `check_backup_degraded.py`).
+Second, for reference, the environment this needs in `/opt/amo-dashboard/.env`:
 
 ```
 BACKUP_REMOTE=spaces:<bucket-name>
@@ -1734,6 +1816,9 @@ RCLONE_CONFIG_SPACES_SECRET_ACCESS_KEY=<secret>
 Configuring rclone through environment variables rather than `rclone.conf` is deliberate: `.env` is
 already gitignored, so the credential exists in exactly one place. `rclone` must also be installed
 (`apt-get install -y rclone`) — until it is, the job reports `local_only` rather than failing.
+
+**Still genuinely open in this area:** nothing has been restored from the bucket since the one test
+on 17 Aug 2026. A backup nobody has restored is a hypothesis.
 
 **8b. ~~`DealIntelligence.tsx` is unrouted~~ — RESOLVED 11 Aug 2026: retired.**
 The page and its 8 endpoints were removed together (deleting the page alone would have left
@@ -1797,7 +1882,7 @@ healthy (640 rows, 57% carrying loan amounts).
 | Data changed without clearing the cache | Stale dashboard for up to 7 days | Nightly restart; `POST /api/cache/bust` |
 | Single droplet, single SQLite file | Total loss on host failure | **Resolved 17 Aug 2026** — nightly verified snapshot to DigitalOcean Spaces (different failure domain from the droplet), 7 archives retained locally, all Broward images mirrored. Restore tested from the bucket copy, counts matched live exactly |
 | Backups run but silently stop working | False confidence — the failure is only discovered when a restore is attempted | Every run records status in `backup_runs`. The Overview shows **red** when the job is absent, errored, or has not run in 48h, and **amber** when it is working but not reaching off-box storage. Snapshots are integrity-checked and row-count-asserted before they may rotate an older one away |
-| A backup is taken while `normalize.py` is mid-run | The snapshot restores a dashboard showing **zeros**, and passes verification, so the failure is invisible until a restore is attempted | **Open — confirmed live 22 Sep 2026.** `amo-20260916-031501.db.gz`, one of the seven currently retained, holds `aom_events_clean` = 0. `aom_events_clean` is empty for ~90 minutes of every rebuild (§6.5), and the row-count assertion keys on a table that stays full, so an empty one rotates a good snapshot away. The 03:15 slot does not collide with the 08:30 cron rebuild — it collided with a **manual** one. Fix: assert non-zero `aom_events_clean` in `run_backup.sh` and refuse to run while a normalize lock is held |
+| A backup is taken while `normalize.py` is mid-run | The snapshot restores a dashboard showing **zeros**, and passes verification, so the failure is invisible until a restore is attempted | **Closed 7 Oct 2026.** `run_backup.sh` now waits out a running rebuild before snapshotting (the same `pgrep` gate the nightly normalize and the weekly email use), and gives `aom_events_clean` its own assertion — the old one keyed on `assignments`, which stays full throughout. An empty derived table is recorded as a new `degraded` status that bars the run from counting as good and **skips rotation entirely**. Deliberately *not* the fix proposed here previously ("refuse to run"): refusing would suppress the nightly Broward image copy too, and those images are the one unrecoverable thing in the system. `check_backup_degraded.py` runs the real script and, against the pre-fix version, reproduces the incident |
 | A headline figure counts the wrong thing and nobody notices | Numbers go outward that overstate the dataset — the entity count included thousands of homeowners as if they were lenders, for an unknown period before 20 Sep 2026 | **Partly open.** Fixed at source by the 16 and 19 Sep party fixes (§7.4 item −6), and §7.2 now records the query behind each published figure. But nothing asserts that a figure still measures what its label claims; this one was caught only because the whole table was re-derived by hand |
 | Weak default password | Unauthorised access | `AMO_PASSWORD`/`AMO_SECRET` must be set in the production `.env` |
 | A search returns more results than the county will serve | **Documents silently missing on the busiest days.** The portal caps a search at ~500 index rows. The collector splits a date range into smaller chunks until it fits, but it cannot split below a single day — so on 23 days between 11 Jan 2023 and 3 Feb 2026 it stored what it was given and moved on. Those days hold 109–145 documents each against a daily average of 59, consistent with truncation | **Open.** The affected days are recorded as `CAPPED` in `collection_log`, so they are identifiable. Recovering them needs a narrower search axis than date — party name or book range |
@@ -1817,25 +1902,19 @@ healthy (640 rows, 57% carrying loan amounts).
    2025-12-31, ~41,900 documents, TIFF as the daily FTP feed already delivers so it drops straight
    into the existing pipeline. Would also close the Jan–Jun 2026 index gap if requested together.
 
-3. 🔑 **Create a DigitalOcean Space and give the key to the backup job.** The nightly job is built,
-   tested and running as of 15 Aug 2026 — but it is copying to the same disk it is protecting until
-   this is done, which does not address the risk it exists for. Create a Space, generate a Spaces
-   access key, and add the six lines in §7.4 item 8a to `/opt/amo-dashboard/.env`. ~$5/month.
-   The amber banner on the Overview clears once the first upload succeeds.
-4. 📧 **Register an Azure app so the weekly emailed report can send** (§7.4 item 9). The app
-   password was installed and the content approved, but DigitalOcean blocks outbound SMTP from the
-   droplet, so that path cannot work regardless. The Graph transport is built and deployed; it needs
-   an app registration on the `safeharborcp.com` tenant: Azure portal → App registrations → New
-   registration; from **Overview** take the Directory (tenant) ID and Application (client) ID; from
-   **Certificates & secrets** create a client secret and take its *value*; under **API permissions**
-   add Microsoft Graph → **Application permissions** → `Mail.Send` (plus `User.Read.All` for the
-   `--check` mailbox probe) and click **Grant admin consent**. Requires an M365 administrator.
-   Add all three to `/opt/amo-dashboard/.env` as `GRAPH_TENANT_ID`, `GRAPH_CLIENT_ID`,
-   `GRAPH_CLIENT_SECRET` — never pass secrets through chat.
-   **Recommended hardening:** app-only `Mail.Send` permits send-as for *every* mailbox in the
-   tenant; scope it to the one sender with an Exchange `ApplicationAccessPolicy`.
-   *Parallel option, if preferred:* a DigitalOcean support ticket asking them to lift the SMTP block
-   (framed as one authenticated internal report per week) would revive the simpler SMTP path.
+3. ✅ **DONE — the DigitalOcean Space exists and the backup job uses it.** Verified 7 Oct 2026: the
+   eight most recent runs all recorded `status=ok` against `spaces:amo-dashboard-backups-ec`. This
+   item and §7.4 item 8a had both stayed on the list long after the Space was created, while the
+   risk register recorded it as resolved on 17 Aug 2026 — the page disagreed with itself for seven
+   weeks. What remains is not a credential but a drill: **restore from the bucket again**, since
+   the only restore ever performed was the one on 17 Aug.
+4. ✅ **DONE — the Azure app is registered and the weekly email is live.** The Graph transport sent
+   its first report to real recipients on **Monday 5 Oct 2026 at 07:00 EDT** and has been verified
+   end to end (§4.1a). DigitalOcean's outbound SMTP block is now moot — Graph was the answer, not
+   a workaround.
+   **One piece of hardening still outstanding:** app-only `Mail.Send` permits send-as for *every*
+   mailbox in the tenant. Scope it to the one sender with an Exchange `ApplicationAccessPolicy`.
+   That needs an M365 administrator and is the only remaining action in this item.
 
 **Engineering:**
 
@@ -1844,11 +1923,14 @@ healthy (640 rows, 57% carrying loan amounts).
    and we request all three (see §3). Nothing was missing. The AIT failure was diagnosed — the county
    returns no results for that type and never has — and fixed so it no longer stalls each run. UCC
    financing statements (`FST`) were added as a new source of lending relationships.
-   (ii) ✅ **Classification: mostly answered.** "Assignments of collateral" was never a missing
-   document type — 19,123 documents already carry `COLLATERAL`. **Still open:** facility *type*
-   over-labelling (item 7 below), where nearly everything recent reads
-   `warehouse_or_revolving_credit_facility` including obvious consumer HELOCs. Any extraction-prompt
-   change must re-pass `verify_integration.py` at 21/21.
+   (ii) ✅ **Classification: answered, and now closed.** "Assignments of collateral" was never a
+   missing document type — 19,123 documents already carry `COLLATERAL`. The facility *type*
+   over-labelling that was still open here is **fixed and applied in production** (§7.4 item 7,
+   verified 7 Oct 2026): the decision moved from the prompt into a deterministic rule in code on
+   12 Sep 2026, and the recompute has since relabelled every existing row. No prompt change was
+   needed, so the `verify_integration.py` 21/21 gate was never put at risk — which is why the fix
+   went into code in the first place: adding rules to the prompt had fixed only 6 of 16 sampled
+   cases.
    (iii) ✅ **DONE 10 Sep 2026 — Wilmington Savings, MERS, Fannie Mae and Freddie Mac are hidden
    from the Reporting tab.** Display filter only; every row stays in the database and every other
    page still counts them. See §4.3 for what this changes on screen.
@@ -1876,6 +1958,31 @@ healthy (640 rows, 57% carrying loan amounts).
 8. **Clean up the four ad-hoc `backup_pre_*.db` files** on the droplet (~420MB). They predate the
    automated job and are unrotated. Keep `backup_pre_broward_normalize.db` — `ROLLBACK.md` and §6.8
    both name it as the Broward rollback point — and copy the rest to Spaces before deleting.
+9. **Truncated and abbreviated name variants that the suffix rules cannot reach.** The 7 Oct 2026
+   change closed the legal-suffix class (§7.4 item −7a), and the 23 Sep comma fix closed another,
+   but three kinds remain, each needing a different mechanism rather than a wider rule:
+   · **geographic qualifiers** — `CITY NATIONAL BANK` vs `CITY NATIONAL BANK OF FLORIDA`. These are
+     two different real banks, so this one is *correct as it stands* and must not be "fixed"; the
+     owner's original example is the trap, not the bug. Only a human can say which rows are which.
+   · **state abbreviations and OCR digits** — `CITY NATIONAL BANK OF FLA` (1 filing) and
+     `CITY NATIONAL BANK 0F FLORIDA` (1 filing, digit zero for the letter O). Small, mechanical,
+     and safely fixable; not bundled into the suffix change so that change carried one source of
+     variation.
+   · **a bare trailing `&`** — `JAMES B NUTTER &` is a real canonical name. Stripping it would also
+     turn the OCR truncations `EVOLVE &`, `GROVE &` and `UNIVERSAL &` into bare generic words, and
+     `UNIVERSAL` is exactly the kind of word that absorbs unrelated firms. Needs the "confirmed
+     landing" treatment (only strip when the shortened name already exists) rather than a blanket
+     rule.
+   Separately, `canonicalize()` strips a bare `II`/`III` as if it were a suffix, which merges
+   `ARVE INVESTMENTS II` into `ARVE INVESTMENTS` while leaving `NWL CREDIT INVESTORS I` and `II`
+   apart. That is long-standing behaviour, pinned by the baseline, and a roman-numeral problem
+   rather than a suffix one — worth a deliberate decision, not a drive-by change.
+10. **Give the Python guardrails a single entry point.** There are fifteen `collector/tests/check_*.py`
+   and they are run by hand from the table in §6.6; `npm run check` covers only the four TypeScript
+   gates. Four of the fifteen had never been added to that table, found on 7 Oct 2026 by diffing the
+   directory against the page. The checks are the main defence against the silent-correctness bugs
+   this project keeps finding, so the one that is easiest to forget to run is the weak link.
+11. **Restore from the bucket again.** The only restore ever performed was 17 Aug 2026 (§7.4 item 8a).
 
 ---
 

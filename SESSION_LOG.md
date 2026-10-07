@@ -4,6 +4,144 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-10-07 — two real fixes, two stale doc claims, and a cron cleanup
+
+Session opened as "review the docs, where did we leave off". Four items were picked up: a production
+health check, the truncated-name duplicates thread, the backup-mid-normalize risk, and facility-type
+over-labelling. **Two were code; two turned out to be documentation that had gone stale while the
+work was already done.**
+
+### Production health — checked, not assumed
+
+Healthy. 151,824 filings (Miami-Dade through 1 Oct, Broward through 30 Sep), 57,248 loan transfers,
+uptime 77 days, disk 8%. **Broward recovered on its own:** feed lag back to **4 business days**, all
+ten days on the feed harvested, `status=ok`. The 23 Sep lag doubling has resolved without
+intervention, as the publishing-lag table predicted.
+
+**`dist/index.cjs` was 18 days behind `HEAD`** (built 19 Sep, HEAD 5 Oct). Benign *at that moment* —
+every commit since touched only `server/email/`, which runs from source via `tsx` — but it is
+exactly the "deploy silently fails" risk, and it stopped being benign the moment this session
+touched `routes.ts`. **Check `date -r dist/index.cjs` against `git log -1`, not just the pull.**
+
+**SSH was dead at session start again** — `ssh-add -l` reported no identities (the agent is emptied
+by a reboot). `ssh-add --apple-load-keychain` restores it with no passphrase re-entry. Same as 2 Oct;
+worth checking first rather than debugging the droplet.
+
+### THE finding — `canonicalize()` never stripped bare COMPANY or LIMITED
+
+The owner's reported example (`CITY NATIONAL BANK` vs `CITY NATIONAL BANK OF FLORIDA`) is **the one
+member of that class that must NOT be merged** — City National Bank of Los Angeles is a different
+real bank, and "OF FLORIDA" is a geographic qualifier, not a legal suffix. But measuring the class
+found the real defect underneath it.
+
+`STRIP_SUFFIXES` had `CORPORATION`, `INCORPORATED`, `LTD`, `CO`, `LP` — and **not bare `COMPANY` or
+bare `LIMITED`**. `\bCO\.?\b` cannot reach `COMPANY` across a word boundary, so every firm the county
+recorded both ways was permanently two entities with no path to reunite.
+- **BANK OF NEW YORK MELLON TRUST broke 179/178** — a near-even split of one institution.
+  NORTHERN TRUST 179/88, MCLP ASSET 486/130, FDIC 622/14, FORETHOUGHT 129/13, METLIFE 111/25.
+- Measured over all **45,262** distinct recorded names: **120 collision groups, 119 names merged
+  away, 88 with real filings** — all 88 read and confirmed to be one real company *before* committing.
+- **Three couplings, each silent.** (1) `LIMITED PARTNERSHIP` and `LIMITED LIABILITY` must strip as
+  whole phrases AHEAD of bare `LIMITED`; word-by-word leaves a dangling `... PARTNERSHIP` or the
+  nonsense `A FLORIDA LIABILITY`, splitting a firm a second way instead of merging it. Ordering is
+  what gathers all **seven** Cardinal Financial spellings. (2) spaced `L P` — `\bLP\b` needs the
+  letters joined, `\bL\.P\.\b` needs the period. (3) **`ENTITY_TYPE_PATTERNS` match the CANONICAL
+  name**: `NWL COMPANY` was listed under `TRUST`, so 106 filings would have dropped to `OTHER`.
+  Re-anchored `^NWL$`, NOT `\bNWL\b` — production also holds NWL CREDIT HOLDINGS, NWL CREDIT
+  INVESTORS I/II and NWL 7600 FISHER ISLAND LENDER, which are separate entities and not trusts.
+- Email exclusions checked in both directions (do the five still map to themselves; did any
+  canonical name newly contain or stop containing one) — unaffected.
+- `check_company_suffix.py` pins both directions, including the geographic qualifier that must not
+  merge. **Negative control run: reverting the fix fails all 10 merge groups + the NWL coupling.**
+- **Gotcha, and the guard caught me doing it:** my first SPLIT assertions used *invented* spellings
+  (`ARVE INVESTMENTS II LIMITED PARTNERSHIP`) and failed — because `canonicalize()` **already strips
+  a bare `II`/`III`**, long-standing and baseline-pinned. Pre-existing roman-numeral behaviour, not
+  mine, left alone deliberately. The file's own rule — use real production spellings — exists for
+  exactly this.
+- **`gen_canonicalize_baseline.py --from-baseline` added.** Re-derives outputs over the inputs
+  already in the .tsv instead of re-reading the DB, which keeps the diff a *pure* review artifact.
+  Re-reading the database folds in every name collected since the last regeneration and a reviewer
+  then cannot separate a new name from a changed mapping. Diff here: **530 changed, 0 added, 0 removed.**
+
+### Backups — fixed the rotation, NOT the backup
+
+Risk register said: "assert non-zero `aom_events_clean` and refuse to run while a normalize lock is
+held". **The "refuse" half is wrong and was not implemented.** Refusing suppresses the nightly
+Broward **image** copy too, and those images are the one unrecoverable thing in the system — a
+crashed normalize nobody noticed for a week would cost seven nights of them. The raw tables are what
+is irreplaceable; derived tables rebuild in one run.
+
+So: (1) **wait** out a running rebuild before snapshotting (same `pgrep -f "[n]ormalize\.py"` gate
+`run_nightly_normalize.sh` and `send_weekly_email.sh` use), bounded 2h; (2) give `aom_events_clean`
+its own assertion — the old one keyed on `assignments`, which stays full through a rebuild and so
+could never see the empty window; (3) an empty derived table records a new **`degraded`** status
+that cannot count as good and **skips rotation entirely**. Kept and uploaded regardless.
+
+`degraded` is **red** on the Overview with its own message, because `lastGoodBackup` keys on `'ok'` —
+without the flag an unbroken run of degraded nights reads as a healthy job while the last restorable
+copy ages out of the seven retained.
+
+`check_backup_degraded.py` **runs the real `run_backup.sh`** against a temp DB rather than restating
+its rules: the bug lived entirely in the gap between what the script asserted and what it did with
+the result, so a test re-stating the intended rule would have passed against the broken version.
+**Against the pre-fix script it reproduces the 16 Sep incident exactly** — rotates a good archive out
+in favour of the empty one.
+
+### Two items that were already done — the page was contradicting itself
+
+1. **Facility-type over-labelling: DONE, and the recompute HAS been applied.** Production reads
+   **warehouse 304 · business line of credit 67 · syndicated 11**, against 623-of-625 warehouse and
+   *zero* syndicated before the 12 Sep fix, spread across all four years — so old rows were
+   relabelled, not just new ones. 625 → 382 rows as the boilerplate-only documents left. The
+   original complaint is resolved at row level: every remaining Amerant warehouse row is to an LLC
+   under an agreement literally named "Mortgage Warehouse Line of Credit and Security Agreement",
+   and the $1.94B JPMorgan row is gone. §7.4 item 7 still carried a "⏳ existing rows still carry the
+   old labels". **No prompt change, so the `verify_integration.py` 21/21 gate was never at risk** —
+   which is why the fix went into code: prompt rules had fixed only 6 of 16 sampled cases.
+2. **Off-box backups and the Azure app registration.** §7.6 items 3 and 4 both listed them as
+   needing the owner. Spaces has been live for weeks (eight consecutive `status=ok` runs to
+   `spaces:amo-dashboard-backups-ec`, ~148MB each) and the risk register had said "Resolved 17 Aug"
+   the whole time — **the page disagreed with itself for seven weeks.** The email went live 2 Oct and
+   delivered 5 Oct.
+
+### Droplet housekeeping
+
+- **Crontab cleaned** (backed up to `collector/crontab.before_cleanup.20261007T142940Z` first):
+  removed four expired one-offs whose own comments said "REMOVE AFTER" — the 18–21 Sep weekend run,
+  the 17 Sep QC audit, the 24 Sep comma-fix normalize. **They were date-pinned to September with no
+  year, so they would have re-fired in Sept 2027.** Five real jobs + the email entry retained.
+- Corrected the cron comment still claiming `REPORT_EMAIL_ENABLED` is UNSET — it was set 2 Oct.
+- Deployed: pull → `npm run build` → `pm2 restart` → all five guardrails PASS **on the droplet** →
+  `normalize.py` under `nohup`+`disown` → `pm2 restart` to bust the 7-day cache.
+
+### Open / next session
+
+1. **Name variants the suffix rules cannot reach**, each needing a different mechanism, not a wider
+   rule: **geographic qualifiers** (`CITY NATIONAL BANK` vs `... OF FLORIDA` — *correct as it
+   stands*, do not "fix"); **state abbreviations and OCR digits** (`OF FLA`, and `0F FLORIDA` with a
+   digit zero — 1 filing each, small and safely fixable); **a bare trailing `&`** (`JAMES B NUTTER &`
+   is real, but stripping it also turns the OCR truncations `EVOLVE &`/`GROVE &`/`UNIVERSAL &` into
+   bare generic words, and `UNIVERSAL` absorbs unrelated firms — needs "confirmed landing", not a
+   blanket rule).
+2. **`canonicalize()` strips a bare `II`/`III`.** Merges `ARVE INVESTMENTS II` into `ARVE
+   INVESTMENTS` while leaving `NWL CREDIT INVESTORS I` and `II` apart. Long-standing, baseline-pinned,
+   a roman-numeral problem rather than a suffix one. Deserves a deliberate decision.
+3. **The Python guardrails have no runner.** `npm run check` covers only the TypeScript ones; the
+   twelve `collector/tests/check_*.py` are run by hand from a table in §6.6, so a new one is easy to
+   forget. A single entry point would be cheap.
+4. **Restore drill.** The only restore ever performed from the bucket was 17 Aug 2026. A backup
+   nobody has restored is a hypothesis.
+5. **Graph hardening:** app-only `Mail.Send` permits send-as for every mailbox in the tenant. Scope
+   it to the one sender with an Exchange `ApplicationAccessPolicy`. Needs an M365 admin.
+6. **The late-records notice in the email has still never fired in production** — Broward has stayed
+   at or under 5 business days. Only ever rendered under a pinned test date.
+7. **`(+0%)` subject cosmetic** still unfixed; only visible when a window comes out exactly flat.
+8. **STILL OUTSTANDING, oldest item, the only one with security consequences — the leaked GitHub
+   PAT** in `.git/config` on this Mac and the droplet. Repo is PUBLIC; never committed, so secret
+   scanning never saw it and nothing auto-revokes it. Open since 4 Aug 2026.
+
+---
+
 ## 2026-10-05 — the roll-up sent for real, on schedule, first time
 
 **It worked.** `collector/email.log`:
@@ -437,8 +575,11 @@ sent to `mktinfo@safeharborcp.com` + `enriquec012@outlook.com` only. **`run_week
 last, gated by `REPORT_EMAIL_ENABLED=1` (**not set** — awaiting owner OK for andres@/david@), waits for
 any `normalize.py` (Friday runs end 09:00–10:05 UTC, overlapping the 08:30 nightly rebuild), and uses
 `set -a` because GRAPH_* lines lack `export`. Send script refuses a 0-row report. **Gotcha:** an Edit
-wrote two literal NUL bytes for a ` ` separator — code ran, but git/grep treated report.ts as
-binary. Fixed; scan for NULs after writing escape sequences. Outlook ignores CSS max-width, so long
+wrote two literal NUL bytes where an escaped `\x00` separator was intended — code ran, but git/grep
+treated report.ts as binary. Fixed; scan for NULs after writing escape sequences. **And it happened
+again, in this very note:** writing the sentence above put a literal NUL into SESSION_LOG.md, so git
+reported this file as `Bin` and `rg` refused to search it for two weeks. Cleaned 7 Oct 2026 — if you
+describe a control character, spell its name, never paste it. Outlook ignores CSS max-width, so long
 cells are truncated in code.
 
 **Filter tooltips.** Every filter/view button (Reporting, Clean Transactions, Lending Relationships,
