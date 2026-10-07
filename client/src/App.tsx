@@ -7,6 +7,7 @@ import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import Sidebar from '@/components/Sidebar';
 import Dashboard from '@/pages/Dashboard';
+import Chat from '@/pages/Chat';
 import Assignments from '@/pages/Assignments';
 import CleanEvents from '@/pages/CleanEvents';
 import MarketAnalytics from '@/pages/MarketAnalytics';
@@ -30,6 +31,7 @@ export default function App() {
             <main className="flex-1 overflow-y-auto flex flex-col print:overflow-visible">
               <Switch>
                 <Route path="/" component={Dashboard} />
+                <Route path="/ask" component={Chat} />
                 <Route path="/clean-events" component={CleanEvents} />
                 <Route path="/market-analytics" component={MarketAnalytics} />
                 <Route path="/assignments" component={Assignments} />

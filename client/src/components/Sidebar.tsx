@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'wouter';
-import { BarChart2, FileText, CheckCircle, Shield, Building2, ClipboardList, Menu, X, LineChart, LayoutList, LogOut, Crosshair, Landmark, FileSignature } from 'lucide-react';
+import { BarChart2, FileText, CheckCircle, Shield, Building2, ClipboardList, Menu, X, LineChart, LayoutList, LogOut, Crosshair, Landmark, FileSignature, MessageSquare } from 'lucide-react';
 import { useState } from 'react';
 import { useCounty, COUNTY_OPTIONS, type CountyScope } from '@/lib/county';
 import { FilterHint } from '@/components/FilterHint';
@@ -7,6 +7,7 @@ import { COUNTY_DEF } from '@/lib/filterDefinitions';
 
 const NAV = [
   { href: '/',                 icon: BarChart2,    label: 'Overview',           group: 'main' },
+  { href: '/ask',              icon: MessageSquare,label: 'Ask the Data',       group: 'main' },
   { href: '/reporting',        icon: LayoutList,   label: 'Reporting',          group: 'analysis' },
   { href: '/targets',          icon: Crosshair,    label: 'Targets',            group: 'analysis' },
   { href: '/market-analytics', icon: LineChart,    label: 'FDIC Data Analytics',group: 'analysis' },

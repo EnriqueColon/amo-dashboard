@@ -4,6 +4,28 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-10-07 (evening) — "Ask the Data": chat over the database with GPT-6 Astra — BUILT, NOT DEPLOYED
+
+User asked whether users could type questions into a chatbox and get ChatGPT-style answers from the data; answer was yes, then "get started", model "a strong one — Astra or another". Built end to end in one session. **Not deployed and not yet run against the real model** (no `OPENAI_API_KEY` on the dev machine).
+
+### What was built
+- **Model: `gpt-6-astra`** (verified via web search: OpenAI flagship released 3–4 Sep 2026, `$10/M in · $50/M out`, 1.05M context, `reasoning_effort` low…max, tool calling on Chat Completions). Default in `server/chat/openai.ts`; overridable with `OPENAI_CHAT_MODEL` (`gpt-6-sol` = $2/$10 is the budget fallback), `OPENAI_CHAT_REASONING_EFFORT` (default `medium`; `none` omits the param), `OPENAI_BASE_URL` (gateway/mock).
+- **`server/chat/`** (new): `index.ts` — `POST /api/chat` SSE tool-calling loop (max 8 rounds, last round forces `tool_choice:'none'`), `GET /api/chat/config`; `tools.ts` — ten read-only tools; `prompt.ts` — system prompt with schema reference + 10 numbered data traps + answer style; `openai.ts` — raw-fetch streaming client (no SDK, same as the Python side), assembles parallel tool calls from fragmented deltas, `stream_options.include_usage`. Registered in `routes.ts` after `registerMarketIntelligenceRoutes`, so behind `checkAuth`. Startup warning if key missing (same pattern as MI). `.env.example` updated.
+- **Tools:** `get_dataset_overview` (per-county counts, date ranges, month gaps), `search_entities` (entity_nodes + aliases + raw-name fallback), `get_entity_profile` (node, counterparties both directions, txn mix, monthly, facilities), `get_top_entities` (from aom_events_clean so date/county-scopable — entity_nodes is not), `get_monthly_volume` (month/quarter/year, optional entity), `list_filings` (joins assignments for address), `get_lending_relationships` (reuses `queryGroupedFacilities`), `list_facility_filings` (evidence quotes), `get_document_text` (zlib-inflates `document_text.text_z`; graceful when table absent — local DBs lack it, prod has it since 18–19 Sep), `run_sql` (separate `readonly:true` + `query_only` connection; single statement; SELECT/WITH only; keyword blocklist; wrapped `SELECT * FROM (…) LIMIT 201`). All errors returned as data so the model can recover. Tool output capped at 60k chars (rows halved until it fits).
+- **Client:** `client/src/pages/Chat.tsx` at `#/ask`, nav "Ask the Data" in the main group. Streams via fetch + manual SSE parse; collapsible "N lookups" strip per answer (args, rows, ms, SQL text, errors); `react-markdown` + `remark-gfm` (new deps) with the typography plugin already in the Tailwind config; Stop (AbortController), New chat, suggestion chips, model/rounds/tokens footer, "can be wrong" disclaimer. Sends the active county scope; history is browser-only (user/assistant text), rebuilt server-side each turn.
+- Verified: `tsc` clean, `npm run check` passes, `npm run build` ok (client bundle 1.23 MB, server 925 kB). All tools exercised against `prod_snapshot.db` (70,355 filings) with correct shapes; SQL guard rejects `DELETE`, `;`-chained, `PRAGMA`. Full loop verified in-browser against a local mock of OpenAI's streaming protocol (text preamble → two parallel tool calls incl. `run_sql` → results → streamed markdown table); empty-upstream-stream path surfaces an `error` event.
+
+### Bug worth remembering
+- **`req.on('close')` fires as soon as the request body is consumed (Node ≥16)**, i.e. right after `express.json()`. Using it to detect client disconnect aborted every chat instantly and silently (200 in 6 ms, empty body, upstream never called). Fix: `res.on('close', () => { if (!res.writableFinished) abort.abort(); })`.
+
+### Dev-environment notes
+- Background processes started with `&`/`nohup`/`disown` from a tool shell die when the call returns; run long-lived dev servers as background shell tasks instead. `tsx` from `/tmp` needs `NODE_PATH=$PWD/node_modules`. `prod_snapshot.db` (21 Sep, 70k assignments / 445 facility rows) is the better local test DB; `miami_dade_amo.db` is older and thinner.
+
+### To deploy
+`git pull && npm run build`, then one-time env push: `export OPENAI_API_KEY="$(grep '^OPENAI_API_KEY=' .env | cut -d= -f2-)"` (already in `.env` for the collectors) → `pm2 restart amo-dashboard --update-env && pm2 save`. Verify `GET /api/chat/config` → `configured:true, model:gpt-6-astra`. Then ask ~a dozen real questions with the lookups strip open and tune `prompt.ts`. **Open:** no spend cap (est. $0.15–0.30/question; `[chat]` log line per request has tokens); `run_sql` has no statement timeout; Confluence §4.3/§6.2/§6.4/§6.9/§7.3/§7.4(−10)/§8 updated.
+
+---
+
 ## 2026-10-07 (later) — FDIC Data Analytics now reads Market Intelligence — DEPLOYED 16:56 UTC
 
 **Live on production at `dfd42f8`.** Commits: `0bcc0b3` (server client + routes, FDIC proxy removed),

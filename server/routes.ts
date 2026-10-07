@@ -2,6 +2,7 @@ import type { Express } from 'express';
 import type { Server } from 'http';
 import { getDb } from './db';
 import { registerMarketIntelligenceRoutes } from './market-intelligence';
+import { registerChatRoutes } from './chat';
 import { queryGroupedFacilities } from './lending/facilities';
 import { buildActivityWorkbook } from './reporting/workbook';
 import { loanRows, COUNTED_LOAN_AMOUNT } from './reporting/loanVolume';
@@ -1262,6 +1263,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   // 2026-10-07 when the page switched to consuming the Market Intelligence
   // analytics API. One source, one code path; see server/market-intelligence.ts.
   registerMarketIntelligenceRoutes(app);
+  registerChatRoutes(app);
 
   // ═══════════════════════════════════════════════════════════════════════════
   // TARGETS (user watchlist of market participants)

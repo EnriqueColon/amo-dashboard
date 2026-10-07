@@ -5,6 +5,7 @@ import { registerAuthRoutes, checkAuth } from "./auth";
 import { createServer } from "http";
 import { registerWeekendStatus } from "./weekend";
 import { warnIfMarketIntelligenceUnconfigured } from "./market-intelligence";
+import { warnIfChatUnconfigured } from "./chat";
 
 const app = express();
 const httpServer = createServer(app);
@@ -68,6 +69,7 @@ app.use((req, res, next) => {
 
 (async () => {
   warnIfMarketIntelligenceUnconfigured(log);
+  warnIfChatUnconfigured(log);
   registerWeekendStatus(app);
   await registerRoutes(httpServer, app);
 

@@ -281,6 +281,27 @@ private-credit activity), date coverage, monthly assignment volume chart, and th
 Sellers / Most Connected leaderboards.
 *Start here to see whether the data is current — the date range and last-collected date are the fastest health check.*
 
+#### Ask the Data (`/ask`) — built 7 Oct 2026, not yet deployed
+A chat box. Type a question in plain English — *"who were the top acquirers in 2025 and how does that
+compare to 2024?"*, *"which banks provide warehouse lines, and to whom?"*, *"what does CFN 2025R123456
+say?"* — and a language model (OpenAI **GPT-6 Astra** by default) answers from this database, the way
+ChatGPT would, with the figures streamed in as it writes.
+
+**How it stays honest.** The model never sees the database directly and cannot invent numbers from
+memory: it is given ten named lookups (entity search, entity profile, rankings, monthly volume,
+individual filings, lending relationships, facility filings, stored document text, dataset coverage,
+and a guarded read-only SQL query) and must call them. Every lookup it ran is shown above the answer
+in a collapsible **"N lookups"** strip, with the arguments, row counts, timings and — for SQL — the
+exact query, so a figure can always be traced. Its instructions carry the data traps documented on
+this page (never sum `facility_amount`, entity figures are cross-county, Broward is index-only,
+missing amounts are unknown not zero, collection gaps are not market stops), and it is told to state
+the county and date window it used. The active **county selector** is passed in as its default scope.
+
+Expect it to be wrong sometimes — the page says so under the box. Open the lookups and check the
+underlying page before relying on a number. The conversation lives in the browser tab only; **New
+chat** clears it. Nothing is written to the database, and the OpenAI key never reaches the browser
+(§5.5 login gate applies to `/api/chat` like every other route).
+
 #### UCC Filings (`/ucc`)
 Secured lending, and a **separate page from Reporting on purpose**. A UCC financing statement
 records a lender taking a security interest against a borrower — it is not a loan changing hands, so
@@ -599,7 +620,10 @@ amo-dashboard/
 │   ├── db.ts           schema + idempotent migrations, run at startup
 │   ├── auth.ts         single-password HMAC cookie gate
 │   ├── cache.ts        in-memory TTL response cache
-│   └── market-intelligence.ts   Market Analytics API client + /api/mi/* routes (replaced fdic.ts, 7 Oct 2026)
+│   ├── market-intelligence.ts   Market Analytics API client + /api/mi/* routes (replaced fdic.ts, 7 Oct 2026)
+│   └── chat/           "Ask the Data" (7 Oct 2026): index.ts POST /api/chat SSE loop · tools.ts the
+│                       ten read-only lookups · prompt.ts system prompt + schema + data traps · openai.ts
+│                       streaming Chat Completions client (no SDK)
 ├── shared/
 │   └── schema.ts
 ├── docs/
@@ -721,8 +745,11 @@ System dependencies for OCR: `poppler-utils` and `tesseract-ocr`
 | `AMO_SECRET` | `server/auth.ts` | HMAC signing key; derived from password if unset |
 | `PORT` | `server/index.ts` | Default `5000`; the only unfirewalled port |
 | `NODE_ENV` | `server/index.ts` | `production` serves the built bundle; anything else runs Vite |
-| `OPENAI_API_KEY` | `extract_pdfs.py`, `enrich_entities.py`, `batch_extract_facility.py` | |
-| `OPENAI_MODEL` | same | Default `gpt-4.1-nano` |
+| `OPENAI_API_KEY` | `extract_pdfs.py`, `enrich_entities.py`, `batch_extract_facility.py`, **and since 7 Oct 2026 `server/chat/`** | Already in production `.env` for the collectors; **the Node server now reads it too, so it must be pushed into PM2's environment once** (§6.4). Missing → startup warning, `/api/chat` answers 503, the page shows a notice |
+| `OPENAI_MODEL` | collector scripts | Default `gpt-4.1-nano` |
+| `OPENAI_CHAT_MODEL` | `server/chat/openai.ts` | Model behind Ask the Data. Default **`gpt-6-astra`** ($10/M in, $50/M out). `gpt-6-sol` ($2/$10) is the cheaper fallback if usage grows |
+| `OPENAI_CHAT_REASONING_EFFORT` | `server/chat/openai.ts` | `low` · `medium` (default) · `high` · `xhigh` · `max` · `none` (omits the parameter, for models that reject it) |
+| `OPENAI_BASE_URL` | `server/chat/openai.ts` | Default `https://api.openai.com/v1`; an OpenAI-compatible gateway or a local mock for tests |
 | `OPENAI_BUDGET_USD` | `extract_pdfs.py` | Hard spend cap per run |
 | `NORMALIZE_COUNTIES` | `normalize.py` | Default `MIAMI-DADE,BROWARD`; `ALL` for every county |
 | `CLERK_EMAIL` / `CLERK_PASSWORD` | `collect_live.py` | Miami-Dade portal login |
@@ -789,6 +816,12 @@ pm2 restart amo-dashboard --update-env && pm2 save
 # 3. verify — no "Market Intelligence is not configured" line, and login still works:
 pm2 logs amo-dashboard --lines 20 --nostream
 ```
+
+**Deploying Ask the Data (pending)** is the same shape, with one variable the collectors already have
+in `.env`: `export OPENAI_API_KEY="$(grep '^OPENAI_API_KEY=' .env | cut -d= -f2-)"` then
+`pm2 restart amo-dashboard --update-env && pm2 save`. Verify with `pm2 logs` (no "OPENAI_API_KEY not
+set" warning) and `GET /api/chat/config` from a logged-in browser (`configured: true`, `model`).
+`OPENAI_CHAT_MODEL` / `OPENAI_CHAT_REASONING_EFFORT` are optional and only need exporting if set.
 
 Do **not** `source .env` wholesale before `--update-env`: `.env` and `ecosystem.config.cjs` are both
 known to hold an `AMO_PASSWORD` that differs from the one PM2 is actually running with (§7.6), and a
@@ -1181,6 +1214,14 @@ the Batch API halves that again. The full ~44k-document historical facility back
 **$5–11 total**. `extract_pdfs.py` accepts a hard `--budget` cap per run, and `run_asg_backfill.sh`
 uses `--budget 5.0`.
 
+**Ask the Data is the one place a strong, expensive model is used** — `gpt-6-astra` at $10/M input and
+$50/M output. A question costs roughly 10–20k prompt tokens (an ~8k-token system prompt plus the tool
+results, re-sent on every tool round) and 0.5–2k output tokens, so **about $0.15–0.30 per question**, more
+for multi-step analyses. Each answer's footer shows its model, rounds and total tokens, and every
+request is logged as `[chat] gpt-6-astra rounds=N tokens=…` in the PM2 log, so spend is auditable.
+If usage grows, `OPENAI_CHAT_MODEL=gpt-6-sol` is a fifth of the price; there is no per-request budget
+cap yet (§7.4).
+
 The only other recurring cost is the droplet.
 
 ### 6.10 Keeping this page current
@@ -1510,8 +1551,21 @@ endpoints healthy across all three county scopes.
 | Automated backups | 🟢 **Live off-box 17 Aug 2026** — nightly verified snapshot → DigitalOcean Spaces (`amo-dashboard-backups-ec`, NYC3). Re-verified 7 Oct 2026: eight consecutive `status=ok` runs, ~148MB per archive. **Hardened 7 Oct 2026** — waits out a running `normalize.py`, asserts the derived tables separately, and records a `degraded` status that cannot count as good or rotate a complete archive away (§7.5). Only one restore has ever been performed (17 Aug); another drill is the open item, not a credential |
 | Entity naming / name variants | 🟡 **Legal-suffix class closed 7 Oct 2026** — bare `COMPANY`, `LIMITED` and spaced `L P` now strip, merging 119 canonical names that no amount of suffix stripping could previously reunite (Bank of New York Mellon Trust had broken 179/178). Pinned by `check_company_suffix.py`. **Still split:** geographic qualifiers (correctly — see §7.6 item 9), state abbreviations, OCR digit-for-letter, and a bare trailing `&` |
 | Droplet MCP tools (`tools/droplet-mcp/`) | 🟢 **New 22 Sep 2026** — seven named tools over SSH (§6.4a). Developer-machine only; nothing installed on the droplet, no new credential, no change to how production runs. Smoke-tested against live: read-only tools returned, `db_query` write rejected by SQLite, both guarded tools refused without `confirm` |
+| Ask the Data (`/ask`, `POST /api/chat`) | 🟡 **Built 7 Oct 2026, NOT deployed** — chat over the database with GPT-6 Astra and ten read-only lookups (§4.3). Verified locally against the 21 Sep production snapshot: all ten tools return correct shapes, the SQL guard rejects writes / multi-statements / PRAGMA, and the full streaming loop (parallel tool calls assembled from fragments → results fed back → markdown answer streamed) ran end to end in the browser against a mock of OpenAI's streaming protocol. **Not yet exercised against the real model** — no OpenAI key on the dev machine. Deploy needs the one-time `OPENAI_API_KEY --update-env` step (§6.4) |
 
 ### 7.4 Known gaps and open items
+
+**−10. BUILT 7 Oct 2026, NOT DEPLOYED — Ask the Data has not met the real model yet, and has no spend
+cap.** Everything up to the OpenAI call is verified (§7.3); what is not is how `gpt-6-astra` actually
+behaves on the prompt — which tools it reaches for, whether it respects the data traps, how many
+rounds a typical question takes and therefore what it costs. First deploy should be followed by a
+dozen real questions with the lookups strip open, and the system prompt (`server/chat/prompt.ts`)
+tuned from what is seen. There is no per-request or daily budget cap; the only brakes are the
+8-round limit per question, the 200-row cap per lookup, the 60k-character cap per tool result, and
+the login gate. Add a cap before opening the page to more than the current handful of users.
+Known limits by design: conversation history is browser-only (a reload forgets it); `run_sql` has
+no statement timeout (better-sqlite3 is synchronous), so a pathological query can hold the single
+Node process for its duration — acceptable for an internal tool, not for a public one.
 
 **−9. DEPLOYED 7 Oct 2026 16:56 UTC — FDIC Data Analytics switched to Market Intelligence; one
 verification target was missed and two decisions remain open.**
@@ -2121,6 +2175,7 @@ healthy (640 rows, 57% carrying loan amounts).
 | `GET /api/targets` · `POST` · `DELETE` | Watchlist |
 | `GET /api/mi/meta` · `/api/mi/screening?scope=` · `/api/mi/visuals?scope=` · `/api/mi/cohort-watch?scope=` · `/api/mi/behavior-signals?scope=&band=` · `/api/mi/institution/:cert[?include=narrative]` | Market Intelligence pass-through (since 7 Oct 2026; replaced `GET /api/fdic/financials`) — 1:1 with its Market Analytics data API, bearer key added server-side, `ok:true` cached 7 days, 503 when unconfigured |
 | `GET /api/collection-log` | Pipeline health |
+| `POST /api/chat` · `GET /api/chat/config` | Ask the Data (7 Oct 2026). Body `{messages:[{role,content}], county}`; answers as Server-Sent Events (`tool`, `tool_done`, `delta`, `done`, `error`). Never cached. `config` reports whether a key is set and which model answers |
 | `POST /api/cache/bust` · `GET /api/cache/stats` | Cache control |
 
 Most read endpoints accept `?county=MIAMI-DADE|BROWARD` (omit for all counties; the server defaults
