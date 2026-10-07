@@ -7,7 +7,9 @@ import { COUNTY_DEF } from '@/lib/filterDefinitions';
 
 const NAV = [
   { href: '/',                 icon: BarChart2,    label: 'Overview',           group: 'main' },
-  { href: '/ask',              icon: MessageSquare,label: 'Ask the Data',       group: 'main' },
+  // Marked at the owner's request (7 Oct 2026) while the chat is being trialled in
+  // production. Drop the suffix once the first round of real questions has been reviewed.
+  { href: '/ask',              icon: MessageSquare,label: 'Ask the Data (TESTING/NOTDEPLOYED)', group: 'main' },
   { href: '/reporting',        icon: LayoutList,   label: 'Reporting',          group: 'analysis' },
   { href: '/targets',          icon: Crosshair,    label: 'Targets',            group: 'analysis' },
   { href: '/market-analytics', icon: LineChart,    label: 'FDIC Data Analytics',group: 'analysis' },
@@ -114,7 +116,7 @@ export default function Sidebar() {
               >
                 <Icon size={15} className="shrink-0" />
                 {!collapsed && (
-                  <span className="truncate flex-1 text-xs">{label}</span>
+                  <span className="flex-1 text-xs leading-tight">{label}</span>
                 )}
                 {!collapsed && badge && (
                   <span className="text-[9px] font-bold bg-primary/20 text-primary px-1.5 py-0.5 rounded-full shrink-0">

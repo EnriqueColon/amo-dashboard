@@ -196,7 +196,12 @@ export default function Chat() {
         <div className="flex items-center gap-3">
           <MessageSquare size={20} className="text-muted-foreground" />
           <div>
-            <h1 className="text-xl font-semibold">Ask the Data</h1>
+            <h1 className="text-xl font-semibold flex items-center gap-2 flex-wrap">
+              Ask the Data
+              <span className="text-[10px] font-bold uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-300 rounded px-1.5 py-0.5" title="Trial in production — answers are being reviewed; the page may change or go away">
+                TESTING / NOT DEPLOYED
+              </span>
+            </h1>
             <p className="text-sm text-muted-foreground mt-0.5">
               Plain-English questions over the assignment records · scope: <span className="font-medium text-foreground">{countyLabel(county)}</span>
             </p>
