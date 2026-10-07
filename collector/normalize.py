@@ -186,6 +186,19 @@ STRIP_SUFFIXES = [
     r'\bA MARYLAND CORPORATION\b',
     r'\bA CALIFORNIA CORPORATION\b',
     r'\bA FLORIDA CORPORATION\b',
+    # Must precede the bare LIMITED pattern below and stay in this block: the
+    # suffix loop applies patterns in list order, so stripping LIMITED first
+    # would leave a dangling "... PARTNERSHIP" that the phrase can never match.
+    # Cardinal Financial is recorded seven ways and only this ordering gathers
+    # all of them ("CARDINAL FINANCIAL LIMITED PARTNERSHIP", "... COMPANY
+    # LIMITED PARTNERSHIP", "... COMPANY L P", and four more).
+    r'\bLIMITED PARTNERSHIP\b',
+    # Same ordering requirement, and the reason it is a second pattern rather
+    # than relying on LIMITED LIABILITY COMPANY further down: the index also
+    # records the phrase truncated ("... LIMITED LIABILITY CO", or bare "...
+    # LIMITED LIABILITY"), and bare LIMITED alone would reduce those to the
+    # nonsense "A FLORIDA LIABILITY".
+    r'\bLIMITED LIABILITY\b',
     r'\bNATIONAL BANKING ASSOCIATION\b',
     r'\bNATIONAL BANKING ASSOC\b',
     r'\bNATIONAL ASSOCIATION\b',
@@ -208,6 +221,21 @@ STRIP_SUFFIXES = [
     r'\bINCORPORATED\b',
     r'\bINC\.?\b',
     r'\bLIMITED LIABILITY COMPANY\b',
+    # CORPORATION, INCORPORATED, LTD, CO and LP were all here; bare COMPANY and
+    # bare LIMITED were not, and `\bCO\.?\b` cannot reach COMPANY across a word
+    # boundary. So every firm the county recorded both ways stayed split, and
+    # suffix stripping had no path to reunite them. Bank of New York Mellon
+    # Trust was a near-even 179/178 break; Northern Trust 179/88; MCLP Asset
+    # 486/130.
+    #
+    # Measured against production 2026-10-07 over all 45,262 distinct recorded
+    # names: 113 collision groups, 119 canonical names merged away, each group
+    # read and confirmed to be one real company. Like the comma fix, this can
+    # only merge names ALREADY identical apart from the dropped word, so the
+    # blast radius is exactly enumerable and it cannot fabricate an entity the
+    # way the old leading-digit strip did (see check_leading_numbers.py).
+    r'\bCOMPANY\b',
+    r'\bLIMITED\b',
     r'\bLLLP\b',
     r'\bLLLC\b',
     r'\bLLC\b',
@@ -234,6 +262,9 @@ STRIP_SUFFIXES = [
     r'\bL\s+L\s+C\b',
     r'\bF\s+S\s+B\b',
     r'\bP\s+A\b',
+    # Same gap one row down: `\bL\.P\.?\b` needs the period and `\bLP\b` needs
+    # the letters joined, so the spaced form the index also uses fell through.
+    r'\bL\s+P\b',
     r'\bII\b',
     r'\bIII\b',
     # NOTE: FINANCIAL, MORTGAGE, BANK, CAPITAL, TRUST, FUND, GROUP, HOLDINGS
@@ -429,7 +460,15 @@ ENTITY_TYPE_PATTERNS = [
     ('TRUST',          r'MEB LOAN TRUST|TOWD POINT|CV3 ALPHA TRUST|'
                        r'US MORTGAGE RESOLUTION TRUST|US MTG RESOLUTION|'
                        r'1 SHARPE OPPORTUNITY TRUST|CHURCHILL FUNDING|'
-                       r'NWL 2016 EVERGREEN|NWL COMPANY|'
+                       # These patterns run against the CANONICAL name, so
+                       # dropping bare COMPANY above moved this one: the three
+                       # spellings "NWL COMPANY LLC"/"NWL CO LLC"/"NWL COMPANY
+                       # INC" now all canonicalize to "NWL". Anchored, not
+                       # `\bNWL\b` — production also holds NWL CREDIT HOLDINGS,
+                       # NWL CREDIT INVESTORS I and II, and NWL 7600 FISHER
+                       # ISLAND LENDER, which are separate entities and not
+                       # trusts.
+                       r'NWL 2016 EVERGREEN|^NWL$|'
                        r'FIRSTKEY MORTGAGE|FIRSTKEY HOMES|'
                        r'SALUDA GRADE MORTGAGE FUNDING'),
     # Private credit / active asset managers / PE funds
