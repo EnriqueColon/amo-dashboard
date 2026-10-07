@@ -220,19 +220,33 @@ export default function Dashboard() {
         >
           <AlertCircle size={14} className="mt-0.5 shrink-0 text-red-500" />
           <span>
-            {/* Three distinct red states, because they need three different
-                responses: the job is not installed · it ran and errored · it
-                stopped running at all. "Working but not off-box" is amber and
-                handled by the banner below, not here. */}
+            {/* Four distinct red states, because they need four different
+                responses: the job is not installed · it ran and errored · its
+                snapshot restores an empty dashboard · it stopped running at
+                all. "Working but not off-box" is amber and handled by the
+                banner below, not here. */}
             <span className="font-medium">
               {backup?.never_run
                 ? 'No backup has ever run.'
                 : backup?.last_status === 'failed'
                   ? 'The nightly backup is failing.'
-                  : `No backup has run in ${Math.floor((backup?.hours_since_run ?? 0) / 24)} days.`}
+                  : backup?.last_status === 'degraded'
+                    ? 'The latest backup would restore an empty dashboard.'
+                    : `No backup has run in ${Math.floor((backup?.hours_since_run ?? 0) / 24)} days.`}
             </span>{' '}
-            Everything here lives on one droplet, and the Broward document images cannot be
-            re-harvested once the feed rolls past its ten-day window.
+            {backup?.last_status === 'degraded' ? (
+              <>
+                The raw filings and images in it are intact — only the derived tables are
+                empty, which a single <code className="font-mono">normalize.py</code> run
+                rebuilds. The archive was kept and rotation was skipped, so the older
+                complete copies are still there.
+              </>
+            ) : (
+              <>
+                Everything here lives on one droplet, and the Broward document images cannot be
+                re-harvested once the feed rolls past its ten-day window.
+              </>
+            )}
             {backup?.last_detail && <> Last run reported: “{backup.last_detail}”.</>} Check{' '}
             <code className="font-mono">collector/backup.log</code> on the droplet.
           </span>

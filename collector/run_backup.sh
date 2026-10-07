@@ -28,7 +28,10 @@
 # rotate anything away, and /api/stats surfaces staleness on the Overview page
 # the same way Broward collection health does. A run that cannot reach the
 # remote still keeps a good local snapshot and reports `local_only` rather than
-# pretending to have succeeded.
+# pretending to have succeeded. A run whose snapshot holds intact raw tables but
+# empty DERIVED ones reports `degraded`: kept and uploaded, because the raw data
+# is what is irreplaceable, but barred from counting as good or from rotating a
+# complete archive away.
 
 set -u
 
@@ -109,6 +112,25 @@ fail() {
     exit 1
 }
 
+# ── 0. Wait out a running rebuild ────────────────────────────────────────────
+# normalize.py empties aom_events_clean and refills it in place, leaving it at 0
+# rows for roughly 90 minutes of every run. A snapshot taken in that window is a
+# structurally perfect database that restores a dashboard showing zeros — and
+# step 3's assertion keyed only on `assignments`, which stays full the whole
+# time, so it passed. Confirmed live 2026-09-22: amo-20260916-031501.db.gz, one
+# of the seven then retained, holds aom_events_clean = 0.
+#
+# 03:15 does not collide with the 08:30 cron rebuild; that archive collided with
+# a MANUAL one, which is exactly why waiting is the fix rather than rescheduling.
+# Bounded at 2h: a full rebuild is ~90 minutes, and nothing else is scheduled
+# before the Friday 06:00 collect. "[n]ormalize" so pgrep never matches this
+# script's own command line (it did once — see SESSION_LOG 2026-08-06).
+waited=0
+while pgrep -f "[n]ormalize\.py" >/dev/null && [ "$waited" -lt 7200 ]; do
+    sleep 60; waited=$((waited + 60))
+done
+[ "$waited" -gt 0 ] && echo "waited ${waited}s for a running normalize.py"
+
 # ── 1. Consistent snapshot ───────────────────────────────────────────────────
 # busy_timeout for the same reason as in record() — the online backup API
 # restarts if a writer commits mid-copy, and on a busy database it needs to be
@@ -146,12 +168,39 @@ case "$rows" in
 esac
 [ "$rows" -gt 0 ] || { rm -f "$SNAP" "$SNAP-shm" "$SNAP-wal"; fail "snapshot has 0 assignments"; }
 
+# The derived tables get their own check, because the row-count assertion above
+# keys on a table that stays full through a rebuild and so cannot see the empty
+# window step 0 exists to avoid. Treated differently from the two checks above,
+# deliberately:
+#
+#   · `assignments` empty  -> the snapshot is worthless. Delete it, fail.
+#   · `aom_events_clean` 0 -> the RAW tables are intact and the derived ones are
+#                             rebuildable from them in one normalize run, so the
+#                             snapshot is still worth keeping and uploading. The
+#                             harm is only that it must never be allowed to
+#                             count as good or to rotate a good archive away.
+#
+# Refusing to back up at all here — the first-cut fix — would be worse than the
+# bug: a crashed normalize nobody noticed for a week would suppress seven nights
+# of Broward image copies, and those images cannot be re-harvested once the feed
+# rolls past its ten-day window. That is the one irreversible loss in the system,
+# and it has nothing to do with whether a derived table happens to be populated.
+clean_rows=$(sqlite3 "$SNAP" "SELECT COUNT(*) FROM aom_events_clean;" 2>/dev/null)
+case "$clean_rows" in
+    ''|*[!0-9]*) clean_rows=0 ;;
+esac
+
 # Belt and braces: if any sqlite3 version still leaves sidecars, they die here
 # rather than living in the backup directory forever.
 rm -f "$SNAP-shm" "$SNAP-wal"
 
 db_bytes=$(wc -c < "$SNAP" | tr -d ' ')
-echo "snapshot ok — $rows assignments, $db_bytes bytes"
+echo "snapshot ok — $rows assignments, $clean_rows clean events, $db_bytes bytes"
+if [ "$clean_rows" -eq 0 ]; then
+    echo "WARNING: aom_events_clean is EMPTY in this snapshot — keeping it, but it will"
+    echo "         not count as good and rotation is skipped so no good archive is lost."
+    echo "         Re-run normalize.py on the droplet; the raw tables are intact."
+fi
 
 # ── 4. Compress ──────────────────────────────────────────────────────────────
 # gzip rather than the faster zstd on purpose: a backup is only worth what it is
@@ -197,13 +246,30 @@ else
     fi
 fi
 
+# A derived-table-empty snapshot outranks the remote-placement states: it needs
+# someone to re-run normalize, where local_only needs someone to add a
+# credential. Set last so it cannot be overwritten by the block above, and the
+# remote outcome is kept in `detail` rather than lost.
+if [ "$clean_rows" -eq 0 ]; then
+    detail="aom_events_clean is empty in this snapshot — re-run normalize.py${detail:+; $detail}"
+    status=degraded
+fi
+
 # ── 6. Rotate local copies ───────────────────────────────────────────────────
 # Runs last, and only over verified archives, so a bad run can never age out the
-# good snapshots it failed to replace.
-ls -1t "$BACKUP_DIR"/amo-*.db.gz 2>/dev/null | tail -n +$((KEEP_LOCAL + 1)) | while read -r old; do
-    echo "rotating out $(basename "$old")"
-    rm -f "$old"
-done
+# good snapshots it failed to replace. A degraded run is the same hazard by a
+# different route — the archive is valid, so rotation would happily retire a
+# complete one in its favour. Seven nights of it would leave nothing restorable
+# to a working dashboard, which is how the 16 Sep archive came to be one of only
+# seven retained.
+if [ "$status" = degraded ]; then
+    echo "skipping rotation — this run is degraded and must not retire a good archive"
+else
+    ls -1t "$BACKUP_DIR"/amo-*.db.gz 2>/dev/null | tail -n +$((KEEP_LOCAL + 1)) | while read -r old; do
+        echo "rotating out $(basename "$old")"
+        rm -f "$old"
+    done
+fi
 
 record "$status" "$db_bytes" "$archive_bytes" "$rows" "$detail"
 echo "=== backup done: $(date -u +%FT%TZ) — status=$status ==="

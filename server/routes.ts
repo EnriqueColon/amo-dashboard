@@ -390,6 +390,12 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     // not the same as splitting by severity:
     //   · never ran / hasn't run in 48h / last run FAILED  → red. The job is
     //     absent or broken; someone has to go and fix it.
+    //   · last run was `degraded`                          → red. The snapshot
+    //     is valid and was kept, but its derived tables are empty, so restoring
+    //     it gives a dashboard of zeros. Someone has to re-run normalize.py.
+    //     Red rather than amber because `lastGoodBackup` keys on 'ok', so an
+    //     unbroken run of degraded nights would otherwise show a healthy job
+    //     while the last restorable copy aged out of the seven retained.
     //   · last run was `local_only`                        → amber. The job is
     //     working — snapshotting, verifying, rotating — it just has nowhere
     //     off-box to put the result yet. That is a missing credential, not a
@@ -411,6 +417,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       never_run:        lastBk?.finished_at == null,
       stale:            lastBk?.finished_at == null
                         || lastBk.status === 'failed'
+                        || lastBk.status === 'degraded'
                         || (lastRunHours ?? 0) > 48,
     };
 
