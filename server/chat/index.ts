@@ -3,8 +3,9 @@
  *
  * A conversational interface over the AMO database. The browser sends the
  * visible conversation (user/assistant text only); this route rebuilds the
- * full prompt, runs the model in a tool-calling loop against server/chat/tools.ts,
- * and streams progress back as Server-Sent Events:
+ * full prompt, runs the model (OpenAI Responses API, see openai.ts for why)
+ * in a tool-calling loop against server/chat/tools.ts, and streams progress
+ * back as Server-Sent Events:
  *
  *   event: tool       {id, name, args, purpose?}         a tool call started
  *   event: tool_done  {id, ms, rows?, error?}             it finished
@@ -22,7 +23,7 @@ import type { Express, Request, Response } from 'express';
 import { getDb } from '../db';
 import { buildSystemPrompt } from './prompt';
 import { TOOLS_BY_NAME, executeTool, serializeToolResult, toolDefinitions } from './tools';
-import { chatConfig, streamChatCompletion, OpenAIError, type ChatMessage, type ToolCall, type Usage } from './openai';
+import { chatConfig, streamResponse, OpenAIError, type InputItem, type ToolCall, type Usage } from './openai';
 
 const MAX_ROUNDS = 8;           // tool-call rounds per user turn
 const MAX_HISTORY = 40;         // messages accepted from the client
@@ -112,11 +113,15 @@ export function registerChatRoutes(app: Express) {
     res.on('close', () => { if (!res.writableFinished) abort.abort(); });
 
     const dataThrough = (latestDate.get() as any)?.d ?? undefined;
-    const messages: ChatMessage[] = [
-      { role: 'system', content: buildSystemPrompt({ county, today: new Date().toISOString().slice(0, 10), dataThrough }) },
-      ...parsed.map(m => ({ role: m.role, content: m.content }) as ChatMessage),
-    ];
+    const instructions = buildSystemPrompt({ county, today: new Date().toISOString().slice(0, 10), dataThrough });
     const tools = toolDefinitions();
+
+    // Round 1 sends the conversation. Every later round chains onto the
+    // previous response id and sends ONLY the tool outputs — the API keeps the
+    // transcript, the function_call items and the model's reasoning items,
+    // which reasoning models require to be present alongside tool outputs.
+    let input: InputItem[] = parsed.map(m => ({ role: m.role, content: m.content }));
+    let previousResponseId: string | null = null;
 
     let usage: Usage | null = null;
     let rounds = 0;
@@ -129,34 +134,36 @@ export function registerChatRoutes(app: Express) {
         const last = round === MAX_ROUNDS - 1;
         let text = '';
         let calls: ToolCall[] = [];
-        let finishReason: string | null = null;
+        let status: string | null = null;
 
-        for await (const ev of streamChatCompletion({ messages, tools, toolChoice: last ? 'none' : 'auto', signal: abort.signal })) {
+        for await (const ev of streamResponse({ instructions, input, tools, previousResponseId, toolChoice: last ? 'none' : 'auto', signal: abort.signal })) {
           if (ev.type === 'text') { text += ev.delta; sse(res, 'delta', { text: ev.delta }); }
           else if (ev.type === 'tool_calls') calls = ev.calls;
-          else if (ev.type === 'done') { usage = addUsage(usage, ev.usage); finishReason = ev.finishReason; }
+          else if (ev.type === 'done') { usage = addUsage(usage, ev.usage); status = ev.status; previousResponseId = ev.responseId ?? previousResponseId; }
         }
 
         if (!calls.length) {
-          // A stream that closed without a finish_reason and without content is
-          // an upstream failure (dropped connection, proxy reset), not an answer.
-          if (!text && !finishReason) throw new OpenAIError('OpenAI returned an empty response — please try again', 502);
+          // A stream that closed without completing and without content is an
+          // upstream failure (dropped connection, proxy reset), not an answer.
+          if (!text && !status) throw new OpenAIError('OpenAI returned an empty response — please try again', 502);
           break;
         }
+        if (!previousResponseId) throw new OpenAIError('OpenAI returned tool calls without a response id — cannot continue the turn', 502);
 
-        messages.push({ role: 'assistant', content: text || null, tool_calls: calls });
+        const outputs: InputItem[] = [];
         for (const call of calls) {
           if (abort.signal.aborted) break;
           let args: any = {};
-          try { args = JSON.parse(call.function.arguments || '{}'); } catch { /* reported by executeTool */ }
-          sse(res, 'tool', { id: call.id, name: call.function.name, args, purpose: typeof args?.purpose === 'string' ? args.purpose : undefined });
-          const { result, ms } = executeTool(db, call.function.name, call.function.arguments);
+          try { args = JSON.parse(call.arguments || '{}'); } catch { /* reported by executeTool */ }
+          sse(res, 'tool', { id: call.callId, name: call.name, args, purpose: typeof args?.purpose === 'string' ? args.purpose : undefined });
+          const { result, ms } = executeTool(db, call.name, call.arguments);
           const summary = summarizeResult(result);
-          toolLog.push(`${call.function.name}(${ms}ms${summary.rows !== undefined ? `, ${summary.rows} rows` : ''}${summary.error ? ', error' : ''})`);
-          sse(res, 'tool_done', { id: call.id, ms, ...summary });
-          messages.push({ role: 'tool', tool_call_id: call.id, content: serializeToolResult(result) });
+          toolLog.push(`${call.name}(${ms}ms${summary.rows !== undefined ? `, ${summary.rows} rows` : ''}${summary.error ? ', error' : ''})`);
+          sse(res, 'tool_done', { id: call.callId, ms, ...summary });
+          outputs.push({ type: 'function_call_output', call_id: call.callId, output: serializeToolResult(result) });
         }
         if (abort.signal.aborted) break;
+        input = outputs;
       }
 
       sse(res, 'done', { model: cfg.model, rounds, usage });

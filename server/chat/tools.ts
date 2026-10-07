@@ -590,11 +590,14 @@ export const TOOLS: ToolSpec[] = [
 
 export const TOOLS_BY_NAME = new Map(TOOLS.map(t => [t.name, t]));
 
-/** OpenAI Chat Completions `tools` payload. */
+/** OpenAI Responses API `tools` payload (flat shape — not nested under `function` as in Chat Completions). */
 export function toolDefinitions() {
   return TOOLS.map(t => ({
     type: 'function' as const,
-    function: { name: t.name, description: t.description, parameters: t.parameters, strict: false },
+    name: t.name,
+    description: t.description,
+    parameters: t.parameters,
+    strict: false,
   }));
 }
 
