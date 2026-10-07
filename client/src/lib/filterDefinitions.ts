@@ -124,4 +124,4 @@ export const UCC_TAB_DEFS: Record<string, Definition> = {
 
 // ── Global ─────────────────────────────────────────────────────────────────────
 export const COUNTY_DEF = d('County', "Which county's records every page shows. All Counties combines both. Broward's history before August 2026 is thinner, so compare the two counties with care.");
-export const FDIC_SCOPE_DEF = d('Region', 'Which banks to screen: United States covers institutions above roughly $1B in assets; choosing a state shows every bank in that state.');
+export const FDIC_SCOPE_DEF = d('Region', 'Which banks to screen, as scoped by Market Intelligence: United States is the national cohort it covers (the largest institutions); choosing a state shows every bank it covers in that state. Scores are percentile ranks within the chosen scope, so a bank\'s score changes when the scope does.');

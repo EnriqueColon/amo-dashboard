@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Columns3, LineChart } from 'lucide-react'
-import { computeCapitalRatios, type CapitalRatios } from '@/lib/fdic-ratio-helpers'
 import { KPI_EXPLANATION_NARRATIVE } from '@/lib/kpi-explanation'
 import {
   formatPercent as formatPercentMetric,
@@ -8,16 +7,21 @@ import {
   formatMoney,
   formatMultiple as formatMultipleMetric,
 } from '@/lib/metrics'
-import { getCreCapitalColor } from '@/lib/score-colors'
-import { getErrorMessage } from '@/lib/error-utils'
-import { TREND_QUARTERS, TTM_QUARTERS } from '@shared/fdic-window'
+import { getCreCapitalColor, getScoreColor } from '@/lib/score-colors'
 import { DefTerm } from '@/components/DefTerm'
 import { InstitutionProfileDrawer, type InstitutionProfileRow } from '@/components/InstitutionProfileDrawer'
 import { Skeleton } from '@/components/ui/skeleton'
 import { FilterHint } from '@/components/FilterHint'
 import { FDIC_SCOPE_DEF } from '@/lib/filterDefinitions'
+import {
+  loadMiMeta, loadScreening, loadBehaviorSignals, signalsByKey, stateCodeFor,
+  formatQuarterLabel, MiError, MI_SOURCE_LABEL, MI_UNAVAILABLE_TITLE,
+  type MiMeta, type MiScreeningPayload, type MiScreeningRow, type MiSignalsResult,
+} from '@/lib/market-intelligence'
 
-const US_STATES_ALPHABETICAL = [
+// Shown until /meta answers, so the control is never empty. The live list
+// (meta.scopes.states, which includes DC and PR) replaces it on load.
+const FALLBACK_STATES = [
   'Alabama','Alaska','Arizona','Arkansas','California','Colorado','Connecticut',
   'Delaware','Florida','Georgia','Hawaii','Idaho','Illinois','Indiana','Iowa',
   'Kansas','Kentucky','Louisiana','Maine','Maryland','Massachusetts','Michigan',
@@ -26,85 +30,21 @@ const US_STATES_ALPHABETICAL = [
   'Oklahoma','Oregon','Pennsylvania','Rhode Island','South Carolina','South Dakota',
   'Tennessee','Texas','Utah','Vermont','Virginia','Washington','West Virginia',
   'Wisconsin','Wyoming',
-] as const
+]
+const NATIONAL = 'National'
 
-type RegionKey = 'national' | (typeof US_STATES_ALPHABETICAL)[number]
+type SortKey = 'opportunity' | 'earnings' | 'vulnerability' | 'npl' | 'cre'
 
-type Financial = {
-  id: string
-  name: string
-  city?: string
-  state?: string
-  totalAssets: number
-  totalDeposits?: number
-  netIncome?: number
-  roa?: number
-  roe?: number
-  creConcentration?: number
-  creLoans?: number
-  totalLoans?: number
-  nonaccrualLoans?: number
-  constructionLoans?: number
-  multifamilyLoans?: number
-  nonResidentialLoans?: number
-  otherRealEstateLoans?: number
-  totalUnusedCommitments?: number
-  creUnusedCommitments?: number
-  nplRatio?: number
-  noncurrent_to_loans_ratio?: number
-  noncurrent_to_assets_ratio?: number
-  pastDue3090?: number
-  pastDue90Plus?: number
-  loanLossReserve?: number
-  netInterestMargin?: number
-  cet1Ratio?: number
-  leverageRatio?: number
-  tier1RbcRatio?: number
-  totalRbcRatio?: number
-  reportDate?: string
-  totalEquityDollars?: number | null
-}
-
-type ScreeningRow = Financial & {
-  trend: Array<{ reportDate: string; creConcentration?: number; nplRatio?: number; roa?: number; netIncome?: number; netInterestMargin?: number }>
-  opportunityScore: number
-  earningsScore: number
-  vulnerabilityScore: number
-  capitalRatio: number
-  capitalRatios?: CapitalRatios
-  roaLatest?: number | null
-  roaDelta4Q?: number | null
-  netIncomeTTM?: number | null
-  netIncomeYoYPct?: number | null
-  nimLatest?: number | null
-  nimDelta4Q?: number | null
-  earningsBufferPct?: number | null
+const SORT_VALUE: Record<SortKey, (r: MiScreeningRow) => number> = {
+  opportunity: (r) => r.opportunityScore ?? 0,
+  earnings: (r) => r.earningsScore ?? 0,
+  vulnerability: (r) => r.vulnerabilityScore ?? 0,
+  npl: (r) => r.nonaccrualLoans ?? 0,
+  cre: (r) => r.creConcentration ?? 0,
 }
 
 const currencyFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
 const percentFormatter = new Intl.NumberFormat('en-US', { style: 'percent', minimumFractionDigits: 1, maximumFractionDigits: 1 })
-
-function formatQuarter(dateString?: string) {
-  if (!dateString) return 'Unknown'
-  if (/^\d{8}$/.test(dateString)) {
-    const year = dateString.slice(0, 4)
-    const month = Number(dateString.slice(4, 6))
-    return `Q${Math.ceil(month / 3)} ${year}`
-  }
-  const parsed = new Date(dateString)
-  if (Number.isNaN(parsed.getTime())) return dateString
-  return `Q${Math.floor(parsed.getMonth() / 3) + 1} ${parsed.getFullYear()}`
-}
-
-function normalizeReportDate(dateStr: string | undefined): string {
-  if (!dateStr) return ''
-  if (/^\d{8}$/.test(dateStr)) return dateStr
-  const m = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/)
-  if (m) return m[1] + m[2] + m[3]
-  const d = new Date(dateStr)
-  if (Number.isNaN(d.getTime())) return dateStr
-  return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`
-}
 
 function formatCurrency(value: number | undefined) {
   if (value === undefined || Number.isNaN(value)) return '—'
@@ -126,39 +66,60 @@ function formatRatio(value: number | null | undefined) {
   return formatMultipleMetric(value)
 }
 
+function formatScore(value: number | null | undefined) {
+  if (value === undefined || value === null || !Number.isFinite(value)) return '—'
+  return value.toFixed(1)
+}
+
 export default function MarketAnalytics() {
-  const [region, setRegion] = useState<RegionKey>('Florida')
+  const [region, setRegion] = useState<string>('Florida')
   const [showCapitalColumns, setShowCapitalColumns] = useState(false)
   const [showEarningsColumns, setShowEarningsColumns] = useState(false)
   const [showColumnsMenu, setShowColumnsMenu] = useState(false)
-  const [tableSortColumn, setTableSortColumn] = useState<'npl' | 'cre'>('npl')
+  const [tableSortColumn, setTableSortColumn] = useState<SortKey>('opportunity')
   const [tableSortDesc, setTableSortDesc] = useState(true)
-  const [selectedInstitution, setSelectedInstitution] = useState<ScreeningRow | null>(null)
-  const [compareRows, setCompareRows] = useState<ScreeningRow[]>([])
+  const [selectedInstitution, setSelectedInstitution] = useState<MiScreeningRow | null>(null)
+  const [compareRows, setCompareRows] = useState<MiScreeningRow[]>([])
   const [loading, setLoading] = useState(false)
-  const [financials, setFinancials] = useState<Financial[]>([])
-  const [truncated, setTruncated] = useState(false)
-  const [error, setError] = useState<string | undefined>()
+  const [meta, setMeta] = useState<MiMeta | null>(null)
+  // The payload and the scope it was fetched for travel together, so nothing
+  // downstream can pair a new region with the previous region's rows.
+  const [screening, setScreening] = useState<{ scope: string; payload: MiScreeningPayload } | null>(null)
+  const [asOf, setAsOf] = useState<string | null>(null)
+  const [signals, setSignals] = useState<MiSignalsResult | null>(null)
+  const [signalsError, setSignalsError] = useState<string | undefined>()
+  const [error, setError] = useState<{ title: string; detail: string } | undefined>()
 
+  // /meta once: scope list, signal vocabulary, state-code lookup.
+  useEffect(() => {
+    let mounted = true
+    loadMiMeta().then((m) => { if (mounted) setMeta(m) }).catch(() => { /* surfaced by the screening fetch below */ })
+    return () => { mounted = false }
+  }, [])
+
+  // Screening is the page. A failure clears every number — the page must not
+  // keep showing figures from a previous scope or a previous load.
   useEffect(() => {
     let mounted = true
     async function loadData() {
       setLoading(true)
       setError(undefined)
+      setScreening(null)
+      setAsOf(null)
+      setSelectedInstitution(null)
+      setCompareRows([])
       try {
-        const params = region !== 'national' ? `?state=${encodeURIComponent(region)}` : ''
-        const res = await fetch(`/api/fdic/financials${params}`)
-        if (!res.ok) throw new Error(`Server error: ${res.status}`)
-        const json = await res.json()
+        const res = await loadScreening(region)
         if (!mounted) return
-        if (json.error) { setError(json.error); setFinancials([]); return }
-        setFinancials(json.data ?? [])
-        setTruncated(Boolean(json.truncated))
+        setScreening({ scope: region, payload: res.payload })
+        setAsOf(res.meta.quarter)
       } catch (err) {
         if (!mounted) return
-        setError(`Failed to load FDIC data: ${getErrorMessage(err)}`)
-        setFinancials([])
-        setTruncated(false)
+        const mi = err instanceof MiError ? err : null
+        setError({
+          title: mi && !mi.unavailable ? 'Could not load screening' : MI_UNAVAILABLE_TITLE,
+          detail: mi ? mi.message : (err instanceof Error ? err.message : String(err)),
+        })
       } finally {
         if (mounted) setLoading(false)
       }
@@ -167,160 +128,89 @@ export default function MarketAnalytics() {
     return () => { mounted = false }
   }, [region])
 
-  const regionFinancials = useMemo(() => {
-    if (region === 'national') return financials
-    return financials.filter((item) => item.state && item.state.toUpperCase() === region.toUpperCase())
-  }, [financials, region])
+  // Balance-sheet signals are an overlay on the table: if they fail, the
+  // Signals column says so, but the screening still renders.
+  useEffect(() => {
+    // Wait for the screening of *this* region, not the one still on screen
+    // from the previous region — otherwise the band calls fire twice.
+    if (!meta || !screening || screening.scope !== region) return
+    let mounted = true
+    setSignals(null)
+    setSignalsError(undefined)
+    loadBehaviorSignals(region, meta)
+      .then((s) => { if (mounted) setSignals(s) })
+      .catch((err) => { if (mounted) setSignalsError(err instanceof Error ? err.message : String(err)) })
+    return () => { mounted = false }
+  }, [meta, screening, region])
 
-  const lastQuarterDates = useMemo(() => {
-    const dates = Array.from(new Set(regionFinancials.map((item) => item.reportDate).filter(Boolean))) as string[]
-    return dates.sort((a, b) => normalizeReportDate(b).localeCompare(normalizeReportDate(a))).slice(0, TREND_QUARTERS)
-  }, [regionFinancials])
+  const signalDefs = useMemo(() => signalsByKey(meta), [meta])
 
-  const lastQuarterDatesDisplay = useMemo(() => lastQuarterDates.slice(0, TTM_QUARTERS), [lastQuarterDates])
+  const scopeOptions = useMemo(() => {
+    if (meta) {
+      const states = Object.values(meta.scopes.states).sort((a, b) => a.localeCompare(b))
+      return { national: meta.scopes.national, states }
+    }
+    return { national: NATIONAL, states: FALLBACK_STATES }
+  }, [meta])
 
-  const filteredFinancials = useMemo(() => {
-    return regionFinancials.filter((item) => {
-      if (lastQuarterDates.length > 0 && item.reportDate && !lastQuarterDates.includes(item.reportDate)) return false
-      return true
-    })
-  }, [regionFinancials, lastQuarterDates])
+  // Only show figures that belong to the selected scope — while a new scope is
+  // loading, the previous scope's numbers must not sit under the new label.
+  const payload = screening && screening.scope === region ? screening.payload : null
+  const rows = payload?.rows ?? []
 
-  const nplLoansSummary = useMemo(() => {
-    if (filteredFinancials.length === 0) return null
-    const latestById = new Map<string, Financial>()
-    filteredFinancials.forEach((item) => {
-      const existing = latestById.get(item.id)
-      const existingDate = existing?.reportDate ? Date.parse(existing.reportDate) : 0
-      const nextDate = item.reportDate ? Date.parse(item.reportDate) : 0
-      if (!existing || nextDate > existingDate) latestById.set(item.id, item)
-    })
-    const latest = Array.from(latestById.values())
-    const totalLoans = latest.reduce((s, i) => s + (i.totalLoans ?? 0), 0)
-    const totalNpl = latest.reduce((s, i) => s + (i.nonaccrualLoans ?? 0), 0)
-    const totalCre = latest.reduce((s, i) => s + (i.creLoans ?? 0), 0)
-    const totalAssets = latest.reduce((s, i) => s + i.totalAssets, 0)
-    const avgNpl = latest.length > 0 ? latest.reduce((s, i) => s + (i.nplRatio ?? 0) * 100, 0) / latest.length : 0
-    const avgCreToAssets = totalAssets > 0 ? (totalCre / totalAssets) * 100 : 0
-    return { totalLoans, totalNpl, totalCre, totalAssets, avgNpl, avgCreToAssets, count: latest.length }
-  }, [filteredFinancials])
+  const sortedScreeningTable = useMemo(() => {
+    const value = SORT_VALUE[tableSortColumn]
+    // Stable sort over API order, so ties keep the order Market Intelligence returned.
+    return [...rows].sort((a, b) => tableSortDesc ? value(b) - value(a) : value(a) - value(b))
+  }, [rows, tableSortColumn, tableSortDesc])
 
   const kpis = useMemo(() => {
-    if (filteredFinancials.length === 0) return [
-      { label: 'Institutions Screened', value: '0' },
+    const k = payload?.kpis
+    if (!k) return [
+      { label: 'Institutions Screened', value: '—' },
       { label: 'Avg NPL Ratio', value: '—' },
       { label: 'Avg Noncurrent / Loans', value: '—' },
       { label: 'Avg Reserve Coverage', value: '—' },
       { label: 'Avg CRE Concentration', value: '—' },
     ]
-    const latestById = new Map<string, Financial>()
-    filteredFinancials.forEach((item) => {
-      const existing = latestById.get(item.id)
-      const existingDate = existing?.reportDate ? Date.parse(existing.reportDate) : 0
-      const nextDate = item.reportDate ? Date.parse(item.reportDate) : 0
-      if (!existing || nextDate > existingDate) latestById.set(item.id, item)
-    })
-    const latest = Array.from(latestById.values())
-    const avg = (vals: number[]) => vals.length > 0 ? vals.reduce((s, v) => s + v, 0) / vals.length : 0
-    const avgNpl = avg(latest.map((i) => i.nplRatio || 0))
-    const avgNoncurrentLoans = avg(latest.map((i) => (i.noncurrent_to_loans_ratio ?? 0) * 100))
-    const avgReserve = avg(latest.map((i) => i.loanLossReserve || 0))
-    const avgCre = avg(latest.map((i) => i.creConcentration || 0))
     return [
-      { label: 'Institutions Screened', value: formatNumber(latest.length) },
-      { label: 'Avg NPL Ratio', value: formatPercent(avgNpl * 100) },
-      { label: 'Avg Noncurrent / Loans', value: formatPercent(avgNoncurrentLoans) },
-      { label: 'Avg Reserve Coverage', value: formatPercent(avgReserve * 100) },
-      { label: 'Avg CRE Concentration', value: formatPercent(avgCre) },
+      { label: 'Institutions Screened', value: formatNumber(k.institutionsScreened) },
+      { label: 'Avg NPL Ratio', value: formatPercent(k.avgNplRatio * 100) },
+      { label: 'Avg Noncurrent / Loans', value: formatPercent(k.avgNoncurrentToLoans) },
+      { label: 'Avg Reserve Coverage', value: formatPercent(k.avgReserveCoverage * 100) },
+      { label: 'Avg CRE Concentration', value: formatPercent(k.avgCreConcentration) },
     ]
-  }, [filteredFinancials])
+  }, [payload])
 
-  const screeningTable = useMemo<ScreeningRow[]>(() => {
-    const grouped = new Map<string, Financial[]>()
-    filteredFinancials.forEach((item) => {
-      if (!grouped.has(item.id)) grouped.set(item.id, [])
-      grouped.get(item.id)!.push(item)
-    })
-    const mostRecentQuarter = lastQuarterDates[0]
-    const mostRecentNorm = normalizeReportDate(mostRecentQuarter)
-    const rows: ScreeningRow[] = []
-    grouped.forEach((items) => {
-      const sorted = [...items].sort((a, b) => normalizeReportDate(b.reportDate).localeCompare(normalizeReportDate(a.reportDate)))
-      const byDateNorm = new Map(sorted.map((entry) => [normalizeReportDate(entry.reportDate), entry]))
-      const latest = mostRecentNorm && byDateNorm.has(mostRecentNorm) ? byDateNorm.get(mostRecentNorm)! : sorted[0]
-      if (mostRecentNorm && !byDateNorm.has(mostRecentNorm)) return
-      const capitalRatio = latest.cet1Ratio ?? latest.leverageRatio ?? 0
-      const trend = lastQuarterDatesDisplay.filter(Boolean).map((date) => {
-        const entry = byDateNorm.get(normalizeReportDate(date))
-        return { reportDate: date, creConcentration: entry?.creConcentration, nplRatio: entry?.nplRatio, roa: entry?.roa, netIncome: entry?.netIncome, netInterestMargin: entry?.netInterestMargin }
-      })
-      const capitalRatios = computeCapitalRatios({
-        totalAssets: latest.totalAssets,
-        creLoans: latest.creLoans ?? 0,
-        constructionLoans: latest.constructionLoans ?? 0,
-        multifamilyLoans: latest.multifamilyLoans ?? 0,
-        leverageRatio: latest.leverageRatio,
-        tier1RbcRatio: latest.tier1RbcRatio,
-        totalRbcRatio: latest.totalRbcRatio,
-        cet1Ratio: latest.cet1Ratio,
-        totalEquityDollars: latest.totalEquityDollars,
-      })
+  const nplLoansSummary = payload?.nplSummary ?? null
+  const asOfQuarter = asOf ? formatQuarterLabel(asOf) : 'Latest'
+  const regionDisplay = region === scopeOptions.national ? 'United States' : region
 
-      const q3 = lastQuarterDates[3]
-      const roaLatest = latest.roa != null ? latest.roa : null
-      const roaDelta4Q = lastQuarterDates.length >= 4 && roaLatest != null && byDateNorm.get(normalizeReportDate(q3))?.roa != null
-        ? roaLatest - (byDateNorm.get(normalizeReportDate(q3))!.roa ?? 0) : null
-      const nimLatest = latest.netInterestMargin != null ? latest.netInterestMargin : null
-      const nimDelta4Q = lastQuarterDates.length >= 4 && nimLatest != null && byDateNorm.get(normalizeReportDate(q3))?.netInterestMargin != null
-        ? nimLatest - (byDateNorm.get(normalizeReportDate(q3))!.netInterestMargin ?? 0) : null
-
-      const niCurrent4 = lastQuarterDates.slice(0, TTM_QUARTERS).map((d) => byDateNorm.get(normalizeReportDate(d))?.netIncome)
-      const hasAll4 = niCurrent4.length === TTM_QUARTERS && niCurrent4.every((v) => v != null && Number.isFinite(v))
-      const netIncomeTTM = hasAll4 ? (niCurrent4.reduce((s, v) => s! + v!, 0) as number) : null
-      const niPrior4 = lastQuarterDates.slice(TTM_QUARTERS, TREND_QUARTERS).map((d) => byDateNorm.get(normalizeReportDate(d))?.netIncome)
-      const hasAll8 = niPrior4.length === TTM_QUARTERS && niPrior4.every((v) => v != null && Number.isFinite(v))
-      const netIncomeTTMPrior = hasAll8 ? (niPrior4.reduce((s, v) => s! + v!, 0) as number) : null
-      const netIncomeYoYPct = netIncomeTTM != null && netIncomeTTMPrior != null ? (() => {
-        const denom = Math.abs(netIncomeTTMPrior)
-        return denom === 0 ? null : ((netIncomeTTM - netIncomeTTMPrior) / denom) * 100
-      })() : null
-      const earningsBufferPct = netIncomeTTM != null && (latest.creLoans ?? 0) > 0 ? (netIncomeTTM / latest.creLoans!) * 100 : null
-
-      rows.push({ ...latest, trend, opportunityScore: 0, earningsScore: 0, vulnerabilityScore: 0, capitalRatio, capitalRatios, roaLatest, roaDelta4Q, netIncomeTTM, netIncomeYoYPct, nimLatest, nimDelta4Q, earningsBufferPct })
-    })
-    return rows
-  }, [filteredFinancials, lastQuarterDates])
-
-  const sortedScreeningTable = useMemo(() => {
-    return [...screeningTable].sort((a, b) => {
-      if (tableSortColumn === 'npl') {
-        const va = a.nonaccrualLoans ?? 0, vb = b.nonaccrualLoans ?? 0
-        return tableSortDesc ? vb - va : va - vb
-      }
-      const va = a.creConcentration ?? 0, vb = b.creConcentration ?? 0
-      return tableSortDesc ? vb - va : va - vb
-    })
-  }, [screeningTable, tableSortColumn, tableSortDesc])
-
-  const asOfQuarter = lastQuarterDates[0] ? formatQuarter(lastQuarterDates[0]) : 'Latest'
-  const regionDisplay = region === 'national' ? 'United States' : region
-
-  // FDIC returns one row per institution per quarter, sorted by assets descending,
-  // and caps a response at 10,000 rows. Nationally that ceiling bites, so the
-  // screen is the largest N institutions rather than all of them — and the peer
-  // percentiles in the profile drawer are relative to exactly this set. Say so.
   const cohortNote = useMemo(() => {
-    if (screeningTable.length === 0) return null
-    const assets = screeningTable.map((r) => r.totalAssets).filter((v) => Number.isFinite(v) && v > 0)
-    const floor = assets.length ? Math.min(...assets) : null
-    const count = screeningTable.length.toLocaleString('en-US')
-    if (!truncated) {
-      return `Screening all ${count} FDIC-reporting institutions in ${regionDisplay}.`
-    }
-    return `Screening the ${count} largest FDIC-reporting institutions in ${regionDisplay}`
-      + (floor != null ? ` (assets above ${formatMoney(floor)})` : '')
-      + '. Smaller institutions are outside this cohort, and peer percentiles are relative to it.'
-  }, [screeningTable, truncated, regionDisplay])
+    if (!payload || rows.length === 0) return null
+    const count = rows.length.toLocaleString('en-US')
+    const total = payload.kpis.institutionsScreened
+    const base = total > rows.length
+      ? `Screening ${count} of the ${total.toLocaleString('en-US')} FDIC-reporting institutions Market Intelligence covers in ${regionDisplay}`
+      : `Screening all ${count} FDIC-reporting institutions in ${regionDisplay}`
+    return `${base}. Scores are percentile ranks within this scope, and peer percentiles in the profile drawer are relative to this cohort.`
+  }, [payload, rows.length, regionDisplay])
+
+  const signalsNote = useMemo(() => {
+    if (signalsError) return `Balance-sheet signals unavailable: ${signalsError}`
+    if (!signals) return null
+    return `${signals.firedCount.toLocaleString('en-US')} of ${signals.currentCount.toLocaleString('en-US')} institutions fired at least one balance-sheet signal in ${asOfQuarter}.`
+  }, [signals, signalsError, asOfQuarter])
+
+  const sortButton = (col: { label: string; term: string; sortKey?: SortKey }) => col.sortKey ? (
+    <button type="button" className="cursor-pointer border-b border-dashed border-muted-foreground/50 hover:opacity-80 text-left font-normal flex items-center gap-1 text-xs"
+      onClick={() => { setTableSortColumn(col.sortKey!); setTableSortDesc((prev) => tableSortColumn === col.sortKey ? !prev : true) }}>
+      <DefTerm term={col.term}>{col.label}</DefTerm>
+      {tableSortColumn === col.sortKey ? (tableSortDesc ? ' ↓' : ' ↑') : ''}
+    </button>
+  ) : (
+    <DefTerm term={col.term}>{col.label}</DefTerm>
+  )
 
   return (
     <div className="p-6 space-y-6 max-w-screen-xl mx-auto">
@@ -332,10 +222,11 @@ export default function MarketAnalytics() {
             <h1 className="text-xl font-semibold">FDIC Data Analytics</h1>
           </div>
           <p className="text-sm text-muted-foreground mt-0.5">
-            FDIC financials, failures, and historical summaries with filters.
+            Bank screening, scores and balance-sheet signals from FDIC Call Report data.
           </p>
           <p className="text-xs text-muted-foreground">
-            FDIC data is quarterly and lagged by 1–2 quarters.
+            {asOf ? <>Data as of <span className="font-medium text-foreground">{asOfQuarter}</span> · </> : null}
+            {MI_SOURCE_LABEL}. FDIC data is quarterly and lagged by 1–2 quarters.
           </p>
         </div>
       </div>
@@ -347,11 +238,11 @@ export default function MarketAnalytics() {
           <FilterHint def={FDIC_SCOPE_DEF}>
             <select
               value={region}
-              onChange={(e) => setRegion(e.target.value as RegionKey)}
+              onChange={(e) => setRegion(e.target.value)}
               className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground w-48"
             >
-              <option value="national">United States</option>
-              {US_STATES_ALPHABETICAL.map((state) => <option key={state} value={state}>{state}</option>)}
+              <option value={scopeOptions.national}>United States</option>
+              {scopeOptions.states.map((state) => <option key={state} value={state}>{state}</option>)}
             </select>
           </FilterHint>
           <div className="relative">
@@ -384,19 +275,25 @@ export default function MarketAnalytics() {
       {/* Loading / Error */}
       {loading && (
         <div className="bg-card border border-border rounded-lg p-4 space-y-2">
-          <p className="text-sm font-medium">Loading FDIC data for {regionDisplay}…</p>
+          <p className="text-sm font-medium">Loading Market Intelligence screening for {regionDisplay}…</p>
           <div className="space-y-2">
             {[1,2,3].map((i) => <Skeleton key={i} className="h-4 rounded" />)}
           </div>
         </div>
       )}
-      {error && <div className="bg-card border border-border rounded-lg p-4 text-sm text-destructive">{error}</div>}
+      {error && (
+        <div className="bg-card border border-destructive/40 rounded-lg p-4 text-sm" role="alert">
+          <p className="font-semibold text-destructive">{error.title}</p>
+          <p className="text-muted-foreground mt-1">{error.detail}</p>
+          <p className="text-xs text-muted-foreground mt-2">No figures are shown until the source answers; nothing on this page is cached locally.</p>
+        </div>
+      )}
 
       {/* NPL Summary */}
       {nplLoansSummary && (
         <div className="bg-card border-2 border-border rounded-lg p-6 shadow-sm">
           <h2 className="text-base font-semibold mb-1">NPL & Loans</h2>
-          <p className="text-sm text-muted-foreground mb-4">Nonperforming loan metrics for {regionDisplay}. Dollar values from FDIC call reports (latest quarter).</p>
+          <p className="text-sm text-muted-foreground mb-4">Nonperforming loan metrics for {regionDisplay}. Dollar values from FDIC call reports ({asOfQuarter}).</p>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
             {[
               { label: 'Total Loans', value: loading ? '…' : formatMoney(nplLoansSummary.totalLoans), sub: 'Net loans & leases' },
@@ -419,7 +316,7 @@ export default function MarketAnalytics() {
       {/* Cohort Summary */}
       <div className="bg-card border border-border rounded-lg p-6">
         <h3 className="text-base font-semibold mb-1">Cohort Summary</h3>
-        <p className="text-xs text-muted-foreground mb-4">Average metrics for {regionDisplay} based on the latest quarter. FDIC data is quarterly and lagged.</p>
+        <p className="text-xs text-muted-foreground mb-4">Average metrics for {regionDisplay} as of {asOfQuarter}. FDIC data is quarterly and lagged.</p>
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
           {kpis.map((kpi) => (
             <div key={kpi.label} className="p-3 bg-background border border-border rounded-lg">
@@ -437,13 +334,16 @@ export default function MarketAnalytics() {
           <div>
             <h3 className="text-base font-semibold mb-1">Target Screening List</h3>
             <p className="text-xs text-muted-foreground">
-              Bank-level screening focused on NPL (nonaccrual loans in dollars), CRE loans, and CRE concentration. Sort by NPL ($) or CRE Concentration to prioritize.
+              Bank-level screening ranked by Opportunity Score, with Earnings and Vulnerability scores, NPL (nonaccrual loans in dollars), CRE loans and CRE concentration. Click any underlined header to sort.
             </p>
             {cohortNote && !loading && (
               <p className="mt-1 text-xs text-muted-foreground">{cohortNote}</p>
             )}
+            {signalsNote && !loading && (
+              <p className="mt-1 text-xs text-muted-foreground">{signalsNote}</p>
+            )}
           </div>
-          {!loading && screeningTable.length > 0 && (
+          {!loading && rows.length > 0 && (
             <select
               value={selectedInstitution ? `${selectedInstitution.id}-${selectedInstitution.reportDate ?? ''}` : '__none__'}
               onChange={(e) => {
@@ -460,19 +360,24 @@ export default function MarketAnalytics() {
               <option value="__none__">Jump to institution…</option>
               {[...sortedScreeningTable].sort((a, b) => (a.name || '').localeCompare(b.name || '')).map((item) => (
                 <option key={`${item.id}-${item.reportDate ?? 'na'}`} value={`${item.id}-${item.reportDate ?? ''}`}>
-                  {item.name}{item.state ? ` (${item.state})` : ''}
+                  {item.name}{item.state ? ` (${stateCodeFor(meta, item.state)})` : ''}
                 </option>
               ))}
             </select>
           )}
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-xs border-collapse min-w-[1200px]">
+          <table className="w-full text-xs border-collapse min-w-[1400px]">
             <thead>
               <tr className="border-b border-border">
                 {[
                   { label: 'Institution', term: 'Institution' }, { label: 'State', term: 'State' },
-                  { label: 'Report', term: 'Report' }, { label: 'Total Assets', term: 'Total Assets' },
+                  { label: 'Report', term: 'Report' },
+                  { label: 'Opp.', term: 'Opportunity Score', sortKey: 'opportunity' as const },
+                  { label: 'Earn.', term: 'Earnings Score', sortKey: 'earnings' as const },
+                  { label: 'Vuln.', term: 'Vulnerability Score', sortKey: 'vulnerability' as const },
+                  { label: 'Signals', term: 'Balance-Sheet Signals' },
+                  { label: 'Total Assets', term: 'Total Assets' },
                   { label: 'Total Loans', term: 'Total Loans' }, { label: 'CRE Loans', term: 'CRE Loans' },
                   { label: 'CRE Conc.', term: 'CRE Concentration', sortKey: 'cre' as const },
                   { label: 'NPL ($)', term: 'NPL ($)', sortKey: 'npl' as const },
@@ -496,15 +401,7 @@ export default function MarketAnalytics() {
                   { label: 'NPL Ratio (4Q)', term: 'NPL Ratio (4Q)' },
                 ].map((col) => (
                   <th key={`${col.label}-${col.term}`} className="text-left py-2 px-2 font-medium text-muted-foreground whitespace-nowrap">
-                    {col.sortKey ? (
-                      <button type="button" className="cursor-pointer border-b border-dashed border-muted-foreground/50 hover:opacity-80 text-left font-normal flex items-center gap-1 text-xs"
-                        onClick={() => { setTableSortColumn(col.sortKey!); setTableSortDesc((prev) => tableSortColumn === col.sortKey ? !prev : true) }}>
-                        <DefTerm term={col.term}>{col.label}</DefTerm>
-                        {tableSortColumn === col.sortKey ? (tableSortDesc ? ' ↓' : ' ↑') : ''}
-                      </button>
-                    ) : (
-                      <DefTerm term={col.term}>{col.label}</DefTerm>
-                    )}
+                    {sortButton(col)}
                   </th>
                 ))}
               </tr>
@@ -513,10 +410,12 @@ export default function MarketAnalytics() {
               {loading ? (
                 Array(10).fill(0).map((_, i) => (
                   <tr key={i} className="border-b border-border/30">
-                    {Array(17).fill(0).map((_, j) => <td key={j} className="py-2 px-2"><Skeleton className="h-3 w-16" /></td>)}
+                    {Array(21).fill(0).map((_, j) => <td key={j} className="py-2 px-2"><Skeleton className="h-3 w-16" /></td>)}
                   </tr>
                 ))
-              ) : sortedScreeningTable.map((item, index) => (
+              ) : sortedScreeningTable.map((item, index) => {
+                const fired = signals?.byCert.get(item.id)?.fired ?? []
+                return (
                 <tr key={`${item.id}-${item.reportDate || 'na'}-${index}`} className="border-b border-border/30 cursor-pointer hover:bg-muted/50 transition-colors"
                   onClick={() => {
                     setSelectedInstitution(item)
@@ -524,8 +423,30 @@ export default function MarketAnalytics() {
                     setCompareRows((prev) => prev.some((r) => `${r.id}-${r.reportDate ?? ''}` === key) ? prev : [item, ...prev])
                   }}>
                   <td className="py-1.5 px-2 font-medium text-foreground">{item.name}</td>
-                  <td className="py-1.5 px-2 text-muted-foreground">{item.state || '—'}</td>
-                  <td className="py-1.5 px-2 text-muted-foreground">{formatQuarter(item.reportDate)}</td>
+                  <td className="py-1.5 px-2 text-muted-foreground">{stateCodeFor(meta, item.state) || '—'}</td>
+                  <td className="py-1.5 px-2 text-muted-foreground">{formatQuarterLabel(item.reportDate)}</td>
+                  <td className={`py-1.5 px-2 tabular-nums font-medium ${getScoreColor(item.opportunityScore, 'structural')}`}>{formatScore(item.opportunityScore)}</td>
+                  <td className={`py-1.5 px-2 tabular-nums font-medium ${getScoreColor(item.earningsScore, 'earnings')}`}>{formatScore(item.earningsScore)}</td>
+                  <td className={`py-1.5 px-2 tabular-nums font-medium ${getScoreColor(item.vulnerabilityScore, 'vulnerability')}`}>{formatScore(item.vulnerabilityScore)}</td>
+                  <td className="py-1.5 px-2">
+                    {signals == null && !signalsError ? (
+                      <Skeleton className="h-3 w-12" />
+                    ) : fired.length === 0 ? (
+                      <span className="text-muted-foreground">—</span>
+                    ) : (
+                      <div className="flex flex-wrap gap-1 max-w-[180px]">
+                        {fired.map((key) => {
+                          const def = signalDefs.get(key)
+                          return (
+                            <span key={key} title={def ? `${def.meaning}\n\n${def.rule}` : key}
+                              className={`inline-block rounded border px-1.5 py-0.5 text-[10px] leading-none whitespace-nowrap ${def?.side === 'pressure' ? 'border-amber-300 bg-amber-50 text-amber-900' : 'border-sky-300 bg-sky-50 text-sky-900'}`}>
+                              {def?.label ?? key}
+                            </span>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </td>
                   <td className="py-1.5 px-2 tabular-nums">{formatCurrency(item.totalAssets)}</td>
                   <td className="py-1.5 px-2 tabular-nums">{formatCurrency(item.totalLoans)}</td>
                   <td className="py-1.5 px-2 tabular-nums">{formatCurrency(item.creLoans)}</td>
@@ -539,7 +460,9 @@ export default function MarketAnalytics() {
                   <td className="py-1.5 px-2 tabular-nums">{formatPercent((item.loanLossReserve ?? 0) * 100)}</td>
                   <td className="py-1.5 px-2 tabular-nums">{formatPercent(item.cet1Ratio)}</td>
                   <td className="py-1.5 px-2 tabular-nums">{formatPercent(item.leverageRatio)}</td>
-                  <td className="py-1.5 px-2 text-xs text-muted-foreground">{item.cet1Ratio !== undefined && item.cet1Ratio !== 0 ? 'CET1' : 'Leverage'}</td>
+                  <td className="py-1.5 px-2 text-xs text-muted-foreground" title={item.capitalCategory ? `${item.capitalCategory.label} — ${item.capitalCategory.binding}` : undefined}>
+                    {item.cet1Ratio !== undefined && item.cet1Ratio !== null && item.cet1Ratio !== 0 ? 'CET1' : 'Leverage'}
+                  </td>
                   {showCapitalColumns && <>
                     <td className={`py-1.5 px-2 tabular-nums ${getCreCapitalColor(item.capitalRatios?.creToTier1Tier2 ?? undefined)}`}>{formatRatio(item.capitalRatios?.creToTier1Tier2)}</td>
                     <td className={`py-1.5 px-2 tabular-nums ${getCreCapitalColor(item.capitalRatios?.creToEquity ?? undefined)}`}>{formatRatio(item.capitalRatios?.creToEquity)}</td>
@@ -566,16 +489,17 @@ export default function MarketAnalytics() {
                   </td>
                   <td className="py-1.5 px-2">
                     <div className="space-y-0.5 text-xs text-muted-foreground">
-                      {item.trend.map((entry) => <div key={`cre-${item.id}-${entry.reportDate}`}>{formatQuarter(entry.reportDate)}: {formatPercent(entry.creConcentration)}</div>)}
+                      {item.trend.map((entry) => <div key={`cre-${item.id}-${entry.reportDate}`}>{formatQuarterLabel(entry.reportDate)}: {formatPercent(entry.creConcentration)}</div>)}
                     </div>
                   </td>
                   <td className="py-1.5 px-2">
                     <div className="space-y-0.5 text-xs text-muted-foreground">
-                      {item.trend.map((entry) => <div key={`npl-${item.id}-${entry.reportDate}`}>{formatQuarter(entry.reportDate)}: {formatPercent((entry.nplRatio ?? 0) * 100)}</div>)}
+                      {item.trend.map((entry) => <div key={`npl-${item.id}-${entry.reportDate}`}>{formatQuarterLabel(entry.reportDate)}: {formatPercent((entry.nplRatio ?? 0) * 100)}</div>)}
                     </div>
                   </td>
                 </tr>
-              ))}
+                )
+              })}
             </tbody>
           </table>
         </div>
@@ -586,14 +510,14 @@ export default function MarketAnalytics() {
 
       <InstitutionProfileDrawer
         row={selectedInstitution as InstitutionProfileRow | null}
-        cohort={screeningTable as InstitutionProfileRow[]}
+        cohort={rows as InstitutionProfileRow[]}
         asOfQuarter={asOfQuarter}
         onClose={() => { setSelectedInstitution(null); setCompareRows([]) }}
         compareRows={compareRows as InstitutionProfileRow[]}
         onAddToCompare={(row) => {
-          const key = `${row.id}-${(row as any).reportDate ?? ''}`
+          const key = `${row.id}-${row.reportDate ?? ''}`
           if (compareRows.some((r) => `${r.id}-${r.reportDate ?? ''}` === key)) return
-          setCompareRows((prev) => [...prev, row as ScreeningRow].slice(-10))
+          setCompareRows((prev) => [...prev, row as MiScreeningRow].slice(-10))
         }}
         onRemoveFromCompare={(id, reportDate) => {
           const next = compareRows.filter((r) => !(r.id === id && (r.reportDate ?? '') === (reportDate ?? '')))

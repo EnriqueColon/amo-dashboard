@@ -1,10 +1,17 @@
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { Copy, X } from "lucide-react"
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Skeleton } from "@/components/ui/skeleton"
 import { toast } from "@/hooks/use-toast"
+import {
+  loadInstitution, loadMiMeta, signalsByKey, MiError, MI_UNAVAILABLE_TITLE,
+  type MiInstitution, type MiMeta, type MiRollForwardStep,
+} from "@/lib/market-intelligence"
 import {
   formatMoney,
   formatCapitalMultiple,
@@ -94,8 +101,9 @@ export type InstitutionProfileRow = {
     creToEquity: number | null
     constructionToTier1Tier2: number | null
     multifamilyToTier1Tier2: number | null
-    coverage: { hasTier1Tier2: boolean }
+    coverage?: { hasTier1Tier2: boolean }
   }
+  capitalCategory?: { category: string; label: string; binding: string; basis: string }
   totalUnusedCommitments?: number
   creUnusedCommitments?: number
   opportunityScore: number
@@ -302,6 +310,7 @@ export function InstitutionProfileDrawer({
                       <p className="flex justify-between"><span className="text-slate-500"><DefTerm term="Earnings Buffer">Earnings Buffer</DefTerm></span><span className="font-medium tabular-nums">{rowForCopy.earningsBufferPct != null ? rowForCopy.earningsBufferPct.toFixed(1) + "%" : "—"}</span></p>
                     </div>
                   </div>
+                  <InstitutionDetailSections cert={rowForCopy.id} />
                   <div>
                     <h4 className="text-xs font-semibold uppercase tracking-wide text-primary mb-1">Peer Positioning</h4>
                     <p className="text-[10px] text-slate-400 mb-2.5 leading-snug">
@@ -600,5 +609,286 @@ function ComparisonTable({ rows, cohort, formatAssets, formatQuarter, formatDeci
         </div>
       )}
     </div>
+  )
+}
+
+// ── Per-institution detail from Market Intelligence ──────────────────────────
+//
+// /api/mi/institution/<cert> → { trend, history, behavior }. Loaded when one
+// bank is open in the drawer; the narrative (an OpenAI call upstream) is only
+// requested when the user presses the button for it.
+
+/** Call Report money is in $ thousands; show it as $K / $M / $B. */
+function formatThousands(v: number | null | undefined): string {
+  if (v == null || !Number.isFinite(v)) return "—"
+  // Sign first: "-$50.0M", not "$-50.0M" — unexplained exits go negative when
+  // nonaccruals grow faster than the prior past-dues predicted.
+  return (v < 0 ? "-" : "") + formatAssets(Math.abs(v) * 1000)
+}
+
+function formatPct(v: number | null | undefined, decimals = 2): string {
+  if (v == null || !Number.isFinite(v)) return "—"
+  return `${v.toFixed(decimals)}%`
+}
+
+const VERDICT_TONE: Record<string, string> = {
+  stable: "border-emerald-200 bg-emerald-50 text-emerald-900",
+  watch: "border-amber-200 bg-amber-50 text-amber-900",
+  deteriorating: "border-red-200 bg-red-50 text-red-900",
+}
+
+function RollForwardRow({ step, first }: { step: MiRollForwardStep; first: string }) {
+  return (
+    <TableRow>
+      <TableCell className="py-1.5 text-xs font-medium text-slate-700 whitespace-nowrap">{first}</TableCell>
+      <TableCell className="py-1.5 text-xs tabular-nums text-right">{formatThousands(step.priorNonaccrual)}</TableCell>
+      <TableCell className="py-1.5 text-xs tabular-nums text-right">{formatThousands(step.newNonaccrualProxy)}</TableCell>
+      <TableCell className="py-1.5 text-xs tabular-nums text-right">{formatThousands(step.chargeOffs)}</TableCell>
+      <TableCell className="py-1.5 text-xs tabular-nums text-right">{formatThousands(step.oreoTransferProxy)}</TableCell>
+      <TableCell className={`py-1.5 text-xs tabular-nums text-right ${step.unexplainedExit > 0 ? "font-medium text-sky-800" : ""}`}>{formatThousands(step.unexplainedExit)}</TableCell>
+      <TableCell className="py-1.5 text-xs tabular-nums text-right text-slate-500">{formatPct(step.unexplainedExitPctOfCre)}</TableCell>
+      <TableCell className="py-1.5 text-xs tabular-nums text-right">{formatThousands(step.currentNonaccrual)}</TableCell>
+    </TableRow>
+  )
+}
+
+function RollForwardHeader() {
+  return (
+    <TableHeader>
+      <TableRow>
+        <TableHead className="h-8 text-xs">Quarter</TableHead>
+        <TableHead className="h-8 text-xs text-right">Prior nonaccrual</TableHead>
+        <TableHead className="h-8 text-xs text-right">New (proxy)</TableHead>
+        <TableHead className="h-8 text-xs text-right">Charge-offs</TableHead>
+        <TableHead className="h-8 text-xs text-right">To OREO (proxy)</TableHead>
+        <TableHead className="h-8 text-xs text-right">Unexplained exit</TableHead>
+        <TableHead className="h-8 text-xs text-right">% of CRE</TableHead>
+        <TableHead className="h-8 text-xs text-right">Current nonaccrual</TableHead>
+      </TableRow>
+    </TableHeader>
+  )
+}
+
+export function InstitutionDetailSections({ cert }: { cert: string }) {
+  const [meta, setMeta] = useState<MiMeta | null>(null)
+  const [detail, setDetail] = useState<MiInstitution | null>(null)
+  const [error, setError] = useState<{ title: string; detail: string } | null>(null)
+  const [narrativeState, setNarrativeState] = useState<"idle" | "loading" | "error">("idle")
+
+  useEffect(() => {
+    let mounted = true
+    setDetail(null)
+    setError(null)
+    setNarrativeState("idle")
+    loadMiMeta().then((m) => { if (mounted) setMeta(m) }).catch(() => {})
+    loadInstitution(cert)
+      .then((d) => { if (mounted) setDetail(d) })
+      .catch((err) => {
+        if (!mounted) return
+        const mi = err instanceof MiError ? err : null
+        setError({ title: mi && !mi.unavailable ? "Could not load institution detail" : MI_UNAVAILABLE_TITLE, detail: err instanceof Error ? err.message : String(err) })
+      })
+    return () => { mounted = false }
+  }, [cert])
+
+  const signalDefs = useMemo(() => signalsByKey(meta), [meta])
+
+  const loadNarrative = useCallback(async () => {
+    setNarrativeState("loading")
+    try {
+      const d = await loadInstitution(cert, { narrative: true })
+      setDetail(d)
+      setNarrativeState("idle")
+    } catch {
+      setNarrativeState("error")
+    }
+  }, [cert])
+
+  if (error) {
+    return (
+      <div className="rounded-lg border border-red-200 bg-red-50/60 px-4 py-3 text-sm" role="alert">
+        <p className="font-semibold text-red-800">{error.title}</p>
+        <p className="text-red-700/80 text-xs mt-0.5">{error.detail}</p>
+      </div>
+    )
+  }
+
+  if (!detail) {
+    return (
+      <div className="space-y-2">
+        <h4 className="text-xs font-semibold uppercase tracking-wide text-primary">Loading institution detail…</h4>
+        {[1, 2, 3].map((i) => <Skeleton key={i} className="h-4 rounded" />)}
+      </div>
+    )
+  }
+
+  const { trend, history, behavior, narrative } = detail
+  const fired = behavior?.latest?.fired ?? []
+  const verdictTone = VERDICT_TONE[trend?.verdict?.tone ?? ""] ?? "border-slate-200 bg-slate-50 text-slate-800"
+
+  return (
+    <>
+      {/* Trend — eight quarters */}
+      {trend && (
+        <Card className="border-slate-200/80 shadow-none">
+          <CardHeader className="p-4 pb-2">
+            <CardTitle className="text-xs font-semibold uppercase tracking-wide text-primary">Trend — {trend.points.length} quarters</CardTitle>
+            <CardDescription className="text-xs">
+              {trend.leverageOnly ? "Files under the Community Bank Leverage Ratio framework: leverage is the only capital ratio reported." : "Capital, asset quality and earnings by quarter."}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="p-4 pt-0 space-y-3">
+            <div className={`rounded-md border px-3 py-2 text-xs ${verdictTone}`}>
+              <span className="font-semibold">{trend.verdict.heading}.</span> {trend.verdict.text}
+            </div>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="h-8 text-xs">Quarter</TableHead>
+                    <TableHead className="h-8 text-xs text-right">NPL</TableHead>
+                    <TableHead className="h-8 text-xs text-right">Noncurrent</TableHead>
+                    <TableHead className="h-8 text-xs text-right">Leverage</TableHead>
+                    {!trend.leverageOnly && <TableHead className="h-8 text-xs text-right">CET1</TableHead>}
+                    <TableHead className="h-8 text-xs text-right">CRE / Capital</TableHead>
+                    <TableHead className="h-8 text-xs text-right">Const / Capital</TableHead>
+                    <TableHead className="h-8 text-xs text-right">Reserve</TableHead>
+                    <TableHead className="h-8 text-xs text-right">ROA</TableHead>
+                    <TableHead className="h-8 text-xs text-right">NIM</TableHead>
+                    <TableHead className="h-8 text-xs">Capital</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {trend.points.map((p) => (
+                    <TableRow key={p.quarter}>
+                      <TableCell className="py-1.5 text-xs font-medium text-slate-700 whitespace-nowrap">{p.label}</TableCell>
+                      <TableCell className="py-1.5 text-xs tabular-nums text-right">{formatPct(p.nplPct)}</TableCell>
+                      <TableCell className="py-1.5 text-xs tabular-nums text-right">{formatPct(p.noncurrentPct)}</TableCell>
+                      <TableCell className="py-1.5 text-xs tabular-nums text-right">{formatPct(p.leveragePct, 1)}</TableCell>
+                      {!trend.leverageOnly && <TableCell className="py-1.5 text-xs tabular-nums text-right">{formatPct(p.cet1Pct, 1)}</TableCell>}
+                      <TableCell className="py-1.5 text-xs tabular-nums text-right">{formatPct(p.creToCapitalPct, 0)}</TableCell>
+                      <TableCell className="py-1.5 text-xs tabular-nums text-right">{formatPct(p.constructionToCapitalPct, 0)}</TableCell>
+                      <TableCell className="py-1.5 text-xs tabular-nums text-right">{formatPct(p.reservePct)}</TableCell>
+                      <TableCell className="py-1.5 text-xs tabular-nums text-right">{formatPct(p.roaPct)}</TableCell>
+                      <TableCell className="py-1.5 text-xs tabular-nums text-right">{formatPct(p.nimPct)}</TableCell>
+                      <TableCell className="py-1.5 text-xs text-slate-600 whitespace-nowrap">{p.capital?.label ?? "—"}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Acquisition history */}
+      <Card className="border-slate-200/80 shadow-none">
+        <CardHeader className="p-4 pb-2">
+          <CardTitle className="text-xs font-semibold uppercase tracking-wide text-primary">Acquisition History</CardTitle>
+          <CardDescription className="text-xs">Institutions this bank has absorbed, per FDIC structure records.</CardDescription>
+        </CardHeader>
+        <CardContent className="p-4 pt-0">
+          {history?.acquisitions?.length ? (
+            <ul className="space-y-1 text-sm text-slate-700">
+              {history.acquisitions.map((a) => (
+                <li key={`${a.date}-${a.absorbedCert}`} className="flex gap-3">
+                  <span className="tabular-nums text-slate-500 shrink-0">{a.date}</span>
+                  <span>{a.description} <span className="text-slate-400 text-xs">(CERT {a.absorbedCert})</span></span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-slate-500">No acquisitions on record.</p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Balance-Sheet Actions */}
+      {behavior && (
+        <Card className="border-slate-200/80 shadow-none">
+          <CardHeader className="p-4 pb-2">
+            <CardTitle className="text-xs font-semibold uppercase tracking-wide text-primary">Balance-Sheet Actions</CardTitle>
+            <CardDescription className="text-xs">
+              What the bank did with its CRE book in {behavior.latest?.quarter ? formatQuarter(behavior.latest.quarter) : "the latest quarter"}: signals that fired, the nonaccrual roll-forward, and a plain-language reading. Dollar figures are Call Report values.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="p-4 pt-0 space-y-4">
+            <div>
+              <p className="text-[11px] font-medium text-slate-500 mb-1.5">Signals fired this quarter</p>
+              {fired.length === 0 ? (
+                <p className="text-sm text-slate-500">None.{behavior.latest?.unjudged?.length ? ` ${behavior.latest.unjudged.length} signal${behavior.latest.unjudged.length === 1 ? "" : "s"} could not be judged for this bank.` : ""}</p>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  {fired.map((key) => {
+                    const def = signalDefs.get(key)
+                    return (
+                      <span key={key} title={def?.rule ?? key}
+                        className={`inline-flex flex-col rounded-md border px-2.5 py-1.5 text-xs leading-tight ${def?.side === "pressure" ? "border-amber-300 bg-amber-50 text-amber-900" : "border-sky-300 bg-sky-50 text-sky-900"}`}>
+                        <span className="font-semibold">{def?.label ?? key}</span>
+                        {def && <span className="text-[10px] opacity-80">{def.meaning}</span>}
+                      </span>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
+            {behavior.reading?.text && (
+              <div className="space-y-2 text-sm text-slate-700 leading-relaxed">
+                {behavior.reading.text.split(/\n{2,}/).map((para, i) => <p key={i}>{para}</p>)}
+              </div>
+            )}
+
+            {behavior.rollForward?.length > 0 && (
+              <div>
+                <p className="text-[11px] font-medium text-slate-500 mb-1.5">CRE nonaccrual roll-forward</p>
+                <div className="overflow-x-auto">
+                  <Table>
+                    <RollForwardHeader />
+                    <TableBody>
+                      {behavior.rollForward.map((s) => <RollForwardRow key={s.quarter} step={s} first={s.label} />)}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            )}
+
+            {behavior.latestByCategory?.length > 0 && (
+              <div>
+                <p className="text-[11px] font-medium text-slate-500 mb-1.5">Latest quarter by CRE category</p>
+                <div className="overflow-x-auto">
+                  <Table>
+                    <RollForwardHeader />
+                    <TableBody>
+                      {behavior.latestByCategory.map((c) => <RollForwardRow key={c.category} step={c.step} first={c.label} />)}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            )}
+
+            <div className="pt-1">
+              {narrative?.text ? (
+                <div>
+                  <p className="text-[11px] font-medium text-slate-500 mb-1.5">Narrative</p>
+                  <div className="space-y-2 text-sm text-slate-700 leading-relaxed">
+                    {narrative.text.split(/\n{2,}/).map((para, i) => <p key={i}>{para}</p>)}
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center gap-3">
+                  <Button variant="outline" size="sm" onClick={loadNarrative} disabled={narrativeState === "loading"}>
+                    {narrativeState === "loading" ? "Writing narrative…" : "Generate narrative"}
+                  </Button>
+                  <span className="text-[11px] text-slate-500">
+                    {narrativeState === "error" ? "Narrative unavailable right now." : "Asks Market Intelligence to write an eight-quarter summary (uses an LLM call)."}
+                  </span>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </>
   )
 }

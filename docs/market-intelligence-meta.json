@@ -1,0 +1,185 @@
+{
+  "ok": true,
+  "meta": {
+    "apiVersion": "v1",
+    "contractVersion": "2026-10-07",
+    "quarter": "20260630",
+    "servedAt": "2026-10-07T16:23:01.851Z",
+    "source": "FDIC BankFind Call Report data, computed by Market Intelligence"
+  },
+  "scopes": {
+    "national": "National",
+    "states": {
+      "AL": "Alabama",
+      "AK": "Alaska",
+      "AZ": "Arizona",
+      "AR": "Arkansas",
+      "CA": "California",
+      "CO": "Colorado",
+      "CT": "Connecticut",
+      "DE": "Delaware",
+      "DC": "District of Columbia",
+      "FL": "Florida",
+      "GA": "Georgia",
+      "HI": "Hawaii",
+      "ID": "Idaho",
+      "IL": "Illinois",
+      "IN": "Indiana",
+      "IA": "Iowa",
+      "KS": "Kansas",
+      "KY": "Kentucky",
+      "LA": "Louisiana",
+      "ME": "Maine",
+      "MD": "Maryland",
+      "MA": "Massachusetts",
+      "MI": "Michigan",
+      "MN": "Minnesota",
+      "MS": "Mississippi",
+      "MO": "Missouri",
+      "MT": "Montana",
+      "NE": "Nebraska",
+      "NV": "Nevada",
+      "NH": "New Hampshire",
+      "NJ": "New Jersey",
+      "NM": "New Mexico",
+      "NY": "New York",
+      "NC": "North Carolina",
+      "ND": "North Dakota",
+      "OH": "Ohio",
+      "OK": "Oklahoma",
+      "OR": "Oregon",
+      "PA": "Pennsylvania",
+      "RI": "Rhode Island",
+      "SC": "South Carolina",
+      "SD": "South Dakota",
+      "TN": "Tennessee",
+      "TX": "Texas",
+      "UT": "Utah",
+      "VT": "Vermont",
+      "VA": "Virginia",
+      "WA": "Washington",
+      "WV": "West Virginia",
+      "WI": "Wisconsin",
+      "WY": "Wyoming",
+      "PR": "Puerto Rico"
+    }
+  },
+  "assetBands": [
+    {
+      "key": "under100m",
+      "label": "Under $100M",
+      "maxAssets": 100000
+    },
+    {
+      "key": "100m-250m",
+      "label": "$100M\u2013$250M",
+      "maxAssets": 250000
+    },
+    {
+      "key": "250m-500m",
+      "label": "$250M\u2013$500M",
+      "maxAssets": 500000
+    },
+    {
+      "key": "500m-1b",
+      "label": "$500M\u2013$1B",
+      "maxAssets": 1000000
+    },
+    {
+      "key": "1b-3b",
+      "label": "$1B\u2013$3B",
+      "maxAssets": 3000000
+    },
+    {
+      "key": "3b-10b",
+      "label": "$3B\u2013$10B",
+      "maxAssets": 10000000
+    },
+    {
+      "key": "over10b",
+      "label": "Over $10B",
+      "maxAssets": null
+    }
+  ],
+  "signals": [
+    {
+      "key": "hfsTransfer",
+      "label": "HFS transfer",
+      "side": "action",
+      "meaning": "Bank has decided to sell",
+      "rule": "Held-for-sale rose by at least 0.25% of gross loans in the quarter and stands at least 1.5\u00d7 the bank's own high of the previous four quarters (so a bank that always runs a mortgage pipeline does not fire every quarter)."
+    },
+    {
+      "key": "realizedSale",
+      "label": "Realized sale",
+      "side": "action",
+      "meaning": "A sale closed; a loss is a discount",
+      "rule": "Net gains or losses on loan sales were non-zero in the quarter, and either a loss, or the bank reported loan-sale gains in at most one of the previous four quarters (so routine mortgage sellers do not fire)."
+    },
+    {
+      "key": "chargeOffSpike",
+      "label": "CRE charge-off spike",
+      "side": "action",
+      "meaning": "Active write-down or clean-up",
+      "rule": "Quarterly CRE net charge-offs reached 0.5% of CRE loans, or at least 0.1% and 3\u00d7 the bank's own trailing average."
+    },
+    {
+      "key": "unexplainedExit",
+      "label": "Unexplained nonaccrual exit",
+      "side": "action",
+      "meaning": "Loans left the books another way: likely a note sale",
+      "rule": "CRE nonaccrual fell, and the roll-forward residual \u2014 prior nonaccrual plus prior 90+ past due, less current nonaccrual, charge-offs and the OREO increase \u2014 is at least 25% of the prior nonaccrual and 0.1% of CRE loans. Cures and payoffs land here too: a flag, not a dollar estimate."
+    },
+    {
+      "key": "foreclosureRoute",
+      "label": "Foreclosure route",
+      "side": "action",
+      "meaning": "REO sale candidates coming",
+      "rule": "CRE OREO rose by at least 0.05% of CRE loans while CRE nonaccrual fell."
+    },
+    {
+      "key": "modificationBuild",
+      "label": "Modification build",
+      "side": "pressure",
+      "meaning": "Extend-and-pretend; losses deferred, not resolved",
+      "rule": "CRE modifications to borrowers in financial difficulty rose by at least 0.1% of CRE loans while CRE past-dues (30\u201389 and 90+) were flat or falling."
+    },
+    {
+      "key": "creRunoff",
+      "label": "CRE runoff",
+      "side": "action",
+      "meaning": "Deliberate de-risking",
+      "rule": "CRE loans fell by more than 2% in the quarter and more than 5% over four quarters, both after adding back net charge-offs (a sustained shrink, not one payoff)."
+    }
+  ],
+  "signalThresholds": {
+    "hfsRisePctOfLoans": 0.25,
+    "hfsNewLevelMultiple": 1.5,
+    "ncoRateAbsolute": 0.5,
+    "ncoRateFloor": 0.1,
+    "ncoOwnHistoryMultiple": 3,
+    "exitShareOfPriorNonaccrual": 0.25,
+    "exitPctOfCre": 0.1,
+    "oreoRisePctOfCre": 0.05,
+    "modificationRisePctOfCre": 0.1,
+    "runoffPct": -2,
+    "runoff4qPct": -5,
+    "minCohort": 10
+  },
+  "creCategoryLabels": {
+    "construction": "Construction & land",
+    "multifamily": "Multifamily",
+    "nonfarmNonres": "Nonfarm nonresidential",
+    "cre": "All CRE"
+  },
+  "endpoints": {
+    "screening": "/api/analytics/v1/screening?scope=National|<State name or code>",
+    "visuals": "/api/analytics/v1/visuals?scope=",
+    "cohortWatch": "/api/analytics/v1/cohort-watch?scope=",
+    "behaviorSignals": "/api/analytics/v1/behavior-signals?scope=&band=<optional asset band key>",
+    "institution": "/api/analytics/v1/institution/<CERT>?include=narrative (optional)"
+  },
+  "cache": {
+    "note": "Objects are computed by the daily warm-cache job and keyed by the published quarter; they refresh when FDIC publishes and at most weekly otherwise. Consumers should cache responses for at least an hour and need not poll more than daily."
+  }
+}
