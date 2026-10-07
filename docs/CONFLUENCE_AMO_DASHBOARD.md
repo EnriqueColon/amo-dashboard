@@ -818,9 +818,17 @@ pm2 logs amo-dashboard --lines 20 --nostream
 ```
 
 **Deploying Ask the Data (pending)** is the same shape, with one variable the collectors already have
-in `.env`: `export OPENAI_API_KEY="$(grep '^OPENAI_API_KEY=' .env | cut -d= -f2-)"` then
-`pm2 restart amo-dashboard --update-env && pm2 save`. Verify with `pm2 logs` (no "OPENAI_API_KEY not
-set" warning) and `GET /api/chat/config` from a logged-in browser (`configured: true`, `model`).
+in `.env`. Note that line is written `export OPENAI_API_KEY=…` (confirmed 7 Oct 2026), so a plain
+`grep '^OPENAI_API_KEY='` finds nothing — evaluate just that one line instead:
+
+```bash
+cd /opt/amo-dashboard && git pull && npm run build
+eval "$(grep -E '^\s*(export\s+)?OPENAI_API_KEY=' .env)" && export OPENAI_API_KEY
+pm2 restart amo-dashboard --update-env && pm2 save
+pm2 logs amo-dashboard --lines 20 --nostream   # no "OPENAI_API_KEY not set" warning
+```
+
+Then `GET /api/chat/config` from a logged-in browser should show `configured: true` and the model.
 `OPENAI_CHAT_MODEL` / `OPENAI_CHAT_REASONING_EFFORT` are optional and only need exporting if set.
 
 Do **not** `source .env` wholesale before `--update-env`: `.env` and `ecosystem.config.cjs` are both
