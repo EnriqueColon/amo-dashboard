@@ -4,6 +4,17 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-10-08 (afternoon) — Ask the Data: charts in answers
+
+User: "provide professional, visual graphs — when applicable." Shipped same session; clickable-rows feature deployed earlier today as `319ae14` (PM2 restart #61).
+
+- **Mechanism:** the model emits a fenced ```` ```chart ```` block holding compact JSON (`type` line|area|bar|hbar|pie, `title`, `subtitle`, `format` number|money|percent, `x` label field, `series` [{key,label,color?}] or ["key"], `stacked`, `data` [{…}]); the client overrides react-markdown's `pre` and renders it with recharts (already a dependency). No server/API change beyond the prompt — `server/chat/prompt.ts` ANSWER_STYLE gained a "when to chart" rule (trend ≥ 4 periods → line/area; ranking ≥ 3 → hbar; share ≤ 8 → pie; two-period comparison → bar; never a single number or a 2-row table; chart follows the figures, one per answer, ≤ 40 points, values only from tool results) plus the spec example.
+- **Files:** `client/src/lib/chat-chart.ts` (pure: `parseChartSpec` validates/normalises — coerces "1,210"/"$1.2M"/"41.2%", infers series from data keys, caps 60 points / 6 series / 8 slices, unknown type → bar, distinguishes a *partial* (still streaming) JSON from a broken one by bracket depth; `formatValue` axis/tooltip formatting; `shortLabel`), `client/src/components/ChatChart.tsx` (card with title/subtitle; palette primary + distinct hues — #3b82f6 dropped because it was indistinguishable from primary; exact value labels on single-series bars, compact on axes; donut legend shows each slice's share; dense series drop dots/labels; "Building chart…" placeholder while partial or streaming; amber collapsible fallback with the raw spec on error), `ChatAnswer.tsx` (`MdPre` → `ChatChart` when the code class is `language-chart`), `Chat.tsx` empty-state copy.
+- **Verified:** 16 pure tests (tsx) pass; in-browser against a Responses-API mock streaming all five types + a broken spec: 5 charts at 802 px prose width, SVG present, placeholder visible during streaming (8 polls) then 0 pending, labels "1,240" not "1.2k", legend "MARKET_TRANSFER · 45.7%", last x tick fits after `right: 28` margin. tsc clean, `npm run build` 933.2 kB.
+- **Not done:** charts aren't clickable (rows are); no export/copy-as-image; the model decides applicability — if it over- or under-charts, tune the ANSWER_STYLE bullet, not the client.
+
+---
+
 ## 2026-10-08 — Ask the Data: click a table row → the filings behind it, expanded in place
 
 User: "if a user sees a table with the top assignors and wants to see the actual assignments, he would click on the row and have the details dropdown below." Discussed first (three approaches), then "lets implement". Built and verified in one session.

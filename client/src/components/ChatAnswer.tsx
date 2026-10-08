@@ -7,6 +7,7 @@ import { documentUrl, noDocumentUrlReason } from '@/lib/doc-url';
 import { formatMoney } from '@/lib/metrics';
 import { resolveDrill, defaultsFromSteps, describeRow, type Drill } from '@/lib/chat-drill';
 import { streamChat, type ToolStep, type ChatHistoryMessage } from '@/lib/chat-stream';
+import { ChatChart } from '@/components/ChatChart';
 
 /**
  * Renders one Ask the Data answer. Markdown as before, except that every
@@ -128,8 +129,18 @@ function MdRow({ node, children, ...props }: any) {
   );
 }
 
+/** A fenced ```chart block renders as a chart instead of a code box. */
+function MdPre({ node, children, ...props }: any) {
+  const ctx = useContext(DrillContext);
+  const code = (node?.children ?? []).find((c: any) => c.type === 'element' && c.tagName === 'code');
+  const classes: string[] = Array.isArray(code?.properties?.className) ? code.properties.className.map(String) : [];
+  if (classes.includes('language-chart')) return <ChatChart source={hastText(code)} ready={ctx?.ready ?? true} />;
+  return <pre {...props}>{children}</pre>;
+}
+
 const COMPONENTS: Components = {
   a: ({ node, ...props }: any) => <a {...props} target="_blank" rel="noopener noreferrer" />,
+  pre: MdPre,
   table: MdTable,
   tr: MdRow,
 };

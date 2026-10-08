@@ -194,7 +194,7 @@ export default function Chat() {
             <div className="bg-card border border-border rounded-lg p-5">
               <div className="flex items-center gap-2 text-sm font-medium mb-1"><Database size={14} className="text-primary" /> What you can ask</div>
               <p className="text-xs text-muted-foreground mb-4">
-                The assistant answers only from this dashboard's database — recorded assignments, resolved entities, lending relationships and UCC filings — and shows every lookup it ran. It will tell you when the data cannot answer. When an answer includes a table, click any row to see the individual filings behind it.
+                The assistant answers only from this dashboard's database — recorded assignments, resolved entities, lending relationships and UCC filings — and shows every lookup it ran. It will tell you when the data cannot answer. When an answer includes a table, click any row to see the individual filings behind it; trends, rankings and shares come with a chart.
               </p>
               <div className="grid sm:grid-cols-2 gap-2">
                 {SUGGESTIONS.map(s => (
