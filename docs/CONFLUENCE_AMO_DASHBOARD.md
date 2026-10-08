@@ -1,6 +1,6 @@
 # AMO Tracker — Mortgage Assignment Intelligence Dashboard
 
-> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 7 Oct 2026
+> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 8 Oct 2026
 > **Production URL:** `http://165.22.35.75:5000` (single shared password)
 > **Repository:** `amo-dashboard` (`origin/main`)
 
@@ -310,6 +310,26 @@ period itself when that makes the answer land. The rigour rules are unchanged: e
 tool, CFNs cited, real traps flagged. All of this lives in `server/chat/prompt.ts` (`ANSWER_STYLE`);
 change the wording there, then the normal `npm run build` → `pm2 restart` (the prompt is bundled
 into `dist/index.cjs`; no client or database change is involved).
+
+**Click a table row to see the records behind it** (8 Oct 2026). Every body row of every table in
+an answer has a chevron; click it and the individual filings expand *under the row, inside the
+table* — recorded date, CFN (linked to the document image for Miami-Dade), assignor → assignee,
+transaction type, property and amount where the PDF was read, 25 at a time with "Show more" (up to
+200). Lending-relationship rows expand to the facility filings with their evidence quotes; a row that
+*is* a filing expands to its full record. The header of the expansion states exactly which filter
+produced it ("acquired by US BANK · Miami-Dade · 2025-01-01 → 2025-12-31 · excluding self-assigns"),
+and the count there should equal the number in the row — if it does not, the model's table and its
+lookups disagree, which is worth knowing.
+
+How the row knows what its records are: the page matches the row's cells against the results of the
+lookups the model ran for that answer (an entity name, a month, a lender/borrower pair or a CFN is
+distinctive enough), and uses that lookup's own county, dates and role. **No model call and no cost**
+— it is a plain database query (`GET /api/chat/drill`), under a second. If the row came from an SQL
+query or the model rewrote the values, the page falls back to reading the column headers (Assignor,
+Buyer, Month, County, Type…) and labels the expansion **best guess**. If even that fails — a row of
+ratios, say — the expansion offers **Ask about this row**, which is a normal model turn (10–20 s,
+the usual per-question cost) answered inside the expansion; its own tables are clickable in turn.
+Rows are not clickable until the answer has finished streaming.
 
 Expect it to be wrong sometimes — the page says so under the box. Open the lookups and check the
 underlying page before relying on a number. The conversation lives in the browser tab only; **New
@@ -635,10 +655,12 @@ amo-dashboard/
 │   ├── auth.ts         single-password HMAC cookie gate
 │   ├── cache.ts        in-memory TTL response cache
 │   ├── market-intelligence.ts   Market Analytics API client + /api/mi/* routes (replaced fdic.ts, 7 Oct 2026)
-│   └── chat/           "Ask the Data" (7 Oct 2026): index.ts POST /api/chat SSE loop · tools.ts the
-│                       ten read-only lookups · prompt.ts system prompt + schema + data traps · openai.ts
-│                       streaming client for the OpenAI *Responses* API (no SDK; GPT-6 Astra refuses
-│                       tools + reasoning on Chat Completions — learned from the first production call)
+│   └── chat/           "Ask the Data" (7 Oct 2026): index.ts POST /api/chat SSE loop + GET /api/chat/drill
+│                       (records behind a table row, 8 Oct) · tools.ts the ten read-only lookups · prompt.ts
+│                       system prompt + schema + data traps · openai.ts streaming client for the OpenAI
+│                       *Responses* API (no SDK; GPT-6 Astra refuses tools + reasoning on Chat Completions)
+│                       Client side: client/src/components/ChatAnswer.tsx (clickable tables, expansion
+│                       panel, "Ask about this row") and client/src/lib/chat-drill.ts (row → lookup matching)
 ├── shared/
 │   └── schema.ts
 ├── docs/
@@ -1580,7 +1602,7 @@ endpoints healthy across all three county scopes.
 | Automated backups | 🟢 **Live off-box 17 Aug 2026** — nightly verified snapshot → DigitalOcean Spaces (`amo-dashboard-backups-ec`, NYC3). Re-verified 7 Oct 2026: eight consecutive `status=ok` runs, ~148MB per archive. **Hardened 7 Oct 2026** — waits out a running `normalize.py`, asserts the derived tables separately, and records a `degraded` status that cannot count as good or rotate a complete archive away (§7.5). Only one restore has ever been performed (17 Aug); another drill is the open item, not a credential |
 | Entity naming / name variants | 🟡 **Legal-suffix class closed 7 Oct 2026** — bare `COMPANY`, `LIMITED` and spaced `L P` now strip, merging 119 canonical names that no amount of suffix stripping could previously reunite (Bank of New York Mellon Trust had broken 179/178). Pinned by `check_company_suffix.py`. **Still split:** geographic qualifiers (correctly — see §7.6 item 9), state abbreviations, OCR digit-for-letter, and a bare trailing `&` |
 | Droplet MCP tools (`tools/droplet-mcp/`) | 🟢 **New 22 Sep 2026** — seven named tools over SSH (§6.4a). Developer-machine only; nothing installed on the droplet, no new credential, no change to how production runs. Smoke-tested against live: read-only tools returned, `db_query` write rejected by SQLite, both guarded tools refused without `confirm` |
-| Ask the Data (`/ask`, `POST /api/chat`) | 🟡 **DEPLOYED 7 Oct 2026 18:19 UTC as a trial** (`cb76b6d`; tab labelled "TESTING/NOTDEPLOYED" at the owner's request, renamed to a **Beta** badge 18:45 UTC) — chat over the database with GPT-6 Astra and ten read-only lookups (§4.3). `OPENAI_API_KEY` pushed into PM2's env (`--update-env`, `MI_*` confirmed intact), no startup warning, route 401 unauthenticated, backfill processes untouched. Verified before deploy against the 21 Sep production snapshot: all ten tools return correct shapes, the SQL guard rejects writes / multi-statements / PRAGMA, and the full streaming loop ran end to end in the browser against a mock of OpenAI's streaming protocol. **First real question failed** — `gpt-6-astra` rejects function tools with reasoning on `/v1/chat/completions` ("use /v1/responses or set reasoning_effort to 'none'"); rather than drop reasoning, the client was moved to the Responses API with `previous_response_id` chaining and **redeployed 18:27 UTC (`59af9a5`)**. **Made the landing page 18:38 UTC (`5451898`)** — `/` redirects here, Overview moved to `/overview`. A successful real answer is still the next thing to observe; the `[chat]` PM2 log line per request gives rounds and tokens. Deploy hiccup: build failed once because `npm install` was skipped (§6.4) |
+| Ask the Data (`/ask`, `POST /api/chat`) | 🟡 **DEPLOYED 7 Oct 2026 18:19 UTC as a trial** (`cb76b6d`; tab labelled "TESTING/NOTDEPLOYED" at the owner's request, renamed to a **Beta** badge 18:45 UTC) — chat over the database with GPT-6 Astra and ten read-only lookups (§4.3). `OPENAI_API_KEY` pushed into PM2's env (`--update-env`, `MI_*` confirmed intact), no startup warning, route 401 unauthenticated, backfill processes untouched. Verified before deploy against the 21 Sep production snapshot: all ten tools return correct shapes, the SQL guard rejects writes / multi-statements / PRAGMA, and the full streaming loop ran end to end in the browser against a mock of OpenAI's streaming protocol. **First real question failed** — `gpt-6-astra` rejects function tools with reasoning on `/v1/chat/completions` ("use /v1/responses or set reasoning_effort to 'none'"); rather than drop reasoning, the client was moved to the Responses API with `previous_response_id` chaining and **redeployed 18:27 UTC (`59af9a5`)**. **Made the landing page 18:38 UTC (`5451898`)** — `/` redirects here, Overview moved to `/overview`. **Owner confirmed real answers working the same evening**; voice tuned (interpretation + a one-line preamble before lookups, 23:40 UTC `c9a9ee8`). **8 Oct 2026: clickable table rows** — any row in an answer table expands in place to the filings behind it, matched to the model's own lookups (no model call) with header-heuristic and "Ask about this row" fallbacks (§4.3, `GET /api/chat/drill`). Verified against the 21 Sep snapshot: top-acquirer, month and lending-relationship rows reproduce the table's own counts exactly (1,240 / 1,210 / 31); ratio rows fall through to the model. The `[chat]` PM2 log line per request gives rounds and tokens. Deploy hiccup: build failed once because `npm install` was skipped (§6.4) |
 
 ### 7.4 Known gaps and open items
 
@@ -2204,7 +2226,8 @@ healthy (640 rows, 57% carrying loan amounts).
 | `GET /api/targets` · `POST` · `DELETE` | Watchlist |
 | `GET /api/mi/meta` · `/api/mi/screening?scope=` · `/api/mi/visuals?scope=` · `/api/mi/cohort-watch?scope=` · `/api/mi/behavior-signals?scope=&band=` · `/api/mi/institution/:cert[?include=narrative]` | Market Intelligence pass-through (since 7 Oct 2026; replaced `GET /api/fdic/financials`) — 1:1 with its Market Analytics data API, bearer key added server-side, `ok:true` cached 7 days, 503 when unconfigured |
 | `GET /api/collection-log` | Pipeline health |
-| `POST /api/chat` · `GET /api/chat/config` | Ask the Data (7 Oct 2026). Body `{messages:[{role,content}], county}`; answers as Server-Sent Events (`tool`, `tool_done`, `delta`, `done`, `error`). Never cached. `config` reports whether a key is set and which model answers |
+| `POST /api/chat` · `GET /api/chat/config` | Ask the Data (7 Oct 2026). Body `{messages:[{role,content}], county}`; answers as Server-Sent Events (`tool`, `tool_done`, `delta`, `done`, `error`). Since 8 Oct `tool_done` carries the drillable part of each lookup's result (capped at 60 KB) so the browser can match table rows to lookups. Never cached. `config` reports whether a key is set and which model answers |
+| `GET /api/chat/drill?kind=filings\|facility_filings&…` | The records behind one answer-table row (8 Oct 2026). No model call: runs the `list_filings` / `list_facility_filings` tool with the remaining query parameters as its arguments (`entity, role, counterparty, county, from, to, txn_type, exclude_self_assign, cfn, limit, offset` / `lender, borrower, lender_key, borrower_group_key, cfn, limit`), same validation and caps (200 / 100 rows). Returns `total_matching`, `rows`, and the `args` it applied. Never cached |
 | `POST /api/cache/bust` · `GET /api/cache/stats` | Cache control |
 
 Most read endpoints accept `?county=MIAMI-DADE|BROWARD` (omit for all counties; the server defaults

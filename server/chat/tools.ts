@@ -371,6 +371,7 @@ const listFilings: ToolSpec = {
       county: { type: 'string', description: "'MIAMI-DADE' (default), 'BROWARD' or 'ALL'." },
       from: { type: 'string' }, to: { type: 'string' },
       txn_type: { type: 'string', enum: ['MARKET_TRANSFER', 'ORIGINATION', 'INSTITUTIONAL_OUT', 'PRIVATE', 'SELF_ASSIGN', 'MERS_RELEASE'] },
+      exclude_self_assign: { type: 'boolean', description: 'Drop SELF_ASSIGN rows (matches the default of get_top_entities).' },
       cfn: { type: 'string', description: 'Look up one specific document by its CFN / instrument number.' },
       limit: { type: 'integer', description: 'Default 25, max 200.' },
       offset: { type: 'integer' },
@@ -393,6 +394,7 @@ const listFilings: ToolSpec = {
     }
     if (cp) { where.push('AND (c.assignee_canon = ? OR c.assignor_canon = ?)'); params.push(cp, cp); }
     if (args.txn_type) { where.push('AND c.txn_type = ?'); params.push(String(args.txn_type)); }
+    else if (args.exclude_self_assign === true || args.exclude_self_assign === 'true' || args.exclude_self_assign === '1') where.push("AND c.txn_type != 'SELF_ASSIGN'");
     if (args.cfn) { where.push('AND c.cfn = ?'); params.push(String(args.cfn).trim()); }
     const limit = clampLimit(args.limit, 25);
     const offset = Math.max(0, Number(args.offset) || 0);
@@ -458,6 +460,8 @@ const listFacilityFilings: ToolSpec = {
     properties: {
       lender: { type: 'string', description: 'Partial lender name.' },
       borrower: { type: 'string', description: 'Partial borrower name.' },
+      lender_key: { type: 'string', description: 'Exact lender_key as returned by get_lending_relationships (preferred over lender when you have it — it reproduces the grouped row exactly).' },
+      borrower_group_key: { type: 'string', description: 'Exact group_key as returned by get_lending_relationships (the borrower, or its corporate family when grouped).' },
       cfn: { type: 'string' },
       limit: { type: 'integer', description: 'Default 25, max 100.' },
     },
@@ -466,19 +470,27 @@ const listFacilityFilings: ToolSpec = {
   run(db, args) {
     const where: string[] = [];
     const params: any[] = [];
-    if (args.lender)   { where.push('AND facility_lender_name LIKE ? COLLATE NOCASE'); params.push(`%${args.lender}%`); }
-    if (args.borrower) { where.push('AND (facility_borrower_name LIKE ? COLLATE NOCASE OR borrower_recorded LIKE ? COLLATE NOCASE OR borrower_parent LIKE ? COLLATE NOCASE)'); params.push(`%${args.borrower}%`, `%${args.borrower}%`, `%${args.borrower}%`); }
-    if (args.cfn)      { where.push('AND cfn = ?'); params.push(String(args.cfn).trim()); }
-    if (!where.length) return { error: 'Provide lender, borrower or cfn.' };
+    if (args.lender)   { where.push('AND e.facility_lender_name LIKE ? COLLATE NOCASE'); params.push(`%${args.lender}%`); }
+    if (args.borrower) { where.push('AND (e.facility_borrower_name LIKE ? COLLATE NOCASE OR e.borrower_recorded LIKE ? COLLATE NOCASE OR e.borrower_parent LIKE ? COLLATE NOCASE)'); params.push(`%${args.borrower}%`, `%${args.borrower}%`, `%${args.borrower}%`); }
+    // Same grouping expressions as queryGroupedFacilities, so a key from a
+    // grouped row selects exactly that row's filings.
+    if (args.lender_key)         { where.push(`AND COALESCE(e.lender_key, UPPER(COALESCE(e.facility_lender_name, ''))) = ?`); params.push(String(args.lender_key)); }
+    if (args.borrower_group_key) { where.push(`AND COALESCE(e.borrower_parent, COALESCE(e.borrower_key, UPPER(COALESCE(e.facility_borrower_name, '')))) = ?`); params.push(String(args.borrower_group_key)); }
+    if (args.cfn)      { where.push('AND e.cfn = ?'); params.push(String(args.cfn).trim()); }
+    if (!where.length) return { error: 'Provide lender, borrower, lender_key/borrower_group_key or cfn.' };
+    // rec_book/rec_page come from the raw index so the browser can link the
+    // recorded image (Miami-Dade only — see client/src/lib/doc-url.ts).
     const rows = db.prepare(`
-      SELECT cfn, rec_date, county, doc_type, grantor, grantee, direction, grantor_role, grantee_role,
-             facility_type, facility_lender_name, facility_borrower_name, borrower_parent, facility_agent_name,
-             facility_agreement_name, facility_agreement_date, facility_amount, facility_amount_type,
-             facility_confidence, facility_evidence_quote
-      FROM credit_facility_events WHERE 1=1 ${where.join(' ')}
-      ORDER BY rec_date DESC LIMIT ?
+      SELECT e.cfn, e.rec_date, e.county, e.doc_type, e.grantor, e.grantee, e.direction, e.grantor_role, e.grantee_role,
+             e.facility_type, e.facility_lender_name, e.facility_borrower_name, e.borrower_parent, e.facility_agent_name,
+             e.facility_agreement_name, e.facility_agreement_date, e.facility_amount, e.facility_amount_type,
+             e.facility_confidence, e.facility_evidence_quote, a.rec_book, a.rec_page
+      FROM credit_facility_events e LEFT JOIN assignments a ON a.cfn = e.cfn
+      WHERE 1=1 ${where.join(' ')}
+      ORDER BY e.rec_date DESC LIMIT ?
     `).all(...params, clampLimit(args.limit, 25, 100));
-    return { returned: rows.length, rows };
+    const total = db.prepare(`SELECT COUNT(*) AS n FROM credit_facility_events e WHERE 1=1 ${where.join(' ')}`).get(...params) as any;
+    return { total_matching: total.n, returned: rows.length, rows };
   },
 };
 
@@ -618,6 +630,33 @@ export function executeTool(db: Database.Database, name: string, rawArgs: string
   } catch (e: any) {
     return { result: { error: `Tool failed: ${e?.message ?? String(e)}` }, ms: Date.now() - t0 };
   }
+}
+
+/**
+ * The part of a tool result the browser gets, so a row in the model's table
+ * can be matched back to the lookup that produced it and expanded in place
+ * (client/src/lib/chat-drill.ts). Document text and the dataset overview have
+ * nothing a table row could drill into, so they are not sent. Capped so a
+ * 200-row SQL result does not bloat the stream.
+ */
+const DRILLABLE_TOOLS = new Set([
+  'search_entities', 'get_entity_profile', 'get_top_entities', 'get_monthly_volume',
+  'list_filings', 'get_lending_relationships', 'list_facility_filings', 'run_sql',
+]);
+const MAX_DRILL_PAYLOAD_CHARS = 60_000;
+
+export function drillableResult(name: string, result: unknown): unknown {
+  if (!DRILLABLE_TOOLS.has(name) || !result || typeof result !== 'object') return undefined;
+  if ((result as any).error) return undefined;
+  const s = JSON.stringify(result);
+  if (s.length <= MAX_DRILL_PAYLOAD_CHARS) return result;
+  if (Array.isArray((result as any).rows)) {
+    const r = { ...(result as any) };
+    let rows = r.rows as any[];
+    while (rows.length > 1 && JSON.stringify({ ...r, rows }).length > MAX_DRILL_PAYLOAD_CHARS) rows = rows.slice(0, Math.floor(rows.length / 2));
+    return { ...r, rows };
+  }
+  return undefined;
 }
 
 const MAX_TOOL_OUTPUT_CHARS = 60_000;

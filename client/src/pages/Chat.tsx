@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { MessageSquare, Send, Square, RotateCcw, ChevronDown, ChevronRight, Database, AlertTriangle, Loader2 } from 'lucide-react';
 import { apiRequest } from '@/lib/queryClient';
 import { useCounty, countyLabel } from '@/lib/county';
+import { streamChat, type ToolStep, type ChatMeta, type ChatHistoryMessage } from '@/lib/chat-stream';
+import { ChatAnswer } from '@/components/ChatAnswer';
 
 /**
  * Ask the Data — a chat interface over the AMO database.
@@ -12,20 +12,10 @@ import { useCounty, countyLabel } from '@/lib/county';
  * The browser keeps only the visible conversation (user + assistant text).
  * Each send POSTs the whole thing to /api/chat and reads the Server-Sent
  * Events stream back: tool steps appear as they run, then the answer streams
- * token by token. Tool results themselves never reach the browser — only a
- * one-line summary — so the page stays light even when the model pulls 200 rows.
+ * token by token. Each lookup's drillable result rides along on its
+ * `tool_done` event so a row in an answer table can be expanded in place
+ * (components/ChatAnswer.tsx, lib/chat-drill.ts) without another model call.
  */
-
-interface ToolStep {
-  id: string;
-  name: string;
-  args: Record<string, unknown>;
-  purpose?: string;
-  ms?: number;
-  rows?: number;
-  error?: string;
-  done: boolean;
-}
 
 interface Message {
   id: string;
@@ -34,7 +24,7 @@ interface Message {
   steps?: ToolStep[];
   error?: string;
   streaming?: boolean;
-  meta?: { model: string; rounds: number; usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number } | null };
+  meta?: ChatMeta;
 }
 
 const SUGGESTIONS = [
@@ -78,6 +68,13 @@ function describeStep(s: ToolStep): string {
 let idCounter = 0;
 const nextId = () => `m${Date.now()}_${idCounter++}`;
 
+const EMPTY_STEPS: ToolStep[] = [];
+
+/** What the server gets: user/assistant text only, failed empty turns dropped. */
+function toHistory(msgs: Message[]): ChatHistoryMessage[] {
+  return msgs.filter(m => !m.error || m.content).map(m => ({ role: m.role, content: m.content }));
+}
+
 export default function Chat() {
   const { county } = useCounty();
   const [messages, setMessages] = useState<Message[]>([]);
@@ -120,55 +117,17 @@ export default function Chat() {
     abortRef.current = controller;
 
     try {
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          county,
-          messages: history.filter(m => !m.error || m.content).map(m => ({ role: m.role, content: m.content })),
-        }),
-        signal: controller.signal,
-      });
-      if (!res.ok || !res.body) {
-        let msg = `${res.status} ${res.statusText}`;
-        try { const j = await res.json(); if (j?.error) msg = j.error; } catch { /* ignore */ }
-        throw new Error(msg);
-      }
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = '';
-      for (;;) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        let sep: number;
-        while ((sep = buf.indexOf('\n\n')) >= 0) {
-          const frame = buf.slice(0, sep);
-          buf = buf.slice(sep + 2);
-          let event = 'message';
-          let data = '';
-          for (const line of frame.split('\n')) {
-            if (line.startsWith('event:')) event = line.slice(6).trim();
-            else if (line.startsWith('data:')) data += line.slice(5).trim();
-          }
-          if (!data) continue;
-          let payload: any;
-          try { payload = JSON.parse(data); } catch { continue; }
-
-          if (event === 'delta') {
-            update(assistantId, m => ({ ...m, content: m.content + payload.text }));
-          } else if (event === 'tool') {
-            update(assistantId, m => ({ ...m, steps: [...(m.steps ?? []), { id: payload.id, name: payload.name, args: payload.args ?? {}, purpose: payload.purpose, done: false }] }));
-          } else if (event === 'tool_done') {
-            update(assistantId, m => ({ ...m, steps: (m.steps ?? []).map(s => s.id === payload.id ? { ...s, done: true, ms: payload.ms, rows: payload.rows, error: payload.error } : s) }));
-          } else if (event === 'done') {
-            update(assistantId, m => ({ ...m, streaming: false, meta: { model: payload.model, rounds: payload.rounds, usage: payload.usage } }));
-          } else if (event === 'error') {
-            update(assistantId, m => ({ ...m, streaming: false, error: payload.message }));
-          }
-        }
-      }
+      await streamChat(
+        { county, messages: toHistory(history) },
+        controller.signal,
+        {
+          onDelta: text => update(assistantId, m => ({ ...m, content: m.content + text })),
+          onTool: step => update(assistantId, m => ({ ...m, steps: [...(m.steps ?? []), step] })),
+          onToolDone: (id, patch) => update(assistantId, m => ({ ...m, steps: (m.steps ?? []).map(s => (s.id === id ? { ...s, ...patch } : s)) })),
+          onDone: meta => update(assistantId, m => ({ ...m, streaming: false, meta })),
+          onError: message => update(assistantId, m => ({ ...m, streaming: false, error: message })),
+        },
+      );
       update(assistantId, m => ({ ...m, streaming: false }));
     } catch (err: any) {
       const cancelled = err?.name === 'AbortError';
@@ -235,7 +194,7 @@ export default function Chat() {
             <div className="bg-card border border-border rounded-lg p-5">
               <div className="flex items-center gap-2 text-sm font-medium mb-1"><Database size={14} className="text-primary" /> What you can ask</div>
               <p className="text-xs text-muted-foreground mb-4">
-                The assistant answers only from this dashboard's database — recorded assignments, resolved entities, lending relationships and UCC filings — and shows every lookup it ran. It will tell you when the data cannot answer.
+                The assistant answers only from this dashboard's database — recorded assignments, resolved entities, lending relationships and UCC filings — and shows every lookup it ran. It will tell you when the data cannot answer. When an answer includes a table, click any row to see the individual filings behind it.
               </p>
               <div className="grid sm:grid-cols-2 gap-2">
                 {SUGGESTIONS.map(s => (
@@ -249,7 +208,7 @@ export default function Chat() {
           </div>
         )}
 
-        {messages.map(m => <MessageView key={m.id} m={m} />)}
+        {messages.map((m, i) => <MessageView key={m.id} m={m} county={county} history={messages.slice(0, i + 1)} />)}
         <div ref={bottomRef} />
       </div>
 
@@ -289,7 +248,11 @@ export default function Chat() {
   );
 }
 
-function MessageView({ m }: { m: Message }) {
+function MessageView({ m, county, history }: { m: Message; county: string; history: Message[] }) {
+  // Stable across streaming re-renders so the table rows' drill resolution
+  // (memoised on steps/history) only recomputes when the lookups change.
+  const steps = m.steps ?? EMPTY_STEPS;
+  const chatHistory = useMemo(() => toHistory(history), [history]);
   if (m.role === 'user') {
     return (
       <div className="flex justify-end" data-testid="chat-user-message">
@@ -313,13 +276,7 @@ function MessageView({ m }: { m: Message }) {
           </div>
         )}
         {m.content && (
-          <div className="prose prose-sm max-w-none prose-p:my-2 prose-headings:mt-4 prose-headings:mb-2 prose-table:text-xs prose-th:px-2 prose-th:py-1 prose-td:px-2 prose-td:py-1 prose-pre:text-xs prose-code:text-[12px] prose-code:before:content-none prose-code:after:content-none prose-a:text-primary">
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
-              a: ({ node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" />,
-            }}>
-              {m.content}
-            </ReactMarkdown>
-          </div>
+          <ChatAnswer content={m.content} steps={steps} county={county} history={chatHistory} ready={!m.streaming} />
         )}
         {m.error && (
           <div className="flex items-start gap-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">

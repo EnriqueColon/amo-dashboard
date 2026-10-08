@@ -8,10 +8,16 @@
  * back as Server-Sent Events:
  *
  *   event: tool       {id, name, args, purpose?}         a tool call started
- *   event: tool_done  {id, ms, rows?, error?}             it finished
+ *   event: tool_done  {id, ms, rows?, error?, result?}    it finished; `result` is the
+ *                                                        drillable part of what it returned
  *   event: delta      {text}                              answer text, as it streams
  *   event: done       {model, rounds, usage}              end of turn
  *   event: error      {message}                           fatal; the stream ends
+ *
+ * GET /api/chat/drill is the companion for "click a table row to see the
+ * records behind it": a plain query (no model) that reuses the list_filings /
+ * list_facility_filings tool code, so what the user expands is exactly what
+ * the model would have been given.
  *
  * Registered inside registerRoutes (after app.use(checkAuth) in server/index.ts),
  * so it is login-gated like every other /api route. The OpenAI key never
@@ -22,7 +28,7 @@
 import type { Express, Request, Response } from 'express';
 import { getDb } from '../db';
 import { buildSystemPrompt } from './prompt';
-import { TOOLS_BY_NAME, executeTool, serializeToolResult, toolDefinitions } from './tools';
+import { TOOLS_BY_NAME, executeTool, serializeToolResult, toolDefinitions, drillableResult } from './tools';
 import { chatConfig, streamResponse, OpenAIError, type InputItem, type ToolCall, type Usage } from './openai';
 
 const MAX_ROUNDS = 8;           // tool-call rounds per user turn
@@ -86,6 +92,28 @@ export function registerChatRoutes(app: Express) {
       tools: Array.from(TOOLS_BY_NAME.keys()),
       message: cfg ? null : CHAT_UNCONFIGURED_MESSAGE,
     });
+  });
+
+  // Records behind one table row. `kind` picks the tool; the remaining query
+  // parameters are passed through as that tool's arguments (same validation,
+  // same caps). No model call, no cache: a click should show the database now.
+  const DRILL_KINDS: Record<string, { tool: string; params: string[] }> = {
+    filings:          { tool: 'list_filings',          params: ['entity', 'role', 'counterparty', 'county', 'from', 'to', 'txn_type', 'exclude_self_assign', 'cfn', 'limit', 'offset'] },
+    facility_filings: { tool: 'list_facility_filings', params: ['lender', 'borrower', 'lender_key', 'borrower_group_key', 'cfn', 'limit'] },
+  };
+  app.get('/api/chat/drill', (req: Request, res: Response) => {
+    const kind = DRILL_KINDS[String(req.query.kind ?? '')];
+    if (!kind) { res.status(400).json({ error: `kind must be one of ${Object.keys(DRILL_KINDS).join(', ')}` }); return; }
+    const args: Record<string, unknown> = {};
+    for (const p of kind.params) {
+      const raw = req.query[p];
+      const v = Array.isArray(raw) ? raw[0] : raw;   // first value wins if a parameter is repeated
+      if (typeof v === 'string' && v !== '') args[p] = p === 'limit' || p === 'offset' ? Number(v) : v;
+    }
+    const { result, ms } = executeTool(db, kind.tool, JSON.stringify(args));
+    const r = result as any;
+    if (r && typeof r.error === 'string') { res.status(400).json({ error: r.error }); return; }
+    res.json({ kind: req.query.kind, args, ms, ...r });
   });
 
   app.post('/api/chat', async (req: Request, res: Response) => {
@@ -159,7 +187,7 @@ export function registerChatRoutes(app: Express) {
           const { result, ms } = executeTool(db, call.name, call.arguments);
           const summary = summarizeResult(result);
           toolLog.push(`${call.name}(${ms}ms${summary.rows !== undefined ? `, ${summary.rows} rows` : ''}${summary.error ? ', error' : ''})`);
-          sse(res, 'tool_done', { id: call.callId, ms, ...summary });
+          sse(res, 'tool_done', { id: call.callId, ms, ...summary, result: drillableResult(call.name, result) });
           outputs.push({ type: 'function_call_output', call_id: call.callId, output: serializeToolResult(result) });
         }
         if (abort.signal.aborted) break;
