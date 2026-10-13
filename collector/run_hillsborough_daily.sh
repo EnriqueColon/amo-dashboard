@@ -51,7 +51,11 @@ feed_status=$?
 
 # Scoped to HILLSBOROUGH so it can never eat the Miami-Dade budget. A normal
 # day is ~80 documents (assignments + UCCs); the cap clears a catch-up in one go.
-if [ -n "${OPENAI_API_KEY:-}" ]; then
+# A one-off backlog run reads newest first too, so running both would read the
+# same documents twice.
+if pgrep -f "extract_pdfs.py --county HILLSBOROUGH" >/dev/null; then
+    echo "a Hillsborough extraction is already running — skipping extraction"
+elif [ -n "${OPENAI_API_KEY:-}" ]; then
     "$VENV/bin/python3" -u extract_pdfs.py --county HILLSBOROUGH --limit 300 --budget 1.00
     extract_status=$?
     [ $extract_status -ne 0 ] && echo "extract_pdfs.py FAILED (exit $extract_status)" && status=1
