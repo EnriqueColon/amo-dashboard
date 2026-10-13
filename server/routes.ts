@@ -321,6 +321,61 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     res.json({ ok: true, cleared });
   });
 
+  // ─── GET /api/hillsborough/progress ───────────────────────────────────────
+  // Live reading progress for the Hillsborough backlog plus daily-job liveness.
+  // Deliberately uncached: /api/stats is cached for 7 days, and this exists so
+  // a stalled run is noticed within the hour, not the week.
+  //
+  // "Stalled" only applies while a real backlog exists (over BACKLOG_MIN
+  // unread). Once caught up, the daily job reads ~80 documents once a day, so a
+  // 23-hour gap between reads is normal and must not raise an alarm.
+  app.get('/api/hillsborough/progress', (_req, res) => {
+    const BACKLOG_MIN = 500;
+    const STALL_MINUTES = 30;
+    const groups = db.prepare(`
+      SELECT CASE WHEN a.doc_type = 'FIN' THEN 'ucc' ELSE 'assignments' END AS grp,
+             COUNT(*) AS total,
+             SUM(px.cfn IS NOT NULL) AS attempted,
+             SUM(px.status = 'OK') AS ok
+      FROM assignments a
+      LEFT JOIN pdf_extractions px ON px.cfn = a.cfn
+      WHERE a.county = 'HILLSBOROUGH' AND a.doc_type IN ('ASG', 'ASGT', 'FIN')
+      GROUP BY grp`).all() as any[];
+    if (!groups.length) return res.json({ active: false });
+
+    const reads = db.prepare(`
+      SELECT SUM(extracted_at > datetime('now', '-60 minutes')) AS last_hour,
+             SUM(extracted_at > datetime('now', '-60 minutes') AND status != 'OK') AS errors_last_hour,
+             MAX(extracted_at) AS last_read,
+             CAST((julianday('now') - julianday(MAX(extracted_at))) * 1440 AS INTEGER) AS minutes_since
+      FROM pdf_extractions WHERE county = 'HILLSBOROUGH'`).get() as any;
+    const daily = db.prepare(`
+      SELECT MAX(collected_at) AS last_run,
+             CAST((julianday('now') - julianday(MAX(collected_at))) * 24 AS INTEGER) AS hours_since
+      FROM collection_log WHERE county = 'HILLSBOROUGH'`).get() as any;
+
+    const by = Object.fromEntries(groups.map(g => [g.grp, {
+      total: g.total, read: g.attempted || 0, ok: g.ok || 0, unread: g.total - (g.attempted || 0),
+    }]));
+    const unread = (by.assignments?.unread || 0) + (by.ucc?.unread || 0);
+    const perHour = reads?.last_hour || 0;
+    const backlog = unread > BACKLOG_MIN;
+    res.json({
+      active: true,
+      assignments: by.assignments ?? null,
+      ucc: by.ucc ?? null,
+      per_hour: perHour,
+      errors_last_hour: reads?.errors_last_hour || 0,
+      last_read: reads?.last_read ?? null,
+      minutes_since_read: reads?.minutes_since ?? null,
+      backlog,
+      hours_remaining: backlog && perHour > 0 ? Math.round(unread / perHour) : null,
+      stalled: backlog && (reads?.minutes_since == null || reads.minutes_since > STALL_MINUTES),
+      daily_last_run: daily?.last_run ?? null,
+      daily_stale: daily?.hours_since != null && daily.hours_since > 26,
+    });
+  });
+
   // ─── GET /api/cache/stats ─────────────────────────────────────────────────
   app.get('/api/cache/stats', (_req, res) => {
     res.json(getCacheStats());

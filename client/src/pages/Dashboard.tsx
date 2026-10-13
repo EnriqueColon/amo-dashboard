@@ -8,6 +8,7 @@ import { TrendingUp, TrendingDown, Network, FileText, Database, RefreshCw, Star,
 import { Skeleton } from '@/components/ui/skeleton';
 import CategoryBadge from '@/components/CategoryBadge';
 import EntityDetailPanel from '@/components/EntityDetailPanel';
+import HillsboroughProgress from '@/components/HillsboroughProgress';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 const MONTH_LABELS: Record<string, string> = {
@@ -212,6 +213,8 @@ export default function Dashboard() {
           </span>
         </div>
       )}
+
+      <HillsboroughProgress />
 
       {backupStale && (
         <div
