@@ -4,6 +4,20 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-10-13 (afternoon) — Hillsborough DEPLOYED and collecting; document backlog reading
+
+Owner: "get started on the back end … make sure we run the fix going forward." Merged `feat/hillsborough` → `main` (ff), pushed.
+- **Deploy** 12:53 UTC: pull → build → `pm2 restart` (#68), login 200. No `package.json` change. ssh-agent was empty again (reboot) — `ssh-add --apple-load-keychain` fixed it.
+- **History pull** (nohup, `collector/hillsborough_history.log`): 65,282 rows in ~2 min, 0 errors/collisions — ASG 34,165 / ASGT 24 / FIN 31,093, 2023-01-03 → 2026-10-13. Feed pass: 37 days on feed, 0 new. `check_county_isolation.py` green on the live DB.
+- **New `extract_pdfs.py --doc-types`** (`efefb4f`) so the backlog reads assignments before UCCs (halves time-to-email). `--workers` defaults to 1 — backlog runs use 4.
+- **Backlog run** PID 2339532: `extract_pdfs.py --county HILLSBOROUGH --doc-types ASG,ASGT --limit 40000 --budget 40 --workers 4` → `collector/hillsborough_backlog.log`. 34,189 pending; measured ~14 docs/min (≈840/h, load ~2.4/4 — waiting on clerk + OpenAI, not CPU) → **ETA ~Thu 15 Oct 05:00 UTC**. First 56: 49 LOAN_TRANSFER / 4 OTHER / 3 RENTS_LEASES, real names (MERS → Lakeview etc.).
+- **UCC backlog queued:** PID-based waiter (`while kill -0 2339532 … ; exec extract_pdfs.py … --doc-types FIN --budget 30 --workers 4` → `hillsborough_backlog_ucc.log`). First attempt used `pgrep -f` on a string its own command line contained (would wait forever); my `pkill -f` cleanup then matched and killed my own SSH session — harmless, but **never `pkill -f`/`pgrep -f` a pattern that appears in the invoking command line.**
+- **Cron installed** (`crontab.before_hillsborough.<ts>` backup): `45 13 * * * run_hillsborough_daily.sh >> collector/hillsborough_daily.log`. Wrapper skips its extraction while any `extract_pdfs.py --county HILLSBOROUGH` is running (`a1265b8`) — so during both backlogs it only collects.
+- **Rehearsal:** `.backup` of prod → `/root/rehearse/amo.db`, `normalize.py` against it (log `/root/rehearse/normalize.log`). Still running at commit time (>90 min, 100% CPU, slower than the ~95-min nightly — CPU shared with the backlog, plus ~34k extra HC rows). **Open: compare MD clean counts vs live and record here.** Tonight's real nightly will likely run long too; harmless (backup 03:15 precedes it, Monday email waits for it).
+- Docs: CLAUDE.md + Cursor rule now say Hillsborough LIVE (kept in sync); Confluence status table/cron table/§7.6/§8 updated.
+
+---
+
 ## 2026-10-13 (later) — Hillsborough BUILT on branch `feat/hillsborough`; Palm Beach deferred. NOT deployed
 
 Owner: Palm Beach **defer**; "start building Hillsborough now", on a branch, nothing deployed until approved. Production untouched. Branch is off local `main`, which holds the two scoping-doc commits (`7a9b37f`, `5e4f1c6`) — **unpushed** (auto-review blocked `git push` to main without explicit intent).

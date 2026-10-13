@@ -944,7 +944,7 @@ All installed via `crontab -e` on the droplet.
 |---|---|---|
 | `*/20 * * * *` | `run_facility_tick.sh` | One tick of the OpenAI Batch state machine: poll in-flight jobs, ingest finished ones, top back up to 4 concurrent batches of 500 documents. Resume-safe. |
 | `30 8 * * *` | `run_nightly_normalize.sh` | Rebuild derived tables, then `pm2 restart` to clear the cache. **Skips the restart if normalize fails**, so a failure leaves the last good data serving. |
-| `45 13 * * *` *(proposed — not installed; ships with the Hillsborough deploy)* | `run_hillsborough_daily.sh` | Hillsborough: search API over the last 14 days → daily index feed → extraction (`--county HILLSBOROUGH`, $1 cap). Not time-critical — images are fetched on demand and the search API covers 2023 onward at least. `flock`-guarded. No heartbeat/Overview banner yet |
+| `45 13 * * *` *(installed 13 Oct 2026)* | `run_hillsborough_daily.sh` | Hillsborough: search API over the last 14 days → daily index feed → extraction (`--county HILLSBOROUGH`, $1 cap). Not time-critical — images are fetched on demand and the search API covers 2023 onward at least. `flock`-guarded. No heartbeat/Overview banner yet |
 | `30 15,19,23 * * *` | `run_broward_daily.sh` (`BROWARD_INGEST_INDEX=1`) | Broward index → images → extraction → retention report + heartbeat. **Time-critical.** Runs three times a day on purpose — see "Broward's publication time moves" below. Holds a `flock` so runs cannot overlap; a skipped run exits 0. |
 | `0 6 * * 5` | `run_weekly.sh` | Miami-Dade: collect last 10 days → extract PDFs → normalize → enrich. Sources `/opt/amo-dashboard/.env` itself and **aborts loudly up front if `OPENAI_API_KEY` is missing** (fix `2441222`, 23 Aug 2026 — cron provides no environment; before the fix the run half-succeeded: collection worked, extraction silently died, see §7.4). **No longer sends the email** — that moved out on 2 Oct 2026. |
 | `0 11,12 * * 1` | `send_weekly_email.sh` | The "AMO Market Monitor" email (§4.1a). **Two firings, one send:** the box is Etc/UTC with no DST, so no single UTC hour is 07:00 Eastern all year — 11:00 UTC is 07:00 EDT, 12:00 UTC is 07:00 EST. The script checks the Eastern hour and lets exactly one through. `CRON_TZ` would be tidier but this cron build's support for it is unverified, and a scheduling feature that silently fails would shift the send an hour unnoticed. Waits for any running `normalize.py`, and sends nothing unless `REPORT_EMAIL_ENABLED=1`. |
@@ -1600,7 +1600,7 @@ endpoints healthy across all three county scopes.
 | Miami-Dade collection (weekly cron) | 🟢 Live — ran clean unattended on 11 Sep 2026, all four document types, whole collection phase 2m 13s |
 | AIT (Assignment of Interest) collection | 🟢 **Resolved 11 Sep 2026** — never a timeout. The county rejects the search and returns no results, exactly as it does for a day with no filings, and has done so since the type was added on 16 Jun. Now resolves in about a second and records `EMPTY` rather than a false error. **Kept active on purpose**, so collection begins by itself if the county ever starts using it |
 | UCC financing statements (weekly cron) | 🟢 **New 9–11 Sep 2026** — 32,759 filings collected and read, 2023 to present. Now part of the weekly run |
-| Hillsborough index + extraction | 🟡 **Built 13 Oct 2026 on `feat/hillsborough`, not deployed** — awaiting owner approval and a production-snapshot rehearsal (§7.6 item 12) |
+| Hillsborough index + extraction | 🟡 **LIVE 13 Oct 2026** (`a1265b8`, PM2 restart #68). 65,282 filings since 3 Jan 2023 collected (34,165 `ASG`, 24 `ASGT`, 31,093 `FIN`); daily cron installed. **Backlog being read:** assignments first (~14 docs/min ≈ 40 h, finishing ~Thu 15 Oct), then UCCs (~another 37 h, queued automatically). Deals appear in the analytics as they are read; the weekly email adds Hillsborough at 98% read |
 | Palm Beach | ⚫ **Deferred 13 Oct 2026** — free portal is captcha-gated; paid FTP route undecided (§7.6 item 12) |
 | Broward index + images + extraction (daily cron) | 🟡 Live — 43,795 index rows, but **41,970 have no image and cannot be read** until the bulk image order lands (§7.6) |
 | PDF extraction — Miami-Dade | 🟢 Live — 107,402 documents read end to end |
@@ -2228,7 +2228,7 @@ healthy (640 rows, 57% carrying loan amounts).
    this project keeps finding, so the one that is easiest to forget to run is the weak link.
 11. **Restore from the bucket again.** The only restore ever performed was 17 Aug 2026 (§7.4 item 8a).
 12. **Expand to Hillsborough and Palm Beach.**
-   **Hillsborough — built 13 Oct 2026 on branch `feat/hillsborough`, NOT deployed.** Everything is
+   **Hillsborough — LIVE 13 Oct 2026; document backlog being read (see the status table).** Everything is
    public and free, with no login, captcha or disclaimer: a daily index feed over HTTPS (about two
    months kept, about six days behind) and a live search API that serves each document as a PDF.
    Volume since Jan 2023: **34,160 assignments** (`ASG`, plus a rare `ASGT`) and **31,090 UCC filings**
@@ -2243,9 +2243,8 @@ healthy (640 rows, 57% carrying loan amounts).
    Verified on a local copy with 3,376 Hillsborough rows: guardrails green, `tsc` + build clean, a
    classified Hillsborough assignment reaches the clean table and every `FIN` stays out. **Like
    Broward, `ASG` is a generic code, so Hillsborough rows reach the analytics only once their PDF is
-   read** — the dashboard shows Hillsborough deals as fast as extraction runs. **To go live:** owner
-   approval → rehearse `normalize.py` on a production snapshot → deploy → install the cron → run the
-   2023-to-date history pull (`--history --start 2023-01-01`) → extract the backlog (~65k documents;
+   read** — the dashboard shows Hillsborough deals as fast as extraction runs. **Went live 13 Oct 2026:** deploy → history pull
+   (65,282 rows in ~2 min) → cron → backlog extraction started → `normalize.py` rehearsal on a production snapshot (running at time of writing — Miami-Dade comparison still to be recorded). Backlog: (~65k documents;
    OCR-bound; roughly $30–40 of `gpt-4.1-nano` at Broward's observed ~$0.03 per 55 documents). **Weekly email:** Hillsborough is wired in but held out
    automatically until at least 98% of its 2023-onward assignments have been read (owner, 13 Oct:
    include it once all the data is in); until then the footer reports the percentage read. Without
@@ -2294,7 +2293,7 @@ scope and the applied scope cannot drift).
 |---|---|---|
 | Miami-Dade Clerk Official Records | Web portal, automated via Playwright | Login required; 499-record server cap per query, handled by recursive chunk splitting |
 | Broward County Records, Taxes & Treasury | Public SFTP `BCFTP.Broward.org:22` (`crpublic`/`crpublic`) | No login, no captcha, no scraping. Yearly exports 1978→last completed year (index only) + daily files with images (~10-day retention) |
-| Hillsborough Clerk Official Records — **collector built 13 Oct 2026 (branch `feat/hillsborough`), not deployed** | Daily index `publicrec.hillsclerk.com/OfficialRecords/DailyIndexes/` (HTTPS, public); search API + PDF images under `publicaccess.hillsclerk.com/Public/ORIUtilities/` | No login or captcha. ~2-month feed retention, ~6-day lag. Search capped at 6,000 rows (returns empty + `Truncated` when exceeded). Codes `ASG`/`ASGT`, UCC `FIN` |
+| Hillsborough Clerk Official Records — **live since 13 Oct 2026** | Daily index `publicrec.hillsclerk.com/OfficialRecords/DailyIndexes/` (HTTPS, public); search API + PDF images under `publicaccess.hillsclerk.com/Public/ORIUtilities/` | No login or captcha. ~2-month feed retention, ~6-day lag. Search capped at 6,000 rows (returns empty + `Truncated` when exceeded). Codes `ASG`/`ASGT`, UCC `FIN` |
 | Palm Beach Clerk Official Records — **scoped, not yet collected** | Landmark Web `erec.mypalmbeachclerk.com` (user agreement + **server-enforced reCAPTCHA on every search**); optional paid FTP index ($600/yr, no images) | Up to 10,000 results per search. Codes `ASSIGNMENT`, `ASSIGNMENT TAXABLE`, UCC `FINANCING STATEMENTS (UCC'S)`. Volume not yet measured |
 | Market Intelligence tool — Market Analytics data API | `https://market-intelligence-tool-gilt.vercel.app/api/analytics/v1/*`, bearer key, contract saved at `docs/market-intelligence-meta.json` | FDIC Call Report screening, scores, balance-sheet signals and per-institution trend/history (since 7 Oct 2026; replaced the direct FDIC BankFind proxy). Refreshes on its own daily job, keyed by FDIC quarter |
 | OpenAI | `gpt-4.1-nano`, Chat Completions + Batch API | Document extraction and entity classification fallback |
