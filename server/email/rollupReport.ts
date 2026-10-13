@@ -45,9 +45,19 @@ const PLANE = '#f4f6f9';        // page behind the card
 const NAVY = '#0d366b';         // header band (blue ramp step 700)
 const UP = '#006300';           // ▲ text
 const DOWN = '#d03b3b';         // ▼ text
-const COUNTY_COLOR: Record<string, string> = { 'MIAMI-DADE': '#2a78d6', BROWARD: '#1baf7a' };
-const COUNTY_LABEL: Record<string, string> = { 'MIAMI-DADE': 'Miami-Dade', BROWARD: 'Broward' };
-const COUNTIES = ['MIAMI-DADE', 'BROWARD'];
+const COUNTY_COLOR: Record<string, string> = { 'MIAMI-DADE': '#2a78d6', BROWARD: '#1baf7a', HILLSBOROUGH: '#e07b2a' };
+const COUNTY_LABEL: Record<string, string> = { 'MIAMI-DADE': 'Miami-Dade', BROWARD: 'Broward', HILLSBOROUGH: 'Hillsborough' };
+const COUNTIES = ['MIAMI-DADE', 'BROWARD', 'HILLSBOROUGH'];
+
+// A county whose assignments reach aom_events_clean only once their PDF is read
+// stays out of the email until its backlog is read. Extraction runs newest
+// first, so while the backlog is open the county's older windows are thin and
+// every "vs prior" change would read as growth that never happened. Counts any
+// attempted read, so a handful of unreadable documents cannot hold it out.
+const READ_GATED: Record<string, { types: string[]; from: string }> = {
+  HILLSBOROUGH: { types: ['ASG', 'ASGT'], from: '2023-01-01' },
+};
+const READY_SHARE = 0.98;
 // Recency ramp for the 52-week chart: older weeks → last 30 days → last 15 days.
 // One hue, light→dark; validated as an ordinal ramp.
 const RECENCY = { older: '#86b6ef', d30: '#3987e5', d15: '#184f95' };
@@ -97,6 +107,9 @@ function esc(v: any): string {
 function trunc(s: string | null | undefined, n: number): string {
   if (!s) return '—';
   return esc(s.length > n ? s.slice(0, n - 1) + '…' : s);
+}
+function joinAnd(xs: string[]): string {
+  return xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} &amp; ${xs[xs.length - 1]}`;
 }
 function fmtInt(n: number): string { return Math.round(n).toLocaleString('en-US'); }
 function fmtMoney(v: number): string {
@@ -160,6 +173,19 @@ export function buildRollupReport(db: Database.Database, sendDate: string): Roll
   const asOf: Record<string, string> = {};
   const since: Record<string, string> = {};
   for (const b of bounds) if (COUNTIES.includes(b.county)) { asOf[b.county] = b.last; since[b.county] = b.first; }
+  const readShare: Record<string, number> = {};
+  for (const [c, g] of Object.entries(READ_GATED)) {
+    const row = db.prepare(`
+      SELECT COUNT(*) AS n, SUM(px.cfn IS NOT NULL) AS r
+      FROM assignments a LEFT JOIN pdf_extractions px ON px.cfn = a.cfn
+      WHERE a.county = ? AND a.rec_date >= ? AND a.rec_date <= ?
+        AND a.doc_type IN (${g.types.map(() => '?').join(',')})`)
+      .get(c, g.from, sendDate, ...g.types) as any;
+    if (row?.n) readShare[c] = (row.r || 0) / row.n;
+  }
+  const notReady = Object.keys(readShare).filter(c => readShare[c] < READY_SHARE);
+  // Every window test keys on asOf, so a held-out county must leave it entirely.
+  for (const c of notReady) { delete asOf[c]; delete since[c]; }
   const counties = COUNTIES.filter(c => asOf[c]);
 
   // normalize.py empties aom_events_clean and refills it in place over roughly
@@ -618,7 +644,7 @@ export function buildRollupReport(db: Database.Database, sendDate: string): Roll
 
   <tr><td bgcolor="${NAVY}" style="background:${NAVY};padding:26px 32px 22px 32px;">
     <div style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:#9ec5f4;font-weight:700;">AMO Market Monitor</div>
-    <div style="font-size:22px;font-weight:700;color:#ffffff;margin:6px 0 4px;line-height:1.25;">Mortgage assignment activity — Miami-Dade &amp; Broward</div>
+    <div style="font-size:22px;font-weight:700;color:#ffffff;margin:6px 0 4px;line-height:1.25;">Mortgage assignment activity — ${joinAnd(counties.map(c => COUNTY_LABEL[c]))}</div>
     <div style="font-size:12px;color:#cde2fb;">${fmtDayY(sendDate)} &nbsp;·&nbsp; Data ${coverageLine}</div>
   </td></tr>
 
@@ -658,7 +684,8 @@ export function buildRollupReport(db: Database.Database, sendDate: string): Roll
       <a href="${DASHBOARD_URL}" style="color:${COUNTY_COLOR['MIAMI-DADE']};font-weight:600;text-decoration:none;">Open the dashboard →</a><br>
       <b style="color:${INK_2};">How to read this.</b> Counts are recorded mortgage assignments, dated by recording, not sale date.
       Each window ends on each county's latest collected date. "Vs prior" compares a window with the one of equal length just before it,
-      using only counties with complete data in both (Broward loan data begins ${since.BROWARD ? fmtDay(since.BROWARD) + ', ' + since.BROWARD.slice(0, 4) : '—'}).
+      using only counties with complete data in both (${counties.filter(c => c !== 'MIAMI-DADE').map(c => `${COUNTY_LABEL[c]} loan data begins ${fmtDay(since[c])}, ${since[c].slice(0, 4)}`).join('; ') || 'Miami-Dade only'}).
+      ${notReady.map(c => `${COUNTY_LABEL[c]} joins this report once its recorded documents have been read (${Math.floor(readShare[c] * 100)}% so far).`).join(' ')}
       Stated volume counts only transfers that state an amount (about 57%) and each loan once.
       Excluded, as on the dashboard's Reporting tab: self-transfers, MERS, Wilmington Savings, Fannie Mae and Freddie Mac.
       <b style="color:${INK_2};">This report also leaves out ${EMAIL_ONLY_EXCLUDED_LABELS.length} large firms</b> —

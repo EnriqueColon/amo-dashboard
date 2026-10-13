@@ -2246,8 +2246,10 @@ healthy (640 rows, 57% carrying loan amounts).
    read** — the dashboard shows Hillsborough deals as fast as extraction runs. **To go live:** owner
    approval → rehearse `normalize.py` on a production snapshot → deploy → install the cron → run the
    2023-to-date history pull (`--history --start 2023-01-01`) → extract the backlog (~65k documents;
-   OCR-bound; roughly $30–40 of `gpt-4.1-nano` at Broward's observed ~$0.03 per 55 documents). The weekly email still lists Miami-Dade and Broward
-   only — adding Hillsborough is an owner decision.
+   OCR-bound; roughly $30–40 of `gpt-4.1-nano` at Broward's observed ~$0.03 per 55 documents). **Weekly email:** Hillsborough is wired in but held out
+   automatically until at least 98% of its 2023-onward assignments have been read (owner, 13 Oct:
+   include it once all the data is in); until then the footer reports the percentage read. Without
+   the hold, a half-read history would show as growth in every "vs prior" figure.
    **Palm Beach — deferred (owner, 13 Oct 2026).** Its free portal requires a server-enforced Google
    reCAPTCHA on every search, including instrument lookup; getting around it would defeat a
    deliberate access control and is not recommended. Assignments are `ASSIGNMENT` / `ASSIGNMENT
