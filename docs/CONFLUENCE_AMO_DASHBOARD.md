@@ -1,6 +1,6 @@
 # AMO Tracker — Mortgage Assignment Intelligence Dashboard
 
-> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 8 Oct 2026
+> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 13 Oct 2026
 > **Production URL:** `http://165.22.35.75:5000` (single shared password)
 > **Repository:** `amo-dashboard` (`origin/main`)
 
@@ -2216,6 +2216,22 @@ healthy (640 rows, 57% carrying loan amounts).
    directory against the page. The checks are the main defence against the silent-correctness bugs
    this project keeps finding, so the one that is easiest to forget to run is the weak link.
 11. **Restore from the bucket again.** The only restore ever performed was 17 Aug 2026 (§7.4 item 8a).
+12. **Expand to Hillsborough and Palm Beach — scoped 13 Oct 2026, nothing built yet.**
+   **Hillsborough is ready to build.** Everything needed is public and free, with no login, captcha
+   or disclaimer, and was tested end to end: a daily index feed over HTTPS (about two months kept,
+   about six days behind), plus a search API that returns the whole 2023-to-date history and serves
+   each document as a PDF. Volume since Jan 2023: **34,160 assignments** (`ASG`) and **31,090 UCC
+   filings** (`FIN`). One trap: a search that matches more than 6,000 rows returns *nothing* and a
+   `Truncated` flag rather than an error, so history has to be pulled by quarter.
+   **Palm Beach needs an owner decision first.** Its free portal (Landmark Web) requires accepting a
+   user agreement before any search, which has not been done, so volume and any captcha are still
+   unknown. Assignments are filed as `ASSIGNMENT` and `ASSIGNMENT TAXABLE`. The clerk also sells the
+   daily index by FTP at $600/yr (no images) and past years on CD-ROM at $40/yr.
+   **Engineering prerequisite for either county:** document numbers can no longer be assumed
+   unique across counties (both new counties use purely numeric numbers, like Broward), so the
+   `UNIQUE(county, cfn)` rebuild deferred on 6 Aug 2026 must happen first, and the county list
+   hard-coded in roughly fifteen places (client selector, document links, email, Ask the Data,
+   extractor image source) needs to become one setting. Full detail in `SESSION_LOG.md` (13 Oct 2026).
 
 ---
 
@@ -2253,6 +2269,8 @@ scope and the applied scope cannot drift).
 |---|---|---|
 | Miami-Dade Clerk Official Records | Web portal, automated via Playwright | Login required; 499-record server cap per query, handled by recursive chunk splitting |
 | Broward County Records, Taxes & Treasury | Public SFTP `BCFTP.Broward.org:22` (`crpublic`/`crpublic`) | No login, no captcha, no scraping. Yearly exports 1978→last completed year (index only) + daily files with images (~10-day retention) |
+| Hillsborough Clerk Official Records — **scoped, not yet collected** | Daily index `publicrec.hillsclerk.com/OfficialRecords/DailyIndexes/` (HTTPS, public); search API + PDF images under `publicaccess.hillsclerk.com/Public/ORIUtilities/` | No login or captcha. ~2-month feed retention, ~6-day lag. Search capped at 6,000 rows (returns empty + `Truncated` when exceeded). Codes `ASG`/`ASGT`, UCC `FIN` |
+| Palm Beach Clerk Official Records — **scoped, not yet collected** | Landmark Web `erec.mypalmbeachclerk.com` (user agreement must be accepted); optional paid FTP index ($600/yr, no images) | Up to 10,000 results per search. Codes `ASSIGNMENT`, `ASSIGNMENT TAXABLE`, UCC `FINANCING STATEMENTS (UCC'S)`. Volume not yet measured |
 | Market Intelligence tool — Market Analytics data API | `https://market-intelligence-tool-gilt.vercel.app/api/analytics/v1/*`, bearer key, contract saved at `docs/market-intelligence-meta.json` | FDIC Call Report screening, scores, balance-sheet signals and per-institution trend/history (since 7 Oct 2026; replaced the direct FDIC BankFind proxy). Refreshes on its own daily job, keyed by FDIC quarter |
 | OpenAI | `gpt-4.1-nano`, Chat Completions + Batch API | Document extraction and entity classification fallback |
 

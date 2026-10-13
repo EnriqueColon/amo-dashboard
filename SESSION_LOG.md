@@ -4,6 +4,36 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-10-13 — Palm Beach + Hillsborough expansion SCOPED (research only, nothing built)
+
+User: "expand this tool to bring in the same documents … from Palm Beach County and Hillsborough County. Scope out the tool's current status and the websites." No code changed; production not touched (a read-only SSH status check was blocked by auto-review — figures below are the 7 Oct health check).
+
+### Hillsborough — verified end to end from this Mac, no login/captcha/disclaimer
+- **Daily index, free HTTPS:** `https://publicrec.hillsclerk.com/OfficialRecords/DailyIndexes/` — per business day `D<YYYYMMDD>01id.29` (docs), `P…` (parties), `M…d.29` (local code → FACC code map). Pipe-delimited, layout in `readme.txt` there. D: `action|county(29)|instrument|doctype|desc|legal|booktype|book|page|filler|pages|MM/DD/YYYY|HH:MM|consideration|`. P: `action|29|instrument|seq|FRM\|TO|name|`. **Retention ~2 months** (12 Aug → 6 Oct listed on 13 Oct); **publish lag ~6 days**.
+- **History + images, public JSON API** (the new portal; legacy `pubrec6.hillsclerk.com` timed out from here twice): `POST https://publicaccess.hillsclerk.com/Public/ORIUtilities/DocumentSearch/api/Search` body `{"DocType":["(ASG) ASSIGNMENT"],"RecordDateBegin":"MM/DD/YYYY","RecordDateEnd":"MM/DD/YYYY"}` (also `{"Instrument":[n,…]}`) → `ResultList[]` with `Instrument, PartiesOne[], PartiesTwo[], RecordDate (epoch), DocType, Legal, ID, PageCount`. **Cap 6,000: over it returns ZERO rows + `Truncated:6000`** (silent-empty trap — treat `Truncated` as "split the range", like Miami-Dade's 499). Quarters fit (max 2,797). Image: `GET /Public/ORIUtilities/OverlayWatermark/api/Watermark/<url-encoded ID>` → `application/pdf` (verified, 1 page, 58 KB). PDF, not TIFF → fits the Miami-Dade `download → pdftoppm → tesseract` path.
+- **Codes:** `ASG` (plus `ASGT`, which the M file maps to ASG — request both), `FIN` = UCC financing statement. No AMO-equivalent code.
+- **Volume since 2023-01-01 (counted via the API, quarterly):** ASG **34,160** (~2,000–2,800/qtr, 56 on 1 Oct 2026 = the daily feed's count exactly); FIN **31,090**.
+- Index quirks: names **truncated at 40 chars** (`DEUTSCHE BANK NATIONAL TRUST COMPANY TRU`), MERS as `MERSN`, homeowners listed among `TO` parties (same shape as Broward → existing document-read party fix applies). `Legal` often cites the assigned mortgage (`INST# 2023379275`, `OR BK 15730 PG 0898`) — free assignment→mortgage linkage. Instrument = `YYYY` + 6 digits, pure numeric. Direct link pattern: `https://publicaccess.hillsclerk.com/oripublicaccess/?instrument=<n>`.
+
+### Palm Beach — partially verified; search pages gated behind a click-through
+- **Public portal:** Landmark Web, `https://erec.mypalmbeachclerk.com`. "Disclaimer and User Agreement" must be ACCEPTED before any search (`/Search/SetDisclaimer`; `/Search/Index` 302s home without it). **Not accepted** — Broward's equivalent needed explicit owner authorization; same rule applied. No captcha markup on the landing page; whether search carries one is unknown. Disclaimer text has no anti-automation clause. US-IP required (droplet fine).
+- From the pre-disclaimer page: doc types **`ASSIGNMENT`, `ASSIGNMENT TAXABLE`, `FINANCING STATEMENTS (UCC'S)`** (category "Assignment"); record-date search with a **max of 10,000 results** per query; images free to view/print (Landmark serves page images by internal document id after a search → session state + a search round-trip per document, like AcclaimWeb). Some documents are internet-restricted.
+- **Paid bulk options:** Electronic Distribution Index Service — FTP, **$600/yr** (prorated $50/mo), daily `YYYYMMDD.dat`, pipe-delimited header/party/legal/**linked-document**/trailer records, ≥45-day retention, **index only, no images**, Recording Dept 561-355-2991. Index CD-ROM **$40/yr** ($400/decade) covers 2023–2025 history for $120; image CD-ROMs are $20 per OR book (whole books — not useful).
+- **Volume: unmeasured** (needs a search). Instrument format to confirm (believed pure numeric).
+
+### What the code needs regardless of county (measured)
+1. **`assignments.cfn` is globally UNIQUE**, safe only because Miami-Dade CFNs contain `R` and Broward's are digits. Both new counties are pure digits (Hillsborough 10, Broward 9; Palm Beach TBC) — disjoint by length today only. The 6 Aug entry already said a third county is the moment for the real `UNIQUE(county, cfn)` rebuild; it ripples into everything keyed by `cfn` (`pdf_extractions`, `document_text`, `credit_facility_events`, batch tables, `/api/chat/drill`, doc links).
+2. County list hard-coded in ~15 places: `client/src/lib/county-scope.ts` (`CountyScope`), `CountyCell.tsx`, `doc-url.ts`, `Dashboard.tsx`, `server/email/{rollupReport,report}.ts` (`COUNTIES`), `server/chat/{tools,prompt}.ts`, `routes.ts` (17 refs), `normalize.py`, `extract_pdfs.py` (image source switch: Miami-Dade book/page download vs Broward local TIFF), `check_county_isolation.py`.
+3. Weekly email holds counties apart with colour-coded lines per row — needs a layout check at four counties (Outlook wrap was the reason for that design).
+
+### Open — owner decisions
+1. Authorize accepting the Palm Beach disclaimer (needed to measure volume / captcha / image endpoint).
+2. Palm Beach forward index: scrape Landmark daily vs buy the $600/yr FTP (cleaner, adds linked-document records; still no images).
+3. Collect UCC (`FIN` / `FINANCING STATEMENTS`) in the new counties too, as Miami-Dade does?
+4. Order: Hillsborough first (verified, free) is the recommendation.
+
+---
+
 ## 2026-10-08 (afternoon) — Ask the Data: charts in answers
 
 User: "provide professional, visual graphs — when applicable." Shipped same session; clickable-rows feature deployed earlier today as `319ae14` (PM2 restart #61).
