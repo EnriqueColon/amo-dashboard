@@ -305,7 +305,8 @@ def has_county_column(conn: sqlite3.Connection) -> bool:
 
 def pending_documents(conn: sqlite3.Connection, limit: int, retry_errors: bool,
                       since: str | None = None, redo: bool = False,
-                      county: str | None = None) -> list:
+                      county: str | None = None,
+                      doc_types: list[str] | None = None) -> list:
     """CFNs from assignments that need (re-)extraction, newest first.
 
     --redo targets already-extracted OK rows that are missing the new fields
@@ -394,6 +395,9 @@ def pending_documents(conn: sqlite3.Connection, limit: int, retry_errors: bool,
     if county:
         county_clause = "AND COALESCE(a.county, 'MIAMI-DADE') = ?"
         params.append(county)
+    if doc_types:
+        county_clause += f" AND a.doc_type IN ({','.join('?' * len(doc_types))})"
+        params.extend(doc_types)
 
     params.append(limit)
     return conn.execute(f"""
@@ -1146,14 +1150,14 @@ def run_parallel(docs: list, conn, workers: int):
 
 
 def run(limit: int, retry_errors: bool, since: str | None = None, redo: bool = False,
-        county: str | None = None, workers: int = 1):
+        county: str | None = None, workers: int = 1, doc_types: list[str] | None = None):
     if not OPENAI_KEY:
         raise SystemExit('OPENAI_API_KEY is not set')
 
     conn = get_conn()
     ensure_schema(conn)
     docs = pending_documents(conn, limit, retry_errors, since=since, redo=redo,
-                             county=county)
+                             county=county, doc_types=doc_types)
     by_county: dict = {}
     for d in docs:
         by_county[d[4]] = by_county.get(d[4], 0) + 1
@@ -1261,9 +1265,13 @@ if __name__ == '__main__':
     p.add_argument('--county', type=str, default=None,
                    help="restrict to one county, e.g. 'BROWARD' or 'MIAMI-DADE' "
                         '(default: all counties, newest documents first)')
+    p.add_argument('--doc-types', type=str, default=None,
+                   help="comma-separated doc_type values to restrict to, exactly as "
+                        "stored, e.g. 'ASG,ASGT' (default: all)")
     args = p.parse_args()
     if args.budget is not None:
         BUDGET_USD = args.budget
     run(args.limit, args.retry_errors, since=args.since, redo=args.redo,
         county=args.county.upper() if args.county else None,
-        workers=max(1, args.workers))
+        workers=max(1, args.workers),
+        doc_types=[t.strip() for t in args.doc_types.split(',') if t.strip()] if args.doc_types else None)
