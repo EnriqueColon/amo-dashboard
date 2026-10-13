@@ -2244,7 +2244,7 @@ healthy (640 rows, 57% carrying loan amounts).
    classified Hillsborough assignment reaches the clean table and every `FIN` stays out. **Like
    Broward, `ASG` is a generic code, so Hillsborough rows reach the analytics only once their PDF is
    read** — the dashboard shows Hillsborough deals as fast as extraction runs. **Went live 13 Oct 2026:** deploy → history pull
-   (65,282 rows in ~2 min) → cron → backlog extraction started → `normalize.py` rehearsal on a production snapshot (running at time of writing — Miami-Dade comparison still to be recorded). Backlog: (~65k documents;
+   (65,282 rows in ~2 min) → cron → backlog extraction started → `normalize.py` rehearsal on a production snapshot Miami-Dade and Broward figures came out identical to live; one Hillsborough name retyped Carrington Mortgage from servicer to trust on 648 Miami-Dade filings and was pinned back before the nightly run, and six other companies were corrected to trust/bank. Backlog: (~65k documents;
    OCR-bound; roughly $30–40 of `gpt-4.1-nano` at Broward's observed ~$0.03 per 55 documents). **Weekly email:** Hillsborough is wired in but held out
    automatically until at least 98% of its 2023-onward assignments have been read (owner, 13 Oct:
    include it once all the data is in); until then the footer reports the percentage read. Without
