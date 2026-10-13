@@ -928,6 +928,10 @@ _MANUAL_TYPE_OVERRIDES: dict[str, str] = {
     'PACIFIC UNION FINANCIAL':      'SERVICER',
     'NEW RESIDENTIAL MORTGAGE':     'SERVICER',
     'AMERICAN BANCSHARES MORTGAGE': 'SERVICER',
+    # Canonicalization folds Hillsborough's "CARRINGTON MORTGAGE LOAN TRUST"
+    # into CARRINGTON MORTGAGE, and that one name's trust signal flipped the
+    # servicer to TRUST on 648 Miami-Dade filings (13 Oct 2026 rehearsal).
+    'CARRINGTON MORTGAGE':          'SERVICER',
     # Banks
     'FACEBANK':                     'BANK',             # FaceBank International, Coral Gables
     'EASTERN FINANCIAL':            'BANK',
