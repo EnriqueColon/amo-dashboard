@@ -2223,10 +2223,15 @@ healthy (640 rows, 57% carrying loan amounts).
    each document as a PDF. Volume since Jan 2023: **34,160 assignments** (`ASG`) and **31,090 UCC
    filings** (`FIN`). One trap: a search that matches more than 6,000 rows returns *nothing* and a
    `Truncated` flag rather than an error, so history has to be pulled by quarter.
-   **Palm Beach needs an owner decision first.** Its free portal (Landmark Web) requires accepting a
-   user agreement before any search, which has not been done, so volume and any captcha are still
-   unknown. Assignments are filed as `ASSIGNMENT` and `ASSIGNMENT TAXABLE`. The clerk also sells the
-   daily index by FTP at $600/yr (no images) and past years on CD-ROM at $40/yr.
+   **Palm Beach cannot be collected unattended from its free portal.** The user agreement was
+   accepted with the owner's approval, and behind it every search form (including instrument-number
+   lookup) requires a Google reCAPTCHA that the server enforces. Getting around that would mean
+   defeating a deliberate access control, which is not recommended. Assignments are filed as
+   `ASSIGNMENT` and `ASSIGNMENT TAXABLE`, UCCs as `FINANCING STATEMENTS (UCC'S)`. The realistic
+   routes are the clerk's paid daily index by FTP ($600/yr, no images) with past years on CD-ROM
+   ($40/yr), a bulk records request for the document images (as planned for Broward), or a person
+   solving one captcha per weekly search (one search returns up to 10,000 rows). Route to be decided.
+   Owner decisions so far: Hillsborough first, and collect UCC filings in both new counties.
    **Engineering prerequisite for either county:** document numbers can no longer be assumed
    unique across counties (both new counties use purely numeric numbers, like Broward), so the
    `UNIQUE(county, cfn)` rebuild deferred on 6 Aug 2026 must happen first, and the county list
@@ -2270,7 +2275,7 @@ scope and the applied scope cannot drift).
 | Miami-Dade Clerk Official Records | Web portal, automated via Playwright | Login required; 499-record server cap per query, handled by recursive chunk splitting |
 | Broward County Records, Taxes & Treasury | Public SFTP `BCFTP.Broward.org:22` (`crpublic`/`crpublic`) | No login, no captcha, no scraping. Yearly exports 1978→last completed year (index only) + daily files with images (~10-day retention) |
 | Hillsborough Clerk Official Records — **scoped, not yet collected** | Daily index `publicrec.hillsclerk.com/OfficialRecords/DailyIndexes/` (HTTPS, public); search API + PDF images under `publicaccess.hillsclerk.com/Public/ORIUtilities/` | No login or captcha. ~2-month feed retention, ~6-day lag. Search capped at 6,000 rows (returns empty + `Truncated` when exceeded). Codes `ASG`/`ASGT`, UCC `FIN` |
-| Palm Beach Clerk Official Records — **scoped, not yet collected** | Landmark Web `erec.mypalmbeachclerk.com` (user agreement must be accepted); optional paid FTP index ($600/yr, no images) | Up to 10,000 results per search. Codes `ASSIGNMENT`, `ASSIGNMENT TAXABLE`, UCC `FINANCING STATEMENTS (UCC'S)`. Volume not yet measured |
+| Palm Beach Clerk Official Records — **scoped, not yet collected** | Landmark Web `erec.mypalmbeachclerk.com` (user agreement + **server-enforced reCAPTCHA on every search**); optional paid FTP index ($600/yr, no images) | Up to 10,000 results per search. Codes `ASSIGNMENT`, `ASSIGNMENT TAXABLE`, UCC `FINANCING STATEMENTS (UCC'S)`. Volume not yet measured |
 | Market Intelligence tool — Market Analytics data API | `https://market-intelligence-tool-gilt.vercel.app/api/analytics/v1/*`, bearer key, contract saved at `docs/market-intelligence-meta.json` | FDIC Call Report screening, scores, balance-sheet signals and per-institution trend/history (since 7 Oct 2026; replaced the direct FDIC BankFind proxy). Refreshes on its own daily job, keyed by FDIC quarter |
 | OpenAI | `gpt-4.1-nano`, Chat Completions + Batch API | Document extraction and entity classification fallback |
 

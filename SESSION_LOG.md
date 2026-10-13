@@ -20,17 +20,16 @@ User: "expand this tool to bring in the same documents … from Palm Beach Count
 - From the pre-disclaimer page: doc types **`ASSIGNMENT`, `ASSIGNMENT TAXABLE`, `FINANCING STATEMENTS (UCC'S)`** (category "Assignment"); record-date search with a **max of 10,000 results** per query; images free to view/print (Landmark serves page images by internal document id after a search → session state + a search round-trip per document, like AcclaimWeb). Some documents are internet-restricted.
 - **Paid bulk options:** Electronic Distribution Index Service — FTP, **$600/yr** (prorated $50/mo), daily `YYYYMMDD.dat`, pipe-delimited header/party/legal/**linked-document**/trailer records, ≥45-day retention, **index only, no images**, Recording Dept 561-355-2991. Index CD-ROM **$40/yr** ($400/decade) covers 2023–2025 history for $120; image CD-ROMs are $20 per OR book (whole books — not useful).
 - **Volume: unmeasured** (needs a search). Instrument format to confirm (believed pure numeric).
+- **UPDATE same session — owner authorized accepting the disclaimer; done** (`POST /Search/SetDisclaimer` with an empty body — no body returns HTTP 411). **Every one of the 13 search forms (DocumentType, RecordDate, InstrumentNumber, Name, BookPage, …) carries a reCAPTCHA v2 checkbox** (sitekey `6LdBHOorAAAAALwRLkAZpnNsfcp7qfFS4YIGIRTU`), **enforced server-side**: `POST /Search/DocumentTypeSearch` (`documentType=31,62`, `beginDate`, `endDate`, `recordCount`) without a token → `Invalid Captcha`. A v3 invisible check exists for document viewing (`/Document/CaptchaV3Form`, `/Search/StoreRecaptchaToken`) but its site key is empty, i.e. currently inactive. Internal ids: `ASG` = 31, `ASG TX` = 62, UCC = 35. Results then page via `POST /Search/GetResultsForPage`; detail via `POST /Document/Index {id}`. **Unattended portal scraping is therefore not possible without a captcha-solving service — not recommended (defeats an explicit access control).** Not probed: whether one solve covers a session of searches, and whether image fetches need a token once a document id is known.
 
 ### What the code needs regardless of county (measured)
 1. **`assignments.cfn` is globally UNIQUE**, safe only because Miami-Dade CFNs contain `R` and Broward's are digits. Both new counties are pure digits (Hillsborough 10, Broward 9; Palm Beach TBC) — disjoint by length today only. The 6 Aug entry already said a third county is the moment for the real `UNIQUE(county, cfn)` rebuild; it ripples into everything keyed by `cfn` (`pdf_extractions`, `document_text`, `credit_facility_events`, batch tables, `/api/chat/drill`, doc links).
 2. County list hard-coded in ~15 places: `client/src/lib/county-scope.ts` (`CountyScope`), `CountyCell.tsx`, `doc-url.ts`, `Dashboard.tsx`, `server/email/{rollupReport,report}.ts` (`COUNTIES`), `server/chat/{tools,prompt}.ts`, `routes.ts` (17 refs), `normalize.py`, `extract_pdfs.py` (image source switch: Miami-Dade book/page download vs Broward local TIFF), `check_county_isolation.py`.
 3. Weekly email holds counties apart with colour-coded lines per row — needs a layout check at four counties (Outlook wrap was the reason for that design).
 
-### Open — owner decisions
-1. Authorize accepting the Palm Beach disclaimer (needed to measure volume / captcha / image endpoint).
-2. Palm Beach forward index: scrape Landmark daily vs buy the $600/yr FTP (cleaner, adds linked-document records; still no images).
-3. Collect UCC (`FIN` / `FINANCING STATEMENTS`) in the new counties too, as Miami-Dade does?
-4. Order: Hillsborough first (verified, free) is the recommendation.
+### Owner decisions (13 Oct)
+- Palm Beach disclaimer: **accepted** (see update above). UCCs: **collect in both new counties** (`FIN`; Palm Beach id 35). Order: **Hillsborough first**.
+- Palm Beach index route: owner chose "scrape the free portal daily" **before** the captcha was found — **re-decide**. Realistic options: (a) $600/yr FTP index + $120 CD-ROM history, images via a human-solved captcha per session or a records request; (b) a Chapter 119 public-records request / bulk order for 2023→ assignment images, as planned for Broward; (c) human-in-the-loop weekly search (one solve, up to 10,000 rows). Captcha-solving services: not recommended.
 
 ---
 
