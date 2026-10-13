@@ -114,6 +114,7 @@ const DOC_TYPE_OPTIONS: [string, string][] = [
   ['amo', 'Mortgage (AMO)'],
   ['asg', 'Generic (ASG)'],
   ['ast', 'Broward (AST)'],
+  ['hc_asg', 'Hillsborough (ASG)'],
 ];
 
 // What the document turned out to BE once its PDF was read — as opposed to the

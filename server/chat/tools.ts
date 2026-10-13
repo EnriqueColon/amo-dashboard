@@ -32,13 +32,14 @@ export interface ToolSpec {
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
-/** 'MIAMI-DADE' | 'BROWARD' | null (= all counties). Unknown input → default. */
+/** 'MIAMI-DADE' | 'BROWARD' | 'HILLSBOROUGH' | null (= all counties). Unknown input → default. */
 function normalizeCounty(v: unknown): string | null {
   const raw = String(v ?? '').trim().toUpperCase();
   if (!raw) return DEFAULT_COUNTY;
   if (raw === 'ALL') return null;
   if (raw === 'MIAMI-DADE' || raw === 'MIAMI DADE' || raw === 'MIAMIDADE' || raw === 'DADE') return 'MIAMI-DADE';
   if (raw === 'BROWARD') return 'BROWARD';
+  if (raw === 'HILLSBOROUGH') return 'HILLSBOROUGH';
   return DEFAULT_COUNTY;
 }
 
@@ -142,7 +143,7 @@ const getDatasetOverview: ToolSpec = {
       months_with_no_data: gaps,
       notes: [
         '"filings" counts every recorded document in the raw index (assignments table). "clean_loan_transfer_events" are the subset normalized into assignor→assignee loan transfers with resolved names (aom_events_clean).',
-        'Broward filings are indexed but very few have been processed into clean events or read as PDFs, so any entity-level or lending-relationship figure is effectively Miami-Dade only.',
+        'Broward and Hillsborough filings are indexed but few have been processed into clean events or read as PDFs, so any entity-level or lending-relationship figure is mostly Miami-Dade.',
         'months_with_no_data are collection gaps, not market stops.',
       ],
     };
@@ -202,7 +203,7 @@ const getEntityProfile: ToolSpec = {
     type: 'object',
     properties: {
       entity: { type: 'string', description: 'Exact canonical entity name as returned by search_entities.' },
-      county: { type: 'string', description: "'MIAMI-DADE' (default), 'BROWARD' or 'ALL' — applies to filings/monthly activity only." },
+      county: { type: 'string', description: "'MIAMI-DADE' (default), 'BROWARD', 'HILLSBOROUGH' or 'ALL' — applies to filings/monthly activity only." },
       months: { type: 'integer', description: 'How many trailing months of monthly activity to include (default 24, max 60).' },
     },
     required: ['entity'],
@@ -275,7 +276,7 @@ const getTopEntities: ToolSpec = {
     type: 'object',
     properties: {
       role: { type: 'string', enum: ['assignee', 'assignor'], description: 'assignee = acquirer/buyer of the loan; assignor = seller.' },
-      county: { type: 'string', description: "'MIAMI-DADE' (default), 'BROWARD' or 'ALL'." },
+      county: { type: 'string', description: "'MIAMI-DADE' (default), 'BROWARD', 'HILLSBOROUGH' or 'ALL'." },
       from: { type: 'string', description: 'Start date YYYY-MM-DD (inclusive).' },
       to: { type: 'string', description: 'End date YYYY-MM-DD (inclusive).' },
       txn_type: { type: 'string', enum: ['MARKET_TRANSFER', 'ORIGINATION', 'INSTITUTIONAL_OUT', 'PRIVATE', 'SELF_ASSIGN', 'MERS_RELEASE'], description: 'Optional. Default excludes SELF_ASSIGN.' },
@@ -322,7 +323,7 @@ const getMonthlyVolume: ToolSpec = {
   parameters: {
     type: 'object',
     properties: {
-      county: { type: 'string', description: "'MIAMI-DADE' (default), 'BROWARD' or 'ALL'." },
+      county: { type: 'string', description: "'MIAMI-DADE' (default), 'BROWARD', 'HILLSBOROUGH' or 'ALL'." },
       from: { type: 'string', description: 'Start YYYY-MM or YYYY-MM-DD.' },
       to: { type: 'string', description: 'End YYYY-MM or YYYY-MM-DD.' },
       entity: { type: 'string', description: 'Optional exact canonical entity; counts events where it is assignor or assignee.' },
@@ -368,7 +369,7 @@ const listFilings: ToolSpec = {
       entity: { type: 'string', description: 'Exact canonical entity name.' },
       role: { type: 'string', enum: ['assignee', 'assignor', 'either'], description: 'Which side the entity is on. Default either.' },
       counterparty: { type: 'string', description: 'Optional exact canonical name of the other party.' },
-      county: { type: 'string', description: "'MIAMI-DADE' (default), 'BROWARD' or 'ALL'." },
+      county: { type: 'string', description: "'MIAMI-DADE' (default), 'BROWARD', 'HILLSBOROUGH' or 'ALL'." },
       from: { type: 'string' }, to: { type: 'string' },
       txn_type: { type: 'string', enum: ['MARKET_TRANSFER', 'ORIGINATION', 'INSTITUTIONAL_OUT', 'PRIVATE', 'SELF_ASSIGN', 'MERS_RELEASE'] },
       exclude_self_assign: { type: 'boolean', description: 'Drop SELF_ASSIGN rows (matches the default of get_top_entities).' },

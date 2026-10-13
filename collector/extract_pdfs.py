@@ -66,6 +66,10 @@ BROWARD_IMAGE_DIR = os.environ.get(
     'BROWARD_IMAGE_DIR',
     os.path.join(os.path.dirname(os.path.abspath(__file__)), 'broward_images'))
 
+# Hillsborough serves each document as a PDF from its public portal, keyed by
+# an opaque ID that only a search returns — so a fetch is search-then-download.
+HILLSBOROUGH_API = os.environ.get('HILLSBOROUGH_API_URL', 'https://publicaccess.hillsclerk.com')
+
 DEFAULT_COUNTY = 'MIAMI-DADE'
 
 MAX_OCR_PAGES = 3        # first pages carry the operative language
@@ -369,6 +373,8 @@ def pending_documents(conn: sqlite3.Connection, limit: int, retry_errors: bool,
     #                documents have NO book/page at all, so the Miami-Dade
     #                condition would exclude every one of them — that is exactly
     #                why Broward was invisible to this script until now.
+    #   Hillsborough — fetched live from the clerk by instrument number, which
+    #                every row has; most carry no book/page at all.
     miami_dade_available = """
           (COALESCE(a.county, 'MIAMI-DADE') = 'MIAMI-DADE'
              AND a.rec_book IS NOT NULL AND a.rec_book != ''
@@ -381,7 +387,8 @@ def pending_documents(conn: sqlite3.Connection, limit: int, retry_errors: bool,
           OR (COALESCE(a.county, 'MIAMI-DADE') = 'BROWARD'
              AND EXISTS (SELECT 1 FROM broward_images bi WHERE bi.cfn = a.cfn))
     """ if has_images_table else ""
-    availability = f"AND ({miami_dade_available} {broward_available})"
+    hillsborough_available = "OR COALESCE(a.county, 'MIAMI-DADE') = 'HILLSBOROUGH'"
+    availability = f"AND ({miami_dade_available} {broward_available} {hillsborough_available})"
     params: list = []
     county_clause = ""
     if county:
@@ -410,6 +417,29 @@ def download_pdf(rec_book: str, rec_page: str, dest: str) -> bool:
     resp = requests.get(
         DOC_IMAGE_URL,
         params={'redact': 'false', 'sBook': rec_book, 'sBookType': 'O ', 'sPage': rec_page},
+        timeout=60,
+    )
+    if resp.status_code != 200 or 'pdf' not in resp.headers.get('Content-Type', ''):
+        return False
+    with open(dest, 'wb') as f:
+        f.write(resp.content)
+    return True
+
+
+def download_hillsborough_pdf(instrument: str, dest: str) -> bool:
+    found = requests.post(
+        f'{HILLSBOROUGH_API}/Public/ORIUtilities/DocumentSearch/api/Search',
+        json={'Instrument': [int(instrument)]}, timeout=60,
+    )
+    if found.status_code != 200:
+        return False
+    rows = [r for r in found.json().get('ResultList') or []
+            if str(r.get('Instrument')) == instrument and r.get('ID')]
+    if not rows:
+        return False
+    resp = requests.get(
+        f'{HILLSBOROUGH_API}/Public/ORIUtilities/OverlayWatermark/api/Watermark/'
+        + requests.utils.quote(rows[0]['ID'], safe=''),
         timeout=60,
     )
     if resp.status_code != 200 or 'pdf' not in resp.headers.get('Content-Type', ''):
@@ -467,6 +497,10 @@ def fetch_document_text(county: str, cfn: str, rec_book: str, rec_page: str,
         return ocr_images(paths)
 
     pdf_path = os.path.join(workdir, 'doc.pdf')
+    if county == 'HILLSBOROUGH':
+        if not download_hillsborough_pdf(cfn, pdf_path):
+            raise FileNotFoundError(f'clerk returned no PDF for instrument {cfn}')
+        return ocr_pdf(pdf_path, workdir)
     if not download_pdf(rec_book, rec_page, pdf_path):
         raise FileNotFoundError(f'clerk returned no PDF for book {rec_book}/{rec_page}')
     return ocr_pdf(pdf_path, workdir)
@@ -674,8 +708,8 @@ _CAT_DEBT_TITLE = re.compile(
 # A UCC financing statement genuinely IS a collateral record. Its text would not
 # match the pledge patterns above and two of its titles do mention leases, so
 # without this exclusion it would lose rows out of a bucket where all 20,522
-# belong. Asserted by check_doc_category.py.
-_CAT_UCC_DOC_TYPE = 'FINANCING STATEMENT UCC - FST'
+# belong. Asserted by check_doc_category.py. Miami-Dade files FST, Hillsborough FIN.
+_CAT_UCC_DOC_TYPES = ('FINANCING STATEMENT UCC - FST', 'FIN')
 
 # Deliberately NOT _CAT_RENTS_TITLE. This one is matched against the whole OCR
 # body, where a bare \bLEASES?\b would fire on almost every commercial mortgage
@@ -686,7 +720,8 @@ _CAT_RENTS_BODY = re.compile(r'assignment\s+of\s+(?:leases?\s+and\s+)?rents?\b'
                              r'|assignment\s+of\s+leases?\b', re.I)
 
 _CAT_AMO_DOC_TYPE = 'ASSIGNMENT OF MORTGAGE - AMO'
-_CAT_GENERIC_DOC_TYPES = ('ASSIGNMENT - ASG', 'AST')
+# Miami-Dade ASG, Broward AST, Hillsborough ASG / ASGT (assignment with taxes).
+_CAT_GENERIC_DOC_TYPES = ('ASSIGNMENT - ASG', 'AST', 'ASG', 'ASGT')
 
 
 def _cat_text_eligible(doc_type: str | None, doc_title: str | None) -> bool:
@@ -720,7 +755,7 @@ def reclassify_rents_by_title(doc_type: str | None, doc_title: str | None,
     """
     if model_category != 'COLLATERAL':
         return model_category, None
-    if (doc_type or '') == _CAT_UCC_DOC_TYPE:
+    if (doc_type or '') in _CAT_UCC_DOC_TYPES:
         return model_category, None
 
     title = (doc_title or '').strip()

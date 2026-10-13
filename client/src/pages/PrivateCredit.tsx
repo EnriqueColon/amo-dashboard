@@ -81,7 +81,7 @@ export default function PrivateCredit() {
               <tr className="text-muted-foreground">
                 <th className="px-3 py-2.5 text-left font-medium">CFN</th>
                 <th className="px-3 py-2.5 text-left font-medium">Date</th>
-                <th className="px-3 py-2.5 text-left font-medium" title="Which county's Official Records the document was recorded in. Matters most under the All Counties scope, where Miami-Dade CFNs and Broward instrument numbers sit side by side. Note the two counties are not equally deep: Broward's pre-Aug-2026 history is index-only.">County</th>
+                <th className="px-3 py-2.5 text-left font-medium" title="Which county's Official Records the document was recorded in. Matters most under the All Counties scope, where every county's document numbers sit side by side. The counties are not equally deep: Broward's pre-Aug-2026 history is index-only, and Hillsborough's documents are still being read.">County</th>
                 <th className="px-3 py-2.5 text-left font-medium">Grantor (Seller)</th>
                 <th className="px-2 py-2.5 w-5"></th>
                 <th className="px-3 py-2.5 text-left font-medium">Grantee (Buyer)</th>

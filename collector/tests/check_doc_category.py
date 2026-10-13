@@ -52,6 +52,8 @@ AMO = 'ASSIGNMENT OF MORTGAGE - AMO'
 ASG = 'ASSIGNMENT - ASG'
 AST = 'AST'
 FST = 'FINANCING STATEMENT UCC - FST'
+HC_ASG = 'ASG'
+HC_FIN = 'FIN'
 
 # Text fragments are verbatim from the sampled documents.
 HUD = ("does hereby assign, transfer, convey, set over, and deliver to: SECRETARY OF "
@@ -116,6 +118,8 @@ CASES = [
      'COLLATERAL', 'COLLATERAL',
      'the two UCC titles that DO mention leases must still not move — the doc '
      'type is excluded before the title is ever looked at'),
+    (HC_FIN, 'UCC FINANCING STATEMENT COVERING LEASES AND RENTS', 'collateral: all leases',
+     'COLLATERAL', 'COLLATERAL', "Hillsborough's FIN is the same UCC instrument"),
 
     # ── rents and leases: the second half of the wrong-bucket problem ──────
     # 6,043 rows. Titles are verbatim from production, including the OCR damage.
@@ -149,6 +153,8 @@ CASES = [
      'transfers to servicers and trustees'),
     (AST, 'CORPORATE ASSIGNMENT OF MORTGAGE', FIFTH_THIRD, 'COLLATERAL', 'LOAN_TRANSFER',
      'same for the 61 AST ones'),
+    (HC_ASG, 'CORPORATE ASSIGNMENT OF MORTGAGE', FIFTH_THIRD, 'COLLATERAL', 'LOAN_TRANSFER',
+     "Hillsborough's bare ASG code is the same generic bucket"),
     (AMO, 'ASSIGNMENT OF MORTGAGE, ASSIGNMENT OF LEASES AND RENTS, SECURITY AGREEMENT '
      'AND FIXTURE FILING', 'assignment of leases and rents made by Borrower',
      'COLLATERAL', 'COLLATERAL',

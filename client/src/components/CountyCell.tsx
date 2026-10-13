@@ -18,21 +18,25 @@
  * which is the same convention the server applies (routes.ts countyPredicate).
  */
 
+import { COUNTY_OPTIONS } from '@/lib/county-scope';
+
 const STYLES: Record<string, string> = {
   'MIAMI-DADE': 'bg-blue-500/10 text-blue-600 dark:text-blue-400',
   'BROWARD':    'bg-violet-500/10 text-violet-600 dark:text-violet-400',
+  'HILLSBOROUGH': 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
 };
 
 const SHORT: Record<string, string> = {
   'MIAMI-DADE': 'M-D',
   'BROWARD':    'BRO',
+  'HILLSBOROUGH': 'HIL',
 };
 
 export function CountyCell({ county }: { county?: string | null }) {
   const c = (county || 'MIAMI-DADE').toUpperCase();
   return (
     <span
-      title={c === 'MIAMI-DADE' ? 'Miami-Dade County' : c === 'BROWARD' ? 'Broward County' : c}
+      title={COUNTY_OPTIONS.find(o => o.value === c)?.label ?? c}
       className={`inline-block rounded px-1 py-0.5 text-[9px] font-semibold tracking-wide ${
         STYLES[c] ?? 'bg-muted text-muted-foreground'
       }`}

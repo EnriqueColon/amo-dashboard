@@ -51,6 +51,24 @@ function countyPredicate(alias = ''): string {
   return `(:county IS NULL OR COALESCE(${col}, '${DEFAULT_COUNTY}') = :county)`;
 }
 
+const COUNTY_LABELS: Record<string, string> = {
+  'MIAMI-DADE': 'Miami-Dade County',
+  'BROWARD': 'Broward County',
+  'HILLSBOROUGH': 'Hillsborough County',
+};
+
+/** Document link for an exported row, or '' where the county has no safe deep link. */
+function exportDocLink(r: any): string {
+  const county = String(r.county || DEFAULT_COUNTY).toUpperCase();
+  if (county === 'HILLSBOROUGH' && r.cfn) {
+    return `https://publicaccess.hillsclerk.com/oripublicaccess/?instrument=${encodeURIComponent(r.cfn)}`;
+  }
+  if (county !== 'MIAMI-DADE' || !r.rec_book || !r.rec_page) return '';
+  return 'https://onlineservices.miamidadeclerk.gov/officialrecords/api/DocumentImage/getdocumentimage'
+       + `?redact=false&sBook=${encodeURIComponent(r.rec_book)}`
+       + `&sBookType=O+&sPage=${encodeURIComponent(r.rec_page)}`;
+}
+
 /**
  * Marks a payload whose entity-level figures ignore the county selector.
  *
@@ -1350,9 +1368,10 @@ export async function registerRoutes(httpServer: Server, app: Express) {
 
   // ── Document-type filter ───────────────────────────────────────────────────
   // The client sends a short key; the server owns the county's exact strings.
-  // Worth the indirection because the two counties do not agree on format —
-  // Miami-Dade files "ASSIGNMENT OF MORTGAGE - AMO", Broward files a bare "AST"
-  // — and a UI hard-coding either would break the moment a county renamed one.
+  // Worth the indirection because the counties do not agree on format —
+  // Miami-Dade files "ASSIGNMENT OF MORTGAGE - AMO", Broward a bare "AST",
+  // Hillsborough a bare "ASG" — and a UI hard-coding any of them would break the
+  // moment a county renamed one.
   //
   // Only assignment types appear here. Non-assignment types never reach
   // aom_events_clean at all (normalize.NON_ASSIGNMENT_DOC_TYPES), so there is no
@@ -1361,6 +1380,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     amo: { label: 'Assignment of Mortgage', match: ['ASSIGNMENT OF MORTGAGE - AMO'] },
     asg: { label: 'Assignment (generic)',   match: ['ASSIGNMENT - ASG'] },
     ast: { label: 'Broward Assignment',     match: ['AST'] },
+    hc_asg: { label: 'Hillsborough Assignment', match: ['ASG', 'ASGT'] },
   };
 
   function docTypeParam(q: any): string {
@@ -1929,13 +1949,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     // to a real but unrelated Miami-Dade document — worse than an empty cell,
     // because in an exported CSV it looks like working evidence. Broward
     // publishes no deep link, so its rows export blank.
-    const docLink = (r: any) => {
-      const county = String(r.county || 'MIAMI-DADE').toUpperCase();
-      if (county !== 'MIAMI-DADE' || !r.rec_book || !r.rec_page) return '';
-      return 'https://onlineservices.miamidadeclerk.gov/officialrecords/api/DocumentImage/getdocumentimage'
-           + `?redact=false&sBook=${encodeURIComponent(r.rec_book)}`
-           + `&sBookType=O+&sPage=${encodeURIComponent(r.rec_page)}`;
-    };
+    const docLink = exportDocLink;
 
     const headers = [
       'CFN','Document Link','Date','Doc Type','Category','Title',
@@ -2020,16 +2034,10 @@ export async function registerRoutes(httpServer: Server, app: Express) {
 
     // Same per-county guard as the CSV export: a Miami-Dade book/page URL built
     // from a Broward row resolves to an unrelated real document.
-    const docLink = (r: any) => {
-      const c = String(r.county || DEFAULT_COUNTY).toUpperCase();
-      if (c !== 'MIAMI-DADE' || !r.rec_book || !r.rec_page) return '';
-      return 'https://onlineservices.miamidadeclerk.gov/officialrecords/api/DocumentImage/getdocumentimage'
-           + `?redact=false&sBook=${encodeURIComponent(r.rec_book)}`
-           + `&sBookType=O+&sPage=${encodeURIComponent(r.rec_page)}`;
-    };
+    const docLink = exportDocLink;
 
     const wb = buildActivityWorkbook(rows, {
-      countyLabel: county === 'MIAMI-DADE' ? 'Miami-Dade County' : county === 'BROWARD' ? 'Broward County' : 'All counties',
+      countyLabel: county ? (COUNTY_LABELS[county] ?? county) : 'All counties',
       startDate, endDate, direction: entityRole, search, reviewed, targetsOnly,
       entities, entityTypes, docLink,
     });
@@ -2301,7 +2309,8 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   // are overwhelmingly property LLCs named after street numbers. It would merge
   // unrelated companies. The cost is that "U S BANK NA" and "U S BANK NATIONAL
   // ASSOCIATION" stay separate; that is the lesser error by a wide margin.
-  const UCC_DOC_TYPE = 'FINANCING STATEMENT UCC - FST';
+  // Miami-Dade files the instrument as FST, Hillsborough as FIN.
+  const UCC_DOC_TYPES = ['FINANCING STATEMENT UCC - FST', 'FIN'];
 
   // ── Consumer finance and non-lenders ──────────────────────────────────────
   // 36% of UCC filings in Miami-Dade are consumer solar and home-improvement
@@ -2345,8 +2354,10 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   };
 
   function uccFilters(q: any) {
-    const clauses = ['a.doc_type = ?'];
-    const params: any[] = [UCC_DOC_TYPE];
+    const clauses = [`a.doc_type IN (${UCC_DOC_TYPES.map(() => '?').join(',')})`];
+    const params: any[] = [...UCC_DOC_TYPES];
+    const county = countyScope({ query: q });
+    if (county) { clauses.push(`COALESCE(a.county, '${DEFAULT_COUNTY}') = ?`); params.push(county); }
 
     const search = typeof q.search === 'string' ? q.search.trim() : '';
     if (search) {

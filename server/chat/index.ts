@@ -124,7 +124,7 @@ export function registerChatRoutes(app: Express) {
     if (typeof parsed === 'string') { res.status(400).json({ error: parsed }); return; }
 
     const countyRaw = String(req.body?.county ?? '').trim().toUpperCase();
-    const county = countyRaw === 'BROWARD' || countyRaw === 'ALL' ? countyRaw : 'MIAMI-DADE';
+    const county = ['BROWARD', 'HILLSBOROUGH', 'ALL'].includes(countyRaw) ? countyRaw : 'MIAMI-DADE';
 
     res.status(200);
     res.setHeader('Content-Type', 'text/event-stream');

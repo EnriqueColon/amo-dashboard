@@ -115,6 +115,7 @@ function countyLabel(c?: string): string {
   const u = (c ?? '').toUpperCase();
   if (u === 'ALL') return 'all counties';
   if (u === 'BROWARD') return 'Broward';
+  if (u === 'HILLSBOROUGH') return 'Hillsborough';
   return 'Miami-Dade';
 }
 
@@ -282,7 +283,7 @@ function isPeriodHeader(h: string): boolean {
 }
 
 export interface DrillDefaults {
-  county: string;                 // dashboard scope: MIAMI-DADE | BROWARD | ALL
+  county: string;                 // dashboard scope: MIAMI-DADE | BROWARD | HILLSBOROUGH | ALL
   from?: string; to?: string;     // window the model's lookups used, if any
 }
 
@@ -306,7 +307,7 @@ function fromHeaders(headers: string[], cells: string[], defaults: DrillDefaults
       continue;
     }
     if (!period && (isPeriodHeader(h) || parsePeriod(c))) { period = parsePeriod(c); if (period) continue; }
-    if (/COUNTY/.test(normCell(h))) { county = /BROWARD/.test(c) ? 'BROWARD' : /MIAMI|DADE/.test(c) ? 'MIAMI-DADE' : undefined; continue; }
+    if (/COUNTY/.test(normCell(h))) { county = /BROWARD/.test(c) ? 'BROWARD' : /HILLSBOROUGH/.test(c) ? 'HILLSBOROUGH' : /MIAMI|DADE/.test(c) ? 'MIAMI-DADE' : undefined; continue; }
     if (/TYPE|CATEGORY/.test(normCell(h))) { const t = c.replace(/[\s-]+/g, '_'); if (TXN_TYPES.has(t)) txn = t; }
   }
 

@@ -1,20 +1,24 @@
 """
-Verify the two counties never contaminate each other.
-------------------------------------------------------
-Broward shares the `assignments` table with Miami-Dade and relies on a global
-UNIQUE(cfn) that is only safe because the two key formats are disjoint:
+Verify the counties never contaminate each other.
+-------------------------------------------------
+Every county shares the `assignments` table and relies on a global UNIQUE(cfn)
+that is only safe because the key formats are disjoint:
 
-    Miami-Dade CFN     2026R521735    always contains 'R'
-    Broward instrument 121018052      always pure digits
+    Miami-Dade CFN          2026R521735   always contains 'R'
+    Broward instrument      121018052     9 digits, one sequence since 1978
+    Hillsborough instrument 2026384158    'YYYY' + 6 digits = 10 digits
 
-migrate_add_county.py leans on that invariant instead of rebuilding the UNIQUE
-constraint on a 70k-row production table. This asserts the invariant actually
-holds, so the shortcut stays honest.
+Broward would need roughly 880 million more filings to reach ten digits, so the
+three cannot collide. migrate_add_county.py leans on that invariant instead of
+rebuilding the UNIQUE constraint as UNIQUE(county, cfn). This asserts the
+invariant actually holds, so the shortcut stays honest. A county whose numbers
+fit another county's pattern (or no pattern below) is the point to do the real
+rebuild rather than widen a regex.
 
 Checks, all against the live DB:
   1. every row carries a county (no NULLs left behind by the migration)
   2. no CFN appears under two counties
-  3. Broward CFNs are pure digits; Miami-Dade CFNs are not
+  3. every CFN matches its own county's pattern and no other county's
   4. derived tables never reference a CFN whose county disagrees with
      `assignments` — catches a normalize.py run that dropped the county through
 
@@ -28,7 +32,11 @@ import sys
 
 DB_PATH = os.environ.get('AMO_DB_PATH', '/opt/amo-dashboard/miami_dade_amo.db')
 
-BROWARD_RE = re.compile(r'^\d+$')
+KEY_PATTERNS = {
+    'MIAMI-DADE': re.compile(r'^\d{4}R\d+$'),
+    'BROWARD': re.compile(r'^\d{9}$'),
+    'HILLSBOROUGH': re.compile(r'^20\d{8}$'),
+}
 
 COUNTY_TABLES = ['assignments', 'pdf_extractions',
                  'aom_events_clean', 'credit_facility_events']
@@ -102,21 +110,26 @@ def check_key_formats(conn) -> None:
         'SELECT DISTINCT county FROM assignments WHERE county IS NOT NULL')]
 
     for county in counties:
-        sample = conn.execute(
-            'SELECT cfn FROM assignments WHERE county = ? LIMIT 20000', (county,)
-        ).fetchall()
-        if not sample:
+        own = KEY_PATTERNS.get(county)
+        if own is None:
+            fail(f'{county}: no key pattern registered — add one to KEY_PATTERNS '
+                 f'(and prove it disjoint from the others) before collecting it')
             continue
-        numeric = sum(1 for (c,) in sample if BROWARD_RE.match(c or ''))
-
-        if county == 'BROWARD' and numeric != len(sample):
-            fail(f'BROWARD: {len(sample) - numeric} of {len(sample)} sampled CFNs '
-                 f'are not pure digits — the disjointness invariant is broken')
-        elif county == 'MIAMI-DADE' and numeric:
-            fail(f'MIAMI-DADE: {numeric} of {len(sample)} sampled CFNs are pure '
-                 f'digits — they could collide with Broward instrument numbers')
-        else:
-            notes.append(f'{county}: {len(sample):,} CFN(s) sampled, format consistent')
+        cfns = [c or '' for (c,) in conn.execute(
+            'SELECT cfn FROM assignments WHERE county = ?', (county,))]
+        off_pattern = [c for c in cfns if not own.match(c)]
+        if off_pattern:
+            fail(f'{county}: {len(off_pattern):,} of {len(cfns):,} CFNs do not match '
+                 f'its key pattern, e.g. {off_pattern[:3]} — disjointness unproven')
+        for other, pattern in KEY_PATTERNS.items():
+            if other == county:
+                continue
+            clash = [c for c in cfns if pattern.match(c)]
+            if clash:
+                fail(f'{county}: {len(clash):,} CFN(s) also match the {other} '
+                     f'pattern, e.g. {clash[:3]} — they could collide')
+        if not off_pattern:
+            notes.append(f'{county}: {len(cfns):,} CFN(s), format consistent')
 
 
 def check_derived_agreement(conn) -> None:

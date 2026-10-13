@@ -944,6 +944,7 @@ All installed via `crontab -e` on the droplet.
 |---|---|---|
 | `*/20 * * * *` | `run_facility_tick.sh` | One tick of the OpenAI Batch state machine: poll in-flight jobs, ingest finished ones, top back up to 4 concurrent batches of 500 documents. Resume-safe. |
 | `30 8 * * *` | `run_nightly_normalize.sh` | Rebuild derived tables, then `pm2 restart` to clear the cache. **Skips the restart if normalize fails**, so a failure leaves the last good data serving. |
+| `45 13 * * *` *(proposed — not installed; ships with the Hillsborough deploy)* | `run_hillsborough_daily.sh` | Hillsborough: search API over the last 14 days → daily index feed → extraction (`--county HILLSBOROUGH`, $1 cap). Not time-critical — images are fetched on demand and the search API covers 2023 onward at least. `flock`-guarded. No heartbeat/Overview banner yet |
 | `30 15,19,23 * * *` | `run_broward_daily.sh` (`BROWARD_INGEST_INDEX=1`) | Broward index → images → extraction → retention report + heartbeat. **Time-critical.** Runs three times a day on purpose — see "Broward's publication time moves" below. Holds a `flock` so runs cannot overlap; a skipped run exits 0. |
 | `0 6 * * 5` | `run_weekly.sh` | Miami-Dade: collect last 10 days → extract PDFs → normalize → enrich. Sources `/opt/amo-dashboard/.env` itself and **aborts loudly up front if `OPENAI_API_KEY` is missing** (fix `2441222`, 23 Aug 2026 — cron provides no environment; before the fix the run half-succeeded: collection worked, extraction silently died, see §7.4). **No longer sends the email** — that moved out on 2 Oct 2026. |
 | `0 11,12 * * 1` | `send_weekly_email.sh` | The "AMO Market Monitor" email (§4.1a). **Two firings, one send:** the box is Etc/UTC with no DST, so no single UTC hour is 07:00 Eastern all year — 11:00 UTC is 07:00 EDT, 12:00 UTC is 07:00 EST. The script checks the Eastern hour and lets exactly one through. `CRON_TZ` would be tidier but this cron build's support for it is unverified, and a scheduling feature that silently fails would shift the send an hour unnoticed. Waits for any running `normalize.py`, and sends nothing unless `REPORT_EMAIL_ENABLED=1`. |
@@ -1098,12 +1099,19 @@ anywhere earlier silently shifts every field. This is the highest-risk edit in t
 writer forgets the column, because its rows get silently relabelled Miami-Dade with no error anywhere.
 Queries additionally `COALESCE` onto `'MIAMI-DADE'` rather than trusting the backfill.
 
-**`assignments.cfn` is globally UNIQUE, not `UNIQUE(county, cfn)`.** This is safe only because
-Miami-Dade CFNs always contain `R` and Broward instruments are always digits. **Adding a third county
-whose key format is not disjoint is the moment to do the real table rebuild** — not before.
+**`assignments.cfn` is globally UNIQUE, not `UNIQUE(county, cfn)`.** This is safe only because each
+county's number format is disjoint from every other's: Miami-Dade CFNs always contain `R`
+(`2025R123456`), Broward instruments are exactly 9 digits, Hillsborough instruments are exactly 10
+digits starting `20` (`2026384158`). `collector/tests/check_county_isolation.py` holds one pattern per
+county and fails on a county with no registered pattern, a number that does not match its own county's
+pattern, or one that matches another county's. Hillsborough (13 Oct 2026) was added by registering its
+pattern, not by rebuilding the table — the rebuild ripples into everything keyed by `cfn`.
+**A county whose numbers cannot be told apart from an existing county's is the moment to do the real
+`UNIQUE(county, cfn)` rebuild** — not before.
 
-**Document links are per-county.** Miami-Dade links by book/page; Broward e-recorded documents have
-no book/page at all and link by instrument number. Use the builders in `client/src/lib/doc-url.ts` —
+**Document links are per-county.** Miami-Dade links by book/page; Broward publishes no deep link, so
+its numbers show as plain text; Hillsborough links by instrument number
+(`publicaccess.hillsclerk.com/oripublicaccess/?instrument=…`, opens the document directly). Use the builders in `client/src/lib/doc-url.ts` —
 hand-rolling a link produces a wrong document silently.
 
 **`entity_nodes` and `entity_relationships` genuinely cannot be county-scoped.** They are keyed by
@@ -1152,8 +1160,9 @@ Two traps here, both of which have caused a wrong "it's finished" call:
 1. Write the collector; add rows to `assignments` with the new `county` value.
 2. Run `migrate_add_county.py` **before** the collector (it fails fast with instructions if the
    column is missing).
-3. **Verify key disjointness** against existing CFNs. If keys can collide, rebuild the UNIQUE
-   constraint as `UNIQUE(county, cfn)` first.
+3. **Register the county's number format** in `KEY_PATTERNS` in
+   `collector/tests/check_county_isolation.py` and run it. If the format overlaps an existing
+   county's, rebuild the UNIQUE constraint as `UNIQUE(county, cfn)` first.
 4. Build the extraction path, harvest images, extract documents.
 5. **Rehearse on a production snapshot** with `NORMALIZE_COUNTIES` widened, and diff
    `entity_classifications` + `entity_nodes` before/after. New names enter the classification signal
@@ -1591,6 +1600,8 @@ endpoints healthy across all three county scopes.
 | Miami-Dade collection (weekly cron) | 🟢 Live — ran clean unattended on 11 Sep 2026, all four document types, whole collection phase 2m 13s |
 | AIT (Assignment of Interest) collection | 🟢 **Resolved 11 Sep 2026** — never a timeout. The county rejects the search and returns no results, exactly as it does for a day with no filings, and has done so since the type was added on 16 Jun. Now resolves in about a second and records `EMPTY` rather than a false error. **Kept active on purpose**, so collection begins by itself if the county ever starts using it |
 | UCC financing statements (weekly cron) | 🟢 **New 9–11 Sep 2026** — 32,759 filings collected and read, 2023 to present. Now part of the weekly run |
+| Hillsborough index + extraction | 🟡 **Built 13 Oct 2026 on `feat/hillsborough`, not deployed** — awaiting owner approval and a production-snapshot rehearsal (§7.6 item 12) |
+| Palm Beach | ⚫ **Deferred 13 Oct 2026** — free portal is captcha-gated; paid FTP route undecided (§7.6 item 12) |
 | Broward index + images + extraction (daily cron) | 🟡 Live — 43,795 index rows, but **41,970 have no image and cannot be read** until the bulk image order lands (§7.6) |
 | PDF extraction — Miami-Dade | 🟢 Live — 107,402 documents read end to end |
 | PDF extraction — Broward | 🟡 Live **daily**, coverage still thin — blocked on images, not on the extractor |
@@ -2216,27 +2227,34 @@ healthy (640 rows, 57% carrying loan amounts).
    directory against the page. The checks are the main defence against the silent-correctness bugs
    this project keeps finding, so the one that is easiest to forget to run is the weak link.
 11. **Restore from the bucket again.** The only restore ever performed was 17 Aug 2026 (§7.4 item 8a).
-12. **Expand to Hillsborough and Palm Beach — scoped 13 Oct 2026, nothing built yet.**
-   **Hillsborough is ready to build.** Everything needed is public and free, with no login, captcha
-   or disclaimer, and was tested end to end: a daily index feed over HTTPS (about two months kept,
-   about six days behind), plus a search API that returns the whole 2023-to-date history and serves
-   each document as a PDF. Volume since Jan 2023: **34,160 assignments** (`ASG`) and **31,090 UCC
-   filings** (`FIN`). One trap: a search that matches more than 6,000 rows returns *nothing* and a
-   `Truncated` flag rather than an error, so history has to be pulled by quarter.
-   **Palm Beach cannot be collected unattended from its free portal.** The user agreement was
-   accepted with the owner's approval, and behind it every search form (including instrument-number
-   lookup) requires a Google reCAPTCHA that the server enforces. Getting around that would mean
-   defeating a deliberate access control, which is not recommended. Assignments are filed as
-   `ASSIGNMENT` and `ASSIGNMENT TAXABLE`, UCCs as `FINANCING STATEMENTS (UCC'S)`. The realistic
-   routes are the clerk's paid daily index by FTP ($600/yr, no images) with past years on CD-ROM
-   ($40/yr), a bulk records request for the document images (as planned for Broward), or a person
-   solving one captcha per weekly search (one search returns up to 10,000 rows). Route to be decided.
-   Owner decisions so far: Hillsborough first, and collect UCC filings in both new counties.
-   **Engineering prerequisite for either county:** document numbers can no longer be assumed
-   unique across counties (both new counties use purely numeric numbers, like Broward), so the
-   `UNIQUE(county, cfn)` rebuild deferred on 6 Aug 2026 must happen first, and the county list
-   hard-coded in roughly fifteen places (client selector, document links, email, Ask the Data,
-   extractor image source) needs to become one setting. Full detail in `SESSION_LOG.md` (13 Oct 2026).
+12. **Expand to Hillsborough and Palm Beach.**
+   **Hillsborough — built 13 Oct 2026 on branch `feat/hillsborough`, NOT deployed.** Everything is
+   public and free, with no login, captcha or disclaimer: a daily index feed over HTTPS (about two
+   months kept, about six days behind) and a live search API that serves each document as a PDF.
+   Volume since Jan 2023: **34,160 assignments** (`ASG`, plus a rare `ASGT`) and **31,090 UCC filings**
+   (`FIN`). Built: `collector/hillsborough_collect.py` (history from the search API, which returns
+   *nothing* plus a `Truncated` flag above 6,000 rows, so windows split themselves; daily from the
+   feed, which overwrites the API's alphabetised party order with filing order), image fetch + OCR in
+   `extract_pdfs.py`, `run_hillsborough_daily.sh`, and the county in the selector, document links,
+   labels, Reporting type filter (`Hillsborough (ASG)`), UCC page and Ask the Data. **No table rebuild
+   was needed** (key formats are disjoint and guarded — §6). Two fixes ride along: the UCC page now
+   respects the county selector (it previously showed Miami-Dade UCCs under every scope), and the
+   weekly extraction is scoped to Miami-Dade so Hillsborough's fetchable history cannot take its cap.
+   Verified on a local copy with 3,376 Hillsborough rows: guardrails green, `tsc` + build clean, a
+   classified Hillsborough assignment reaches the clean table and every `FIN` stays out. **Like
+   Broward, `ASG` is a generic code, so Hillsborough rows reach the analytics only once their PDF is
+   read** — the dashboard shows Hillsborough deals as fast as extraction runs. **To go live:** owner
+   approval → rehearse `normalize.py` on a production snapshot → deploy → install the cron → run the
+   2023-to-date history pull (`--history --start 2023-01-01`) → extract the backlog (~65k documents;
+   OCR-bound; roughly $30–40 of `gpt-4.1-nano` at Broward's observed ~$0.03 per 55 documents). The weekly email still lists Miami-Dade and Broward
+   only — adding Hillsborough is an owner decision.
+   **Palm Beach — deferred (owner, 13 Oct 2026).** Its free portal requires a server-enforced Google
+   reCAPTCHA on every search, including instrument lookup; getting around it would defeat a
+   deliberate access control and is not recommended. Assignments are `ASSIGNMENT` / `ASSIGNMENT
+   TAXABLE`, UCCs `FINANCING STATEMENTS (UCC'S)`. Realistic routes: the paid daily index by FTP
+   ($600/yr, no images) with past years on CD-ROM ($40/yr), a bulk image request, or a person solving
+   one captcha per weekly search (up to 10,000 rows each). Full detail in `SESSION_LOG.md`
+   (13 Oct 2026).
 
 ---
 
@@ -2274,7 +2292,7 @@ scope and the applied scope cannot drift).
 |---|---|---|
 | Miami-Dade Clerk Official Records | Web portal, automated via Playwright | Login required; 499-record server cap per query, handled by recursive chunk splitting |
 | Broward County Records, Taxes & Treasury | Public SFTP `BCFTP.Broward.org:22` (`crpublic`/`crpublic`) | No login, no captcha, no scraping. Yearly exports 1978→last completed year (index only) + daily files with images (~10-day retention) |
-| Hillsborough Clerk Official Records — **scoped, not yet collected** | Daily index `publicrec.hillsclerk.com/OfficialRecords/DailyIndexes/` (HTTPS, public); search API + PDF images under `publicaccess.hillsclerk.com/Public/ORIUtilities/` | No login or captcha. ~2-month feed retention, ~6-day lag. Search capped at 6,000 rows (returns empty + `Truncated` when exceeded). Codes `ASG`/`ASGT`, UCC `FIN` |
+| Hillsborough Clerk Official Records — **collector built 13 Oct 2026 (branch `feat/hillsborough`), not deployed** | Daily index `publicrec.hillsclerk.com/OfficialRecords/DailyIndexes/` (HTTPS, public); search API + PDF images under `publicaccess.hillsclerk.com/Public/ORIUtilities/` | No login or captcha. ~2-month feed retention, ~6-day lag. Search capped at 6,000 rows (returns empty + `Truncated` when exceeded). Codes `ASG`/`ASGT`, UCC `FIN` |
 | Palm Beach Clerk Official Records — **scoped, not yet collected** | Landmark Web `erec.mypalmbeachclerk.com` (user agreement + **server-enforced reCAPTCHA on every search**); optional paid FTP index ($600/yr, no images) | Up to 10,000 results per search. Codes `ASSIGNMENT`, `ASSIGNMENT TAXABLE`, UCC `FINANCING STATEMENTS (UCC'S)`. Volume not yet measured |
 | Market Intelligence tool — Market Analytics data API | `https://market-intelligence-tool-gilt.vercel.app/api/analytics/v1/*`, bearer key, contract saved at `docs/market-intelligence-meta.json` | FDIC Call Report screening, scores, balance-sheet signals and per-institution trend/history (since 7 Oct 2026; replaced the direct FDIC BankFind proxy). Refreshes on its own daily job, keyed by FDIC quarter |
 | OpenAI | `gpt-4.1-nano`, Chat Completions + Batch API | Document extraction and entity classification fallback |

@@ -217,7 +217,7 @@ export default function Assignments() {
                   <ColHeader label="Date" tooltip="Recording date — when the assignment was stamped by the county Clerk. This is slightly later than the execution/signing date on the document itself." />
                 </th>
                 <th className="px-3 py-2.5 text-left font-medium">
-                  <ColHeader label="County" tooltip="Which county's Official Records the document was recorded in. Matters most under the All Counties scope, where Miami-Dade CFNs and Broward instrument numbers sit side by side. Note the two counties are not equally deep: Broward's pre-Aug-2026 history is index-only." />
+                  <ColHeader label="County" tooltip="Which county's Official Records the document was recorded in. Matters most under the All Counties scope, where every county's document numbers sit side by side. The counties are not equally deep: Broward's pre-Aug-2026 history is index-only, and Hillsborough's documents are still being read." />
                 </th>
                 <th className="px-3 py-2.5 text-left font-medium">
                   <ColHeader label="Grantor (Assignor)" tooltip="The party transferring/selling the mortgage. This entity is giving up the right to collect or enforce the debt. Often a bank, servicer, or fund offloading a loan from its portfolio." />

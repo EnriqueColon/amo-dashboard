@@ -125,7 +125,12 @@ def pending_documents(conn: sqlite3.Connection, limit: int, since: str | None = 
     work backward from the present. `since` (YYYY-MM-DD) optionally scopes
     this to only documents recorded on/after that date, for a faster
     partial backfill (e.g. "just the last 6 months") ahead of a deadline —
-    re-run without `since` later to pick up the rest of history."""
+    re-run without `since` later to pick up the rest of history.
+
+    Miami-Dade only: download_and_ocr() fetches by book/page from Miami-Dade's
+    clerk, so another county's row that happens to carry a book/page would come
+    back as an unrelated Miami-Dade document. Other counties get facility
+    detection inline from extract_pdfs.py, which fetches per county."""
     date_clause = "AND a.rec_date >= ?" if since else ""
     params = (*_ACTIVE_JOB_STATUSES, *([since] if since else []), limit)
     return conn.execute(f"""
@@ -133,6 +138,7 @@ def pending_documents(conn: sqlite3.Connection, limit: int, since: str | None = 
         FROM assignments a
         LEFT JOIN pdf_extractions px ON px.cfn = a.cfn
         WHERE (px.cfn IS NULL OR px.facility_type IS NULL)
+          AND COALESCE(a.county, 'MIAMI-DADE') = 'MIAMI-DADE'
           AND a.rec_book IS NOT NULL AND a.rec_book != ''
           AND a.rec_page IS NOT NULL AND a.rec_page != ''
           AND a.cfn NOT IN (
@@ -156,6 +162,7 @@ def pending_count(conn: sqlite3.Connection, since: str | None = None) -> int:
             FROM assignments a
             LEFT JOIN pdf_extractions px ON px.cfn = a.cfn
             WHERE (px.cfn IS NULL OR px.facility_type IS NULL)
+              AND COALESCE(a.county, 'MIAMI-DADE') = 'MIAMI-DADE'
               AND a.rec_book IS NOT NULL AND a.rec_book != ''
               AND a.rec_page IS NOT NULL AND a.rec_page != ''
               AND a.cfn NOT IN (

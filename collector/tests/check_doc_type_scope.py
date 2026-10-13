@@ -67,6 +67,9 @@ def build_fixture() -> sqlite3.Connection:
             ('2026R3', None, 'OLD GRANTOR INC', 'OLD GRANTEE NA', 'MIAMI-DADE', '2026-01-04'),
             # the dangerous one — must be excluded everywhere analytical
             ('2026R4', FST, 'SOLAR DEBTOR LLC', 'GOODLEAP LLC', 'MIAMI-DADE', '2026-01-05'),
+            # Hillsborough files the same instrument as FIN, its assignments as ASG
+            ('2026384001', 'FIN', 'TAMPA DEBTOR LLC', 'SUNNOVA LLC', 'HILLSBOROUGH', '2026-01-06'),
+            ('2026384002', 'ASG', 'MERSN', 'LAKEVIEW LOAN SERVICING LLC', 'HILLSBOROUGH', '2026-01-07'),
         ])
     conn.commit()
     return conn
@@ -85,7 +88,9 @@ def check_fixture() -> None:
     if '2026R4' in kept:
         fail("non_assignment_filter() did NOT exclude the FST row — "
              "FST would reach aom_events_clean and the entity signal sweep")
-    for cfn, label in (('2026R1', 'AMO'), ('2026R2', 'ASG')):
+    if '2026384001' in kept:
+        fail("non_assignment_filter() did NOT exclude the Hillsborough FIN row")
+    for cfn, label in (('2026R1', 'AMO'), ('2026R2', 'ASG'), ('2026384002', 'Hillsborough ASG')):
         if cfn not in kept:
             fail(f"non_assignment_filter() wrongly excluded the {label} row {cfn}")
     if '2026R3' not in kept:
@@ -118,7 +123,7 @@ def check_fixture() -> None:
         notes.append("negative control passed — the filter is what excludes FST")
 
     conn.close()
-    notes.append(f"fixture: {len(kept)}/4 rows kept, FST excluded, "
+    notes.append(f"fixture: {len(kept)}/6 rows kept, FST and FIN excluded, "
                  f"legacy NULL row retained")
 
 

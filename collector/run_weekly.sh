@@ -41,8 +41,11 @@ cd "$COLLECTOR_DIR"
 # 1. Collect new records (all configured doc types: AMO, ASG, AIT)
 "$VENV/bin/python3" collect_live.py --start "$START" --end "$END"
 
-# 2. Extract data from the recorded PDFs (newest first, capped per run)
-"$VENV/bin/python3" extract_pdfs.py --limit 1500
+# 2. Extract data from the recorded PDFs (newest first, capped per run).
+#    Miami-Dade only: Broward and Hillsborough extract in their own daily jobs,
+#    and Hillsborough's whole history is fetchable, so unscoped it would take
+#    this cap.
+"$VENV/bin/python3" extract_pdfs.py --county MIAMI-DADE --limit 1500
 
 # 3. Rebuild normalized tables (applies loan-transfer filter + extracted fields)
 "$VENV/bin/python3" normalize.py

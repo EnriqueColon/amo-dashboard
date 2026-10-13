@@ -31,6 +31,7 @@ export const DOC_TYPE_DEFS: Record<string, Definition> = {
   amo: d('Mortgage (AMO)', "Miami-Dade's dedicated \"Assignment of Mortgage\" code. Almost always a loan transfer, but check Shows to be sure."),
   asg: d('Generic (ASG)', "Miami-Dade's catch-all \"Assignment\" code. A mix of loan transfers, collateral pledges, rent assignments and permits — use Shows to narrow it down."),
   ast: d('Broward (AST)', 'Assignments recorded in Broward County, under its own filing code.'),
+  hc_asg: d('Hillsborough (ASG)', 'Assignments recorded in Hillsborough County (ASG, plus the rare ASGT assignment of taxes).'),
 };
 
 // ── Reporting: review status ───────────────────────────────────────────────────
@@ -123,5 +124,5 @@ export const UCC_TAB_DEFS: Record<string, Definition> = {
 };
 
 // ── Global ─────────────────────────────────────────────────────────────────────
-export const COUNTY_DEF = d('County', "Which county's records every page shows. All Counties combines both. Broward's history before August 2026 is thinner, so compare the two counties with care.");
+export const COUNTY_DEF = d('County', "Which county's records every page shows. All Counties combines them. Broward and Hillsborough have far fewer documents read than Miami-Dade, so compare counties with care.");
 export const FDIC_SCOPE_DEF = d('Region', 'Which banks to screen, as scoped by Market Intelligence: United States is the national cohort it covers (the largest institutions); choosing a state shows every bank it covers in that state. Scores are percentile ranks within the chosen scope, so a bank\'s score changes when the scope does.');

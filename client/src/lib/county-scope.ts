@@ -7,11 +7,12 @@
  * otherwise be an import cycle between those two modules.
  */
 
-export type CountyScope = 'MIAMI-DADE' | 'BROWARD' | 'ALL';
+export type CountyScope = 'MIAMI-DADE' | 'BROWARD' | 'HILLSBOROUGH' | 'ALL';
 
 export const COUNTY_OPTIONS: Array<{ value: CountyScope; label: string; short: string }> = [
   { value: 'MIAMI-DADE', label: 'Miami-Dade County', short: 'Miami-Dade' },
   { value: 'BROWARD',    label: 'Broward County',    short: 'Broward' },
+  { value: 'HILLSBOROUGH', label: 'Hillsborough County', short: 'Hillsborough' },
   { value: 'ALL',        label: 'All Counties',      short: 'All Counties' },
 ];
 
@@ -20,7 +21,7 @@ export const DEFAULT_COUNTY: CountyScope = 'MIAMI-DADE';
 const STORAGE_KEY = 'amo.county';
 
 export function isScope(v: unknown): v is CountyScope {
-  return v === 'MIAMI-DADE' || v === 'BROWARD' || v === 'ALL';
+  return COUNTY_OPTIONS.some(o => o.value === v);
 }
 
 export function readStoredCounty(): CountyScope {

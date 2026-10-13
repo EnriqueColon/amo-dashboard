@@ -44,7 +44,7 @@ _COUNTIES_ENV = os.environ.get('NORMALIZE_COUNTIES', '').strip()
 NORMALIZE_COUNTIES: tuple[str, ...] | None = (
     None if _COUNTIES_ENV.upper() == 'ALL'
     else tuple(c.strip().upper() for c in _COUNTIES_ENV.split(',') if c.strip())
-    or ('MIAMI-DADE', 'BROWARD')
+    or ('MIAMI-DADE', 'BROWARD', 'HILLSBOROUGH')
 )
 
 
@@ -74,7 +74,8 @@ NORMALIZE_COUNTIES: tuple[str, ...] | None = (
 # Extraction is deliberately NOT filtered: the PDFs are read and everything is
 # stored in pdf_extractions, so the data is available to query. Only the
 # derived/analytical tables are gated.
-NON_ASSIGNMENT_DOC_TYPES: tuple[str, ...] = ('FINANCING STATEMENT UCC - FST',)
+# Hillsborough files the same instrument as FIN.
+NON_ASSIGNMENT_DOC_TYPES: tuple[str, ...] = ('FINANCING STATEMENT UCC - FST', 'FIN')
 
 
 def non_assignment_filter(alias: str = '') -> str:

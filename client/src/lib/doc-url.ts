@@ -15,15 +15,20 @@
  *               SearchTypeInstrumentNumber were tested and none prefill.
  *               So there is nothing honest to link to, and callers render the
  *               instrument number as plain text.
+ * Hillsborough — addressed by instrument number; the public search page opens
+ *               the document directly from ?instrument=.
  *
  * When a working Broward deep link is found, this is the single place to add it.
  */
 
 export type DocRef = {
   county?: string | null;
+  cfn?: string | null;
   rec_book?: string | null;
   rec_page?: string | null;
 };
+
+const HILLSBOROUGH_DOC_URL = 'https://publicaccess.hillsclerk.com/oripublicaccess/';
 
 const MIAMI_DADE_DOC_URL =
   'https://onlineservices.miamidadeclerk.gov/officialrecords/api/DocumentImage/getdocumentimage';
@@ -31,6 +36,10 @@ const MIAMI_DADE_DOC_URL =
 /** Returns a URL to the recorded document, or null when the county has none. */
 export function documentUrl(ref: DocRef): string | null {
   const county = (ref.county || 'MIAMI-DADE').toUpperCase();
+  if (county === 'HILLSBOROUGH') {
+    const cfn = (ref.cfn ?? '').toString().trim();
+    return cfn ? `${HILLSBOROUGH_DOC_URL}?instrument=${encodeURIComponent(cfn)}` : null;
+  }
   if (county !== 'MIAMI-DADE') return null;
 
   const book = (ref.rec_book ?? '').toString().trim();
@@ -50,5 +59,6 @@ export function noDocumentUrlReason(ref: DocRef): string {
     return 'Broward does not publish a direct document link — search this '
          + 'instrument number at officialrecords.broward.org';
   }
+  if (county === 'HILLSBOROUGH') return 'No instrument number recorded for this document';
   return 'No book/page recorded for this document, so the county portal cannot address it';
 }
