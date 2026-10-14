@@ -41,6 +41,13 @@ export AMO_DB_PATH="${AMO_DB_PATH:-/opt/amo-dashboard/miami_dade_amo.db}"
 COLLECTOR_DIR="/opt/amo-dashboard/collector"
 VENV="$COLLECTOR_DIR/.venv"
 LOOKBACK_DAYS="${LOOKBACK_DAYS:-10}"
+# The reconciler re-queries the portal independently of the collector, so its
+# window is deliberately narrower than the collection lookback: three runs a day
+# over 10 days would be ~84 extra searches daily against one clerk login, to
+# re-confirm days that have not changed in a week. Recent days are the ones that
+# move. Older history is swept by running reconcile_counties.py --days N by hand
+# or from a weekly job.
+RECONCILE_DAYS="${RECONCILE_DAYS:-4}"
 
 # CLERK_EMAIL / CLERK_PASSWORD if they are kept in .env; cron starts bare.
 # shellcheck disable=SC1091
@@ -80,7 +87,7 @@ fi
 # non-zero on a gap, which is what makes a silent miss loud. Advisory here —
 # the collection above already succeeded or failed on its own merits.
 if [ -f "$COLLECTOR_DIR/reconcile_counties.py" ]; then
-    "$VENV/bin/python3" -u reconcile_counties.py --county MIAMI-DADE --days "$LOOKBACK_DAYS"
+    "$VENV/bin/python3" -u reconcile_counties.py --county MIAMI-DADE --days "$RECONCILE_DAYS"
     recon_status=$?
     [ $recon_status -ne 0 ] && echo "RECONCILIATION REPORTED A GAP (exit $recon_status)"
 fi

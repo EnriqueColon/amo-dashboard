@@ -4,6 +4,32 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-10-14 (afternoon) — Miami-Dade was a WEEK stale: daily cron + per-county reconciliation (`d790767`, `384ef03`, DEPLOYED)
+
+**Owner's report:** "I searched by CFN for an AMO document and it was not on the tool but on the website" — `2026R696647`. Then: *on day X the tool must hold everything the clerk holds on day X.*
+
+- **Root cause: Miami-Dade collected WEEKLY** (`0 6 * * 5 run_weekly.sh`) while Broward ran 3×/day and Hillsborough daily. The Friday job fires 06:00 UTC = **02:00 Eastern, before that day's recordings exist**, so the real lag reached eight days. On 14 Oct the tool held nothing after 8 Oct. Verified against the portal: county had **71 AMO on 10-09 and 39 on 10-13, we had 0**. `2026R696647` is rec_date **10/9** (doc_date 9/10/2021 — the owner's "October 5" is neither date; Oct 5 itself is complete at 66 of 66 AMO).
+- **Caught up immediately**: `collect_live.py --start 2026-10-08 --end 2026-10-14` → **227 new rows** (124 AMO, 45 ASG, 58 FST) in 90 seconds. The whole county takes 90s — there was never a cost reason for weekly.
+- **`run_miamidade_daily.sh`** (new): index only, 10-day lookback, flock, defers if the weekly run holds the clerk login, then calls the reconciler. Cron **`30 12,17,22 * * *`** = 08:30/13:30/18:30 ET (backup `crontab.before_md_daily.<ts>`). Extraction/normalize/enrich stay in `run_weekly.sh`, so this cannot compete for CPU or OpenAI budget.
+- **`already_collected()` now refuses to skip any window ending within `AMO_RECHECK_DAYS` (14).** The county adds documents to a recording date for days afterwards. The old rule survived only because the weekly run's chunk boundaries shifted each week and rarely repeated — **on a daily schedule they repeat every run**, so without the horizon the second run of a window would skip it and every late-posted document would be lost permanently. Re-collecting is INSERT OR IGNORE.
+- **`insert_records()` now writes `county`.** It used to leave NULL for `server/db.ts:222` to backfill on the next restart; until then new rows were invisible to `WHERE county='MIAMI-DADE'` — all 227 rows collected today were. Downstream backfills kept for older builds.
+- **`reconcile_counties.py`** (new): asks each source for its own per-day counts and compares. MD = portal (reusing `collect_live.login`/`do_search`); Broward = daily feed file; HC = search API. Verdicts → new `index_coverage` table (county, rec_date, doc_type, source_count, our_count, status). **Exit 1 on SHORT.** A day at MD's 500-row cap is recorded **UNKNOWN, never OK** — the portal returns no total and no paging, so a capped day cannot be reconciled, only flagged. Holding *more* than the source is AHEAD, not a failure (both feeds re-send corrections).
+- **Verified post-fix:** all three counties match 8–13 Oct, including the 71 AMO on 10-09.
+- Tests: `tests/check_collection_horizon.py` (horizon boundary, old history still skipped, county written). Fails against the pre-change `database.py`.
+
+### Audit findings behind this — what IS and IS NOT missing (assignments, 2023→present)
+
+- **Document-type coverage is complete in all three counties.** MD portal offers **79** types, exactly 3 are assignments (AMO/ASG/AIT) and we collect all 3. Broward CY2025: **643,099 records, 65 codes**, `AST` is the only assignment code. HC: `ASG`/`ASGT` collected — **`ASINT` (ASSIGNMENT OF INTEREST) is NOT, ~23/quarter, ~350 since 2023. STILL OPEN.**
+- **Broward 2023–2025 reconciles exactly** against the county's own files: 14,371 = 14,371, 13,925 = 13,925, 13,674 = 13,674.
+- **Hillsborough ASG reconciles exactly every month** Jan 2023 → Sep 2026 (34,188 API vs 34,192 ours; we are 4 ahead from feed corrections).
+- **STILL OPEN — MD 500-row cap.** The portal returns one row **per party**, hard-capped at 500, with no total and no paging. `collect_live` splits by date but `MIN_CHUNK=1` means a single day over the cap keeps the first 500 and discards the rest. **23 days affected, 2023-01-11 → 2026-02-03.** The search form has `lastName`/`firstName`, so the repair is to re-run a capped day partitioned by party-name initial and union the results.
+- **STILL OPEN — Broward 1 Jan → 21 Jul 2026 missing entirely** (~7,600 AST). The Aug import ran CY2023/24/25 and stopped; the daily feed started 22 Jul. **No CY2026 yearly file exists** (published after year-end) and the daily directory keeps ~12 days, so this needs the paid bulk order. Yearly exports run **CY1978 → CY2025** if history is ever wanted.
+- **STILL OPEN — entity fragmentation from index typos.** `2026R681106`: document says PACIFIC LIFE **INSURANCE**, index says PACIFIC LIFE **INURANCE**, normalize kept the index spelling → a 2-row orphan entity typed OTHER beside the real 248-row `PACIFIC LIFE INSURANCE` typed BANK, and txn_type INSTITUTIONAL_OUT instead of MARKET_TRANSFER. Measured: **552 orphan names holding 677 clean rows**, 310 of them also mistyped. **Do NOT auto-merge on similarity** — the same test flags `LEGACY MORTGAGE ASSET TRUST 2020 SL1` vs `2019 SL3` and `LB IGLOO SERIES IV` vs `VI`, which are different trusts. Proposed: prefer the document's spelling only when it is near-identical AND matches a known entity while the index's does not; confirmed pairs into `entity_aliases`; the rest become a review queue.
+- **Visibility ≠ collection.** Assignments in index vs visible in the tool: MD 74,301 → 55,726 (75%), HC 34,216 → 12,804 (37%, backlog running), **Broward 44,938 → 2,072 (4.6%)** — 41,970 have no image and cannot be read until the bulk order lands.
+- Reference: Broward's daily feed carries **30 codes / ~2,685 documents a day** and we ingest only the 49 `AST`; mortgages (188/day), lis pendens (27), final judgments (260), modifications (20) are all parsed and discarded. Deliberate for an assignment tracker, and the obvious seam if the product ever widens. Owner scoped this session to assignments only.
+
+---
+
 ## 2026-10-14 — Hillsborough wrong-party fix (`8627f1a`), applies at the 15 Oct nightly
 
 - **Owner's report:** Reporting row 2026400005 showed assignor `BMF V FL GRAND PAVILION` (the borrower) while the expanded PDF parties said Freddie Mac. Typed ORIGINATION, should be a GSE sale.
