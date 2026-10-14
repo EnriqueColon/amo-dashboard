@@ -1549,8 +1549,23 @@ loan transfers, so no figure above double-counts and nothing published earlier h
 > the loan. Where the county lists several parties on a side, the table now shows the one the document
 > names, in the clerk's spelling. This happens only when the index's pick is unrecognised or is a
 > servicer signing "as attorney-in-fact" for the actual owner. It never replaces a recognised
-> institution or a trust, and never substitutes MERS. About 840 rows were corrected, almost all in
+> institution or a trust, and never substitutes MERS. About 880 rows were corrected, almost all in
 > Hillsborough.
+>
+> **Miami-Dade follow-up — 14 Oct 2026. Seller rankings for private lenders change from the 15 Oct
+> nightly run; the new figures are the correct ones.** The Miami-Dade clerk sometimes indexes the
+> borrower company as the *only* seller. Example: 2026R695675 read "SUITE HOMES RENOVATION → ICE
+> LENDER HOLDINGS" and counted as a new loan, while the document says Debt Closing Services sold it.
+> Where the clerk's seller is a company the dashboard doesn't recognise as a lender, the table now shows
+> the document's seller. It does not do this when:
+> - the two names are spellings of the same company;
+> - the document names a person or MERS;
+> - the clerk's name is a trust;
+> - the clerk's name already sells loans regularly.
+>
+> **About 1,900 Miami-Dade rows** were corrected, most of them borrower LLCs replaced by the lender that
+> actually sold the loan (Velocity Commercial Capital, Alto Capital, RBI Mortgages, Bank OZK). About
+> 1,200 of those move from "origination" to "market transfer".
 
 > ### The Property column: prose removed, legal descriptions kept — 16 Sep 2026
 >
@@ -1610,7 +1625,7 @@ endpoints healthy across all three county scopes.
 | Miami-Dade collection (weekly cron) | 🟢 Live — ran clean unattended on 11 Sep 2026, all four document types, whole collection phase 2m 13s |
 | AIT (Assignment of Interest) collection | 🟢 **Resolved 11 Sep 2026** — never a timeout. The county rejects the search and returns no results, exactly as it does for a day with no filings, and has done so since the type was added on 16 Jun. Now resolves in about a second and records `EMPTY` rather than a false error. **Kept active on purpose**, so collection begins by itself if the county ever starts using it |
 | UCC financing statements (weekly cron) | 🟢 **New 9–11 Sep 2026** — 32,759 filings collected and read, 2023 to present. Now part of the weekly run |
-| Hillsborough index + extraction | 🟡 **LIVE 13 Oct 2026** (`a1265b8`, PM2 restart #68). 65,282 filings since 3 Jan 2023 collected (34,165 `ASG`, 24 `ASGT`, 31,093 `FIN`); daily cron installed. **Backlog being read:** assignments first (~14 docs/min ≈ 40 h, finishing ~Thu 15 Oct), then UCCs (~another 37 h, queued automatically). Deals appear in the analytics as they are read; the weekly email adds Hillsborough at 98% read. **Watch it on the Overview page:** a live progress card (refreshes every minute) turns red if reading stalls for 30 minutes, if downloads start failing, or if the daily job misses a day — the fix for a stall is restarting the backlog command in `SESSION_LOG.md` (13 Oct). **Party fix 14 Oct 2026** (`8627f1a`): the county lists each side's parties alphabetically, so a borrower whose name sorts first could appear as the seller (e.g. 2026400005 showed the property LLC instead of Freddie Mac). Normalize now picks the listed party the document names; about 840 Hillsborough rows are corrected from the 15 Oct nightly run |
+| Hillsborough index + extraction | 🟡 **LIVE 13 Oct 2026** (`a1265b8`, PM2 restart #68). 65,282 filings since 3 Jan 2023 collected (34,165 `ASG`, 24 `ASGT`, 31,093 `FIN`); daily cron installed. **Backlog being read:** assignments first (~14 docs/min ≈ 40 h, finishing ~Thu 15 Oct), then UCCs (~another 37 h, queued automatically). Deals appear in the analytics as they are read; the weekly email adds Hillsborough at 98% read. **Watch it on the Overview page:** a live progress card (refreshes every minute) turns red if reading stalls for 30 minutes, if downloads start failing, or if the daily job misses a day — the fix for a stall is restarting the backlog command in `SESSION_LOG.md` (13 Oct). **Party fix 14 Oct 2026** (`8627f1a`): the county lists each side's parties alphabetically, so a borrower whose name sorts first could appear as the seller (e.g. 2026400005 showed the property LLC instead of Freddie Mac). Normalize now picks the listed party the document names; about 880 Hillsborough rows are corrected from the 15 Oct nightly run (plus about 1,900 Miami-Dade rows where the clerk indexed only the borrower; see "The Assignor column was showing the borrower") |
 | Palm Beach | ⚫ **Deferred 13 Oct 2026** — free portal is captcha-gated; paid FTP route undecided (§7.6 item 12) |
 | Broward index + images + extraction (daily cron) | 🟡 Live — 43,795 index rows, but **41,970 have no image and cannot be read** until the bulk image order lands (§7.6) |
 | PDF extraction — Miami-Dade | 🟢 Live — 107,402 documents read end to end |

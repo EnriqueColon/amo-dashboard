@@ -28,7 +28,8 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 
-from normalize import prefer_document_party, pick_listed_party, clean_property_address  # noqa: E402
+from normalize import (  # noqa: E402
+    prefer_document_party, pick_listed_party, prefer_document_seller, clean_property_address)
 
 # (index_name, names listed on that side, pdf_name, expected, why). Hillsborough
 # lists each side alphabetically, so the first name is not the seller.
@@ -78,6 +79,28 @@ INDEX_TYPES = {
     'WELLS FARGO BANK': 'BANK',
     'ONITY MORTGAGE CORPORATION': 'SERVICER',
 }
+
+# (index_name, pdf_name, expected, why) for prefer_document_seller; the index
+# name is an unrecognised company. Names verbatim from production.
+SELLER_CASES = [
+    ('SUITE HOMES RENOVATION LLC', 'Debt Closing Services LLC ISAOA/ATIMA',
+     'Debt Closing Services LLC ISAOA/ATIMA',
+     '2026R695675: the borrower was the only grantor indexed'),
+    ('MANGO GROVE FAMILY LLC', 'Velocity Commercial Capital, LLC',
+     'Velocity Commercial Capital, LLC', 'borrower indexed, lender in the document'),
+    ('M&M PRIVATE LENDING GROUP LLC', 'M & M PRIVATE LENDING GROUP, LLC',
+     'M&M PRIVATE LENDING GROUP LLC', 'spelling variant: the clerk spelling stays'),
+    ('BOYD LOAN FUNDING I LLC', 'Boyd Loan Funding 1, LLC', 'BOYD LOAN FUNDING I LLC',
+     'I vs 1 is still the same company'),
+    ('PAD SERIES V TRUST', 'U.S. BANK TRUST NATIONAL ASSOCIATION AS TRUSTEE',
+     'PAD SERIES V TRUST', 'a trust is not swapped for its trustee'),
+    ('ZARI CAFE LLC', 'GARY L. BROWN', 'ZARI CAFE LLC',
+     'a person named in the document does not displace a company'),
+    ('SUITE HOMES RENOVATION LLC', 'MORTGAGE ELECTRONIC REGISTRATION SYSTEMS, INC.',
+     'SUITE HOMES RENOVATION LLC', 'MERS is never substituted'),
+    ('SUITE HOMES RENOVATION LLC', None, 'SUITE HOMES RENOVATION LLC',
+     'no extraction: the index is all there is'),
+]
 
 # (index_name, pdf_name, expected, why) — names verbatim from production.
 PARTY_CASES = [
@@ -223,6 +246,18 @@ def main() -> int:
             failures.append(f'listed party: index={idx!r} pdf={pdf!r}\n'
                             f'      expected {expected!r}, got {got!r} — {why}')
 
+    for idx, pdf, expected, why in SELLER_CASES:
+        got = prefer_document_seller(idx, pdf)
+        if got != expected:
+            failures.append(f'seller: index={idx!r} pdf={pdf!r}\n'
+                            f'      expected {expected!r}, got {got!r} — {why}')
+    if prefer_document_seller('SUITE HOMES RENOVATION LLC', 'Debt Closing Services LLC', 'BANK') \
+            != 'SUITE HOMES RENOVATION LLC':
+        failures.append('seller: a recognised index name must keep the row')
+    if prefer_document_seller('GENEVA CAPITAL GROUP LLC', 'NEHIR RESIDENCES LLC', 'OTHER',
+                              {'GENEVA CAPITAL GROUP': 12}) != 'GENEVA CAPITAL GROUP LLC':
+        failures.append('seller: a repeat seller in the index must keep the row (2025R667227)')
+
     for value, expected, why in PROPERTY_CASES:
         got = clean_property_address(value)
         if got != expected:
@@ -238,7 +273,7 @@ def main() -> int:
                 failures.append(f'party rule blanked a party: index={idx!r} pdf={pdf!r}')
 
     print(f'  · {len(PARTY_CASES)} party choices, {len(LISTED_CASES)} listed-party '
-          f'choices and {len(PROPERTY_CASES)} property '
+          f'choices, {len(SELLER_CASES) + 2} seller choices and {len(PROPERTY_CASES)} property '
           f'values checked, plus a never-blank assertion')
     print('  · offline: no database, no network, no API key')
     if failures:

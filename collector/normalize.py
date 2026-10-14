@@ -8,6 +8,7 @@ AMO Normalization Pipeline
    manual overrides → FDIC match → suffix signals → behavioral → regex → default
 """
 import sqlite3
+import difflib
 import json
 import re
 import os
@@ -642,6 +643,52 @@ def pick_listed_party(index_name: str | None, listed: list | None,
             (index_type or 'OTHER') != 'OTHER' or re.search(r'\bTRUST\b', current)):
         return index_name
     return next((n for n in listed if n and canonicalize(n) == target), index_name)
+
+
+def _squash(name: str) -> str:
+    return re.sub(r'[^A-Z0-9]', '', (name or '').upper())
+
+
+def prefer_document_seller(index_name: str | None, pdf_name: str | None,
+                           index_type: str | None = 'OTHER',
+                           sales: dict | None = None) -> str | None:
+    """Replace an unrecognised company in the Assignor column with the document's seller.
+
+    The Miami-Dade clerk sometimes indexes the borrower as the only grantor:
+    2026R695675 read "SUITE HOMES RENOVATION LLC -> ICE LENDER HOLDINGS" and
+    counted as an ORIGINATION, while the document's assignor is Debt Closing
+    Services. With one listed name pick_listed_party has nothing to choose
+    from, and prefer_document_party only replaces people. About 2,200 of 55,726
+    Miami-Dade rows had this shape (14 Oct 2026).
+
+    Held back, each measured on that population: spelling variants of the same
+    company (1,134: "M&M" vs "M & M"; the clerk's spelling is cleaner), a
+    document seller that reads as a person (892, often a trustee signing), MERS,
+    a recognised index name, and an index name carrying TRUST, which is the
+    trust-vs-trustee question (PAD SERIES V TRUST -> its trustee US BANK).
+
+    `sales` counts each canonical name's filings as assignor. An index name that
+    sells on 3+ filings, and more often than the document's name, is a lender
+    and keeps the row: 2025R667227 would otherwise have swapped GENEVA CAPITAL
+    GROUP for NEHIR RESIDENCES, the borrower the extractor misread as assignor.
+    """
+    pdf = sanitize_ocr_field(pdf_name)
+    idx = (index_name or '').strip()
+    if not pdf or not idx or (index_type or 'OTHER') != 'OTHER':
+        return index_name
+    if _looks_like_person(idx) or _looks_like_person(pdf):
+        return index_name
+    current, target = canonicalize(idx), canonicalize(pdf)
+    if (not target or current == target or classify_canonical(target) == 'MERS'
+            or re.search(r'\bTRUST\b', current)):
+        return index_name
+    a, b = _squash(current), _squash(target)
+    if a in b or b in a or difflib.SequenceMatcher(None, a, b).ratio() >= 0.75:
+        return index_name
+    sales = sales or {}
+    if sales.get(current, 0) >= 3 and sales.get(current, 0) > sales.get(target, 0):
+        return index_name
+    return pdf
 
 
 # ── Property address: reject what is not an address ──────────────────────────
@@ -1549,6 +1596,11 @@ def build_normalized_tables():
     # previous run's answer. pick_listed_party needs it because the raw-name
     # join above misses for most index spellings.
     prior_types = dict(conn.execute("SELECT name, category FROM entity_classifications"))
+    try:
+        prior_sales = dict(conn.execute(
+            "SELECT assignor_canon, COUNT(*) FROM aom_events_clean GROUP BY assignor_canon"))
+    except sqlite3.OperationalError:
+        prior_sales = {}
 
     print(f"  Processing {len(cfn_groups)} unique CFNs...")
 
@@ -1677,6 +1729,11 @@ def build_normalized_tables():
                 new_a = prefer_document_party(dominant_assignor, ext.get('assignor_name'), broad=False)
                 new_b = prefer_document_party(dominant_grantee, ext.get('assignee_name'), broad=False)
             dominant_assignor, dominant_grantee = new_a, new_b
+            new_a = prefer_document_seller(dominant_assignor, ext.get('assignor_name'),
+                                           prior_types.get(canonicalize(dominant_assignor or '')),
+                                           prior_sales)
+            if canonicalize(new_a) != canonicalize(dominant_grantee):
+                dominant_assignor = new_a
 
         assignor_canon = canonicalize(dominant_assignor)
         assignee_canon = canonicalize(dominant_grantee)

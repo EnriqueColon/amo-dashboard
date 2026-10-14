@@ -19,6 +19,13 @@ Read this at the start of a session before re-deriving context. Most recent entr
 - **Tests:** `tests/check_party_preference.py` adds 9 listed-party cases.
 - **Deploy:** pushed and pulled on the droplet; no rebuild needed (Python only). It takes effect at the nightly normalize (`30 8 * * *` UTC, Thu 15 Oct 4:30 AM ET), which restarts PM2 to clear the cache. **Check after:** 2026400005 should read FREDDIE MAC → CITIBANK.
 - Simulation lesson: joining `entity_classifications` on `UPPER(name)` in SQL never finished (no index use). Load it into a dict instead.
+- **Miami-Dade follow-up, same day.** Owner flagged 2026R695675, which read `SUITE HOMES RENOVATION LLC` → ICE LENDER HOLDINGS (ORIGINATION) while the document's assignor is Debt Closing Services. The clerk indexed the borrower as the only grantor, so there's no list to pick from, and `prefer_document_party` doesn't fire on a company.
+  - **Fix:** new `prefer_document_seller`, assignor side only, running after `prefer_document_party`. It uses the document's seller when the index's seller is typed OTHER (canonical lookup in `prior_types`).
+  - **Held back when:** either name looks like a person; the document's seller is MERS; the index name contains TRUST; the two are spelling variants (squashed containment or difflib ≥0.75); or the index name has ≥3 sales in the previous run's `aom_events_clean` (`prior_sales`) and more than the document's name. The sales guard exists because 2025R667227 would have swapped GENEVA CAPITAL GROUP for borrower NEHIR RESIDENCES. A self-transfer guard also applies.
+  - **Owner chose the broad scope** (~2,200 rows, including unknown-vs-unknown) over recognised-lenders-only (~1,700, which would not have fixed 2026R695675).
+  - **Combined simulation of both rules:** Miami-Dade 1,907 rows, Hillsborough 882, Broward 9. ORIGINATION→MARKET_TRANSFER 1,212, INSTITUTIONAL_OUT→MARKET_TRANSFER 271, PRIVATE→INSTITUTIONAL_OUT 228. The sample is borrower LLCs replaced by Velocity, Alto, RBI, Bank OZK, Walker & Dunlop.
+  - **Tests:** `check_party_preference.py` has 10 seller cases. Applies at the same 15 Oct nightly. **Check after:** 2026R695675 should read DEBT CLOSING SERVICES → ICE LENDER HOLDINGS.
+  - **Expect top-seller rankings to move** for private lenders such as Velocity and Alto Capital.
 
 ## 2026-10-13 (afternoon) — Hillsborough DEPLOYED and collecting; document backlog reading
 
