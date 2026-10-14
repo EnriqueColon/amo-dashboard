@@ -20,13 +20,22 @@
 # The whole collection takes about 90 seconds. There was never a cost reason for
 # it to be weekly.
 #
-# ── What it does NOT do ──────────────────────────────────────────────────────
-# Index only. Extraction, normalize and enrich_entities stay in run_weekly.sh
-# and the nightly normalize, so this job cannot compete with them for CPU or
-# OpenAI budget. Miami-Dade AMO rows reach aom_events_clean without being read
-# (normalize admits doc_category NULL for that one specific type), so a daily
-# index pull plus the nightly normalize is enough for a new assignment to appear
-# in the tool the next morning.
+# ── Index, then a bounded read ───────────────────────────────────────────────
+# Collection alone is not enough for every document type:
+#
+#   AMO (assignment of mortgage) reaches aom_events_clean without being read —
+#       normalize admits doc_category NULL for that one specific type — so a
+#       daily index pull plus the nightly normalize puts it in the tool.
+#   ASG (the county's GENERIC assignment bucket) does not. It must be read
+#       before it can be classified, and only ~1 in 20 turns out to be a loan
+#       transfer (Jan 2023: 212 rents/leases, 53 other, 39 collateral, 17 loan
+#       transfers). While extraction ran only in the Friday job, a generic
+#       assignment recorded on Monday could not appear in Reporting until
+#       Friday.
+#
+# So this job also reads, but gently: single worker and a small daily budget,
+# sized for the ~190 Miami-Dade documents a business day rather than for a
+# backlog. normalize and enrich stay in run_weekly.sh and the nightly job.
 #
 # ── The lookback window ──────────────────────────────────────────────────────
 # LOOKBACK_DAYS of history every run, not just yesterday. The county keeps
@@ -81,6 +90,24 @@ collect_status=$?
 if [ $collect_status -ne 0 ]; then
     echo "collect_live.py FAILED (exit $collect_status)"
     status=1
+fi
+
+# Read what was just collected. Scoped to MIAMI-DADE so it can never eat
+# another county's budget, and --workers 1 (the default) so it stays polite
+# while a backlog run holds the other cores. A day's worth is ~190 documents;
+# the cap clears a long weekend in one pass.
+if pgrep -f "[e]xtract_pdfs.py --county MIAMI-DADE" >/dev/null; then
+    echo "a Miami-Dade extraction is already running — skipping extraction"
+elif [ -z "${OPENAI_API_KEY:-}" ]; then
+    echo "OPENAI_API_KEY not set — skipping extraction"
+else
+    "$VENV/bin/python3" -u extract_pdfs.py --county MIAMI-DADE \
+        --limit "${EXTRACT_LIMIT:-400}" --budget "${EXTRACT_BUDGET:-2.00}"
+    extract_status=$?
+    if [ $extract_status -ne 0 ]; then
+        echo "extract_pdfs.py FAILED (exit $extract_status)"
+        status=1
+    fi
 fi
 
 # Completeness check: ask the county what it holds per day and compare. Exits
