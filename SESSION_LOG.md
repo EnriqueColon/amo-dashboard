@@ -4,6 +4,22 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-10-14 — Hillsborough wrong-party fix (`8627f1a`), applies at the 15 Oct nightly
+
+- **Owner's report:** Reporting row 2026400005 showed assignor `BMF V FL GRAND PAVILION` (the borrower) while the expanded PDF parties said Freddie Mac. Typed ORIGINATION, should be a GSE sale.
+- **Cause:** Hillsborough's search API returns each side's parties **alphabetically**, and the collector keeps the first as `grantor`/`grantee`, so the full lists exist only in `raw_json.grantors`/`grantees`. `prefer_document_party` didn't catch it because it swaps only when the index name looks like a *person*, and the borrower here is an LLC.
+- **Fix:** new `pick_listed_party` in `normalize.py`, run before `prefer_document_party` and only when `raw_json` has a list of ≥2 names on that side. It takes the listed name whose canonical form equals the document's party, keeping the index spelling.
+  - It applies only where the index's pick has type OTHER (looked up by **canonical** name in the previous run's `entity_classifications`; the raw-name join in the rows query misses most spellings) or carries an attorney-in-fact marker (`ATTY`/`ATT`/`AIF`).
+  - It never picks MERS, never replaces a name containing TRUST, and never creates a self-transfer.
+  - Each exclusion is grounded in a measurement:
+    - MERS: an unguarded version moved ~1,900 rows to MERS_RELEASE, while Miami-Dade shows the lender on 8,865 of 16,091 MERS-signed docs.
+    - Trusts: the unguarded version swapped trusts for their trustees (RMAC, CSMC, CIM).
+    - Onity: it merged Onity into PHH.
+- **Read-only simulation on production:** 839 of 12,804 Hillsborough rows and 5 Broward rows change; Miami-Dade has no party lists, so 0 change there. Main deal-type shifts: INSTITUTIONAL_OUT→MARKET_TRANSFER 271, PRIVATE→ORIGINATION 153, ORIGINATION→MARKET_TRANSFER 127. The changes are mostly borrower LLCs replaced by the real lender, and servicers signing as attorney-in-fact replaced by their principal.
+- **Tests:** `tests/check_party_preference.py` adds 9 listed-party cases.
+- **Deploy:** pushed and pulled on the droplet; no rebuild needed (Python only). It takes effect at the nightly normalize (`30 8 * * *` UTC, Thu 15 Oct 4:30 AM ET), which restarts PM2 to clear the cache. **Check after:** 2026400005 should read FREDDIE MAC → CITIBANK.
+- Simulation lesson: joining `entity_classifications` on `UPPER(name)` in SQL never finished (no index use). Load it into a dict instead.
+
 ## 2026-10-13 (afternoon) — Hillsborough DEPLOYED and collecting; document backlog reading
 
 Owner: "get started on the back end … make sure we run the fix going forward." Merged `feat/hillsborough` → `main` (ff), pushed.
