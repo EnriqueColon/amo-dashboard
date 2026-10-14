@@ -8,6 +8,7 @@ AMO Normalization Pipeline
    manual overrides → FDIC match → suffix signals → behavioral → regex → default
 """
 import sqlite3
+import json
 import re
 import os
 import time
@@ -599,6 +600,48 @@ def prefer_document_party(index_name: str | None, pdf_name: str | None,
     if broad and _looks_like_person(idx) and not _looks_like_person(pdf):
         return pdf
     return index_name
+
+
+_ATTORNEY_IN_FACT_RE = re.compile(r'\bATTY\b|\bATT\s*$|ATTORNEY[\s-]+IN[\s-]+FACT|\bAIF\b')
+
+
+def pick_listed_party(index_name: str | None, listed: list | None,
+                      pdf_name: str | None, index_type: str | None = 'OTHER') -> str | None:
+    """Of the names the index lists on one side, return the one the document names.
+
+    Hillsborough's search API returns each side's parties in alphabetical order,
+    and the collector keeps the first, so a borrower that sorts early takes the
+    Assignor column: "BMF V FL GRAND PAVILION LLC" over "FEDERAL HOME LOAN
+    MORTGAGE CORPORATION" on 2026400005, which then read as an ORIGINATION. 2,684
+    assignors and 1,747 assignees across 12,804 Hillsborough rows (14 Oct 2026).
+    prefer_document_party cannot catch these: the borrower is a company, not a
+    person. Only a name the index itself lists on the same side qualifies, and
+    the index's spelling is kept, so this decides WHICH party and never spelling.
+
+    MERS is never the answer here. "MERS, as nominee for Caliber" with Caliber
+    also listed would move 1,900 rows to MERS_RELEASE, while Miami-Dade, whose
+    index usually lists only the lender, shows the lender on 8,865 of its 16,091
+    MERS-signed documents. Keeping the lender keeps the counties comparable.
+
+    And only an index pick typed OTHER (index_type, the name's stored
+    classification: the borrower LLC) or one signing as attorney-in-fact is
+    replaced. Where it already names a
+    recognised institution the index keeps the row, as in prefer_document_party:
+    the unrestricted rule turned RMAC TRUST into its trustee US BANK and merged
+    ONITY into PHH, the same regressions that rule was narrowed against. A name
+    carrying TRUST is held back even when untyped (CSMC 2021 JR2 TRUST had no
+    type yet and would have become its trustee).
+    """
+    if not listed or not pdf_name or len(listed) < 2:
+        return index_name
+    target = canonicalize(sanitize_ocr_field(pdf_name) or '')
+    current = canonicalize(index_name or '')
+    if not target or current == target or classify_canonical(target) == 'MERS':
+        return index_name
+    if not _ATTORNEY_IN_FACT_RE.search(index_name or '') and (
+            (index_type or 'OTHER') != 'OTHER' or re.search(r'\bTRUST\b', current)):
+        return index_name
+    return next((n for n in listed if n and canonicalize(n) == target), index_name)
 
 
 # ── Property address: reject what is not an address ──────────────────────────
@@ -1481,7 +1524,8 @@ def build_normalized_tables():
                -- Appended at the END on purpose: the rows below are unpacked by
                -- positional index (entries[0][8] etc.), so inserting a column
                -- anywhere earlier would silently shift every one of them.
-               COALESCE(a.county, 'MIAMI-DADE') AS county
+               COALESCE(a.county, 'MIAMI-DADE') AS county,
+               a.raw_json
         FROM assignments a
         LEFT JOIN entity_classifications ec_g ON UPPER(a.grantor)=UPPER(ec_g.name)
         LEFT JOIN entity_classifications ec_a ON UPPER(a.grantee)=UPPER(ec_a.name)
@@ -1500,6 +1544,11 @@ def build_normalized_tables():
     doc_texts = document_direction.load_texts(conn)
     print(f"  Stored document texts for the direction check: {len(doc_texts)}")
     direction_rows = []
+
+    # Keyed by canonical name and written at the end of each run, so this is the
+    # previous run's answer. pick_listed_party needs it because the raw-name
+    # join above misses for most index spellings.
+    prior_types = dict(conn.execute("SELECT name, category FROM entity_classifications"))
 
     print(f"  Processing {len(cfn_groups)} unique CFNs...")
 
@@ -1602,6 +1651,19 @@ def build_normalized_tables():
             if swap:
                 dominant_assignor, dominant_grantee = dominant_grantee, dominant_assignor
                 assignor_type, grantee_type = grantee_type, assignor_type
+
+        if ext and entries[0][14]:
+            try:
+                listed = json.loads(entries[0][14])
+            except (ValueError, TypeError):
+                listed = {}
+            if isinstance(listed, dict):
+                new_a = pick_listed_party(dominant_assignor, listed.get('grantors'), ext.get('assignor_name'),
+                                          prior_types.get(canonicalize(dominant_assignor or '')))
+                new_b = pick_listed_party(dominant_grantee, listed.get('grantees'), ext.get('assignee_name'),
+                                          prior_types.get(canonicalize(dominant_grantee or '')))
+                if canonicalize(new_a) != canonicalize(new_b):
+                    dominant_assignor, dominant_grantee = new_a, new_b
 
         # The document names the assignor and assignee explicitly; the index
         # only lists everyone who appears on the filing. Prefer the document.

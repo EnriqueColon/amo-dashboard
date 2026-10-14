@@ -28,7 +28,56 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 
-from normalize import prefer_document_party, clean_property_address  # noqa: E402
+from normalize import prefer_document_party, pick_listed_party, clean_property_address  # noqa: E402
+
+# (index_name, names listed on that side, pdf_name, expected, why). Hillsborough
+# lists each side alphabetically, so the first name is not the seller.
+LISTED_CASES = [
+    ('BMF V FL GRAND PAVILION LLC',
+     ['BMF V FL GRAND PAVILION LLC', 'FEDERAL HOME LOAN MORTGAGE CORPORATION'],
+     'FEDERAL HOME LOAN MORTGAGE CORPORATION', 'FEDERAL HOME LOAN MORTGAGE CORPORATION',
+     '2026400005: the borrower sorted first and the row read as an ORIGINATION'),
+    ('CALIBER HOME LOANS INC',
+     ['CALIBER HOME LOANS INC', 'MORTGAGE ELECTRONIC REGISTRATION SYSTEMS'],
+     'MORTGAGE ELECTRONIC REGISTRATION SYSTEMS, INC., AS NOMINEE FOR CALIBER HOME LOANS',
+     'CALIBER HOME LOANS INC',
+     'MERS signing as nominee does not displace the lender — Miami-Dade shows the '
+     'lender on most such filings'),
+    ('FAY SERVICING LLC ATTY',
+     ['FAY SERVICING LLC ATTY', 'NATIONAL LOAN FUNDING LLC'],
+     'NATIONAL LOAN FUNDING, LLC', 'NATIONAL LOAN FUNDING LLC',
+     'a servicer signing as attorney-in-fact gives way to its principal, in the '
+     "index's spelling"),
+    ('RMAC TRUST, SERIES 2016-CTT',
+     ['RMAC TRUST, SERIES 2016-CTT', 'U S BANK NATIONAL ASSOCIATION TRU'],
+     'U.S. BANK NATIONAL ASSOCIATION, AS TRUSTEE', 'RMAC TRUST, SERIES 2016-CTT',
+     'a recognised trust is not swapped for its trustee'),
+    ('BMF V FL GRAND PAVILION LLC',
+     ['BMF V FL GRAND PAVILION LLC', 'FEDERAL HOME LOAN MORTGAGE CORPORATION'],
+     'WELLS FARGO BANK, N.A.', 'BMF V FL GRAND PAVILION LLC',
+     'a document party the index does not list on this side is not trusted here'),
+    ('WELLS FARGO BANK', ['WELLS FARGO BANK'], 'US BANK', 'WELLS FARGO BANK',
+     'a single listed party leaves nothing to choose between'),
+    ('WELLS FARGO BANK', None, 'US BANK', 'WELLS FARGO BANK',
+     'Miami-Dade rows carry no party list'),
+    ('CSMC 2021 JR2 TRUST',
+     ['CSMC 2021 JR2 TRUST', 'WILMINGTON SAVINGS FUND SOCIETY FSB TRU'],
+     'WILMINGTON SAVINGS FUND SOCIETY, FSB, AS TRUSTEE', 'CSMC 2021 JR2 TRUST',
+     'an untyped trust is still not swapped for its trustee'),
+    ('ONITY MORTGAGE CORPORATION',
+     ['ONITY MORTGAGE CORPORATION', 'PHH MORTGAGE CORPORATION'],
+     'PHH MORTGAGE CORPORATION', 'ONITY MORTGAGE CORPORATION',
+     'a recognised servicer keeps the row; swapping merges Onity into its former name'),
+]
+
+# The stored classification of each index pick; anything absent is OTHER.
+INDEX_TYPES = {
+    'CALIBER HOME LOANS INC': 'BANK',
+    'FAY SERVICING LLC ATTY': 'SERVICER',
+    'RMAC TRUST, SERIES 2016-CTT': 'TRUST',
+    'WELLS FARGO BANK': 'BANK',
+    'ONITY MORTGAGE CORPORATION': 'SERVICER',
+}
 
 # (index_name, pdf_name, expected, why) — names verbatim from production.
 PARTY_CASES = [
@@ -168,6 +217,12 @@ def main() -> int:
             failures.append(f'party: index={idx!r} pdf={pdf!r}\n'
                             f'      expected {expected!r}, got {got!r} — {why}')
 
+    for idx, listed, pdf, expected, why in LISTED_CASES:
+        got = pick_listed_party(idx, listed, pdf, INDEX_TYPES.get(idx, 'OTHER'))
+        if got != expected:
+            failures.append(f'listed party: index={idx!r} pdf={pdf!r}\n'
+                            f'      expected {expected!r}, got {got!r} — {why}')
+
     for value, expected, why in PROPERTY_CASES:
         got = clean_property_address(value)
         if got != expected:
@@ -182,7 +237,8 @@ def main() -> int:
             if prefer_document_party(idx, pdf) in (None, ''):
                 failures.append(f'party rule blanked a party: index={idx!r} pdf={pdf!r}')
 
-    print(f'  · {len(PARTY_CASES)} party choices and {len(PROPERTY_CASES)} property '
+    print(f'  · {len(PARTY_CASES)} party choices, {len(LISTED_CASES)} listed-party '
+          f'choices and {len(PROPERTY_CASES)} property '
           f'values checked, plus a never-blank assertion')
     print('  · offline: no database, no network, no API key')
     if failures:
