@@ -3,6 +3,7 @@ Database helpers for the AMO collector.
 """
 import sqlite3
 import os
+from datetime import date, datetime, timedelta
 
 DB_PATH = os.environ.get('AMO_DB_PATH', '/opt/amo-dashboard/miami_dade_amo.db')
 
@@ -55,7 +56,18 @@ def init_db():
     conn.close()
 
 
-def insert_records(records: list) -> int:
+def insert_records(records: list, county: str = 'MIAMI-DADE') -> int:
+    """Insert Miami-Dade index rows.
+
+    `county` is written explicitly. It used to be left NULL and repaired later
+    by server/db.ts and migrate_add_county.py, which both backfill NULL →
+    MIAMI-DADE. That repair works, but only on the next server start: until
+    then every freshly collected row is county-less, and anything that filters
+    `assignments` by county silently omits the newest documents. Writing the
+    value here means the row is correct the moment it lands. The downstream
+    backfills stay where they are — they still cover rows written by an older
+    collector build.
+    """
     if not records:
         return 0
     conn = get_conn()
@@ -65,12 +77,29 @@ def insert_records(records: list) -> int:
             conn.execute("""
                 INSERT OR IGNORE INTO assignments
                     (cfn, raw_cfn, rec_date, doc_type, grantor, grantee,
+                     address, legal_desc, rec_book, rec_page, misc_ref, county)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+            """, (
+                r.get('cfn'), r.get('raw_cfn'), r.get('rec_date'), r.get('doc_type'),
+                r.get('grantor'), r.get('grantee'), r.get('address'),
+                r.get('legal_desc'), r.get('rec_book'), r.get('rec_page'),
+                r.get('misc_ref'), county,
+            ))
+            if conn.execute('SELECT changes()').fetchone()[0]:
+                inserted += 1
+        except sqlite3.OperationalError:
+            # Database predates the county column (an old copy) — fall back
+            # rather than failing the collection run.
+            conn.execute("""
+                INSERT OR IGNORE INTO assignments
+                    (cfn, raw_cfn, rec_date, doc_type, grantor, grantee,
                      address, legal_desc, rec_book, rec_page, misc_ref)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 r.get('cfn'), r.get('raw_cfn'), r.get('rec_date'), r.get('doc_type'),
                 r.get('grantor'), r.get('grantee'), r.get('address'),
-                r.get('legal_desc'), r.get('rec_book'), r.get('rec_page'), r.get('misc_ref'),
+                r.get('legal_desc'), r.get('rec_book'), r.get('rec_page'),
+                r.get('misc_ref'),
             ))
             if conn.execute('SELECT changes()').fetchone()[0]:
                 inserted += 1
@@ -108,7 +137,33 @@ def log_collection(date_from: str, date_to: str, records_found: int,
     conn.close()
 
 
-def already_collected(date_from: str, date_to: str, doc_type: str) -> bool:
+# A window whose end date falls inside this many days of today is always
+# re-collected, even if a previous run logged it OK.
+#
+# The county does not finish publishing a recording day on that day: documents
+# are added to an already-published date for some days afterwards, and a window
+# collected once was then never looked at again. A weekly run with a 10-day
+# lookback hid this, because its chunk boundaries shifted each week and rarely
+# repeated. On a daily schedule the boundaries repeat constantly, so without
+# this horizon the second run of a window would skip it and every late-posted
+# document inside it would be missed permanently.
+#
+# Re-collecting is cheap (INSERT OR IGNORE, and the whole Miami-Dade window
+# takes about 90 seconds) and cannot duplicate a row.
+RECHECK_DAYS = int(os.environ.get('AMO_RECHECK_DAYS', '14'))
+
+
+def already_collected(date_from: str, date_to: str, doc_type: str,
+                      recheck_days: int | None = None) -> bool:
+    horizon = RECHECK_DAYS if recheck_days is None else recheck_days
+    if horizon > 0:
+        try:
+            end = datetime.strptime(date_to, '%Y-%m-%d').date()
+        except (TypeError, ValueError):
+            end = None
+        if end and end >= date.today() - timedelta(days=horizon):
+            return False
+
     conn = get_conn()
     row = conn.execute("""
         SELECT 1 FROM collection_log
