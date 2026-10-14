@@ -71,11 +71,16 @@ if ! flock -n 9; then
     exit 0
 fi
 
-# The weekly run collects the same window with the same credentials. Two
+# The weekly run collects the same window with the same credentials, and a
+# historical reconciliation sweep drives the same portal for hours. Two
 # Playwright sessions against one clerk login is a good way to get the account
-# rate-limited, so defer rather than race it.
+# rate-limited, so defer rather than race either of them.
 if pgrep -f "[c]ollect_live.py" >/dev/null; then
     echo "=== miami-dade daily SKIPPED $(date -u +%FT%TZ): collect_live.py already running ==="
+    exit 0
+fi
+if pgrep -f "[r]econcile_counties.py.*MIAMI-DADE" >/dev/null; then
+    echo "=== miami-dade daily SKIPPED $(date -u +%FT%TZ): a reconciliation sweep is driving the portal ==="
     exit 0
 fi
 
