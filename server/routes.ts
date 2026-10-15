@@ -1730,14 +1730,21 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   });
 
   // ─── POST /api/aliases/suggestions/dismiss ────────────────────────────────
+  // Body: { key: string } or { keys: string[] } — the Duplicate Manager's
+  // "Not duplicates" works on a checked set, so one request covers them all.
   app.post('/api/aliases/suggestions/dismiss', (req, res) => {
-    const { key } = req.body as { key?: string };
-    if (!key) return res.status(400).json({ error: 'key is required' });
-    db.prepare(`
+    const body = req.body as { key?: string; keys?: string[] };
+    const keys = (body.keys ?? (body.key ? [body.key] : []))
+      .map(k => String(k).trim()).filter(Boolean);
+    if (keys.length === 0) return res.status(400).json({ error: 'key or keys is required' });
+    if (keys.length > 500) return res.status(400).json({ error: 'Too many keys in one request (max 500)' });
+    const now = new Date().toISOString();
+    const ins = db.prepare(`
       INSERT INTO alias_suggestion_dismissals (cluster_key, dismissed_at) VALUES (?, ?)
       ON CONFLICT(cluster_key) DO NOTHING
-    `).run(key, new Date().toISOString());
-    res.json({ ok: true });
+    `);
+    db.transaction(() => { for (const k of keys) ins.run(k, now); })();
+    res.json({ ok: true, dismissed: keys.length });
   });
 
   // ─── GET /api/reporting/entity-report ─────────────────────────────────────

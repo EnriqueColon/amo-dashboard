@@ -542,7 +542,13 @@ def chat_completion_body(ocr_text: str, system_prompt: str) -> dict:
     """The request body shape shared by the real-time and Batch API paths."""
     return {
         'model': OPENAI_MODEL,
-        'max_tokens': 1024,
+        # 4096, not 1024: a multi-parcel commercial assignment lists dozens of
+        # folio numbers (Hillsborough 2026152506, 31 parcels, $7.5M) and the
+        # model was cut off mid-list at 1,024 tokens, which parsed as an
+        # "Unterminated string" LLM_ERROR — 7% of a Hillsborough re-read on
+        # 15 Oct 2026, and precisely the CRE documents the product is for.
+        # Output on nano is cheap; a truncated answer is not.
+        'max_tokens': 4096,
         'temperature': 0,
         'response_format': {'type': 'json_object'},
         'messages': [
@@ -947,17 +953,31 @@ def _openai_post(body: dict) -> dict:
         f'OpenAI still failing after {_TRANSIENT_RETRIES} retries: {last}')
 
 
+def _completion_text(body: dict) -> str:
+    """The model's answer, or a clear error if it was cut off.
+
+    A truncated JSON object fails to parse with "Unterminated string at
+    char N", which says nothing about why. finish_reason does: 'length' means
+    the output cap, and the note should say so.
+    """
+    choice = body['choices'][0]
+    if choice.get('finish_reason') == 'length':
+        used = (body.get('usage') or {}).get('completion_tokens')
+        raise ValueError(f'model output truncated at the max_tokens cap ({used} tokens)')
+    return choice['message']['content']
+
+
 def llm_extract(ocr_text: str) -> dict | None:
     body = _openai_post(chat_completion_body(ocr_text, SYSTEM_PROMPT))
     _track_spend(body.get('usage', {}))
-    data = json.loads(body['choices'][0]['message']['content'])
+    data = json.loads(_completion_text(body))
     return postprocess_extraction(data)
 
 
 def llm_extract_facility(ocr_text: str) -> dict | None:
     body = _openai_post(chat_completion_body(ocr_text, FACILITY_SYSTEM_PROMPT))
     _track_spend(body.get('usage', {}))
-    data = json.loads(body['choices'][0]['message']['content'])
+    data = json.loads(_completion_text(body))
     return postprocess_facility(data)
 
 

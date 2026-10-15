@@ -62,10 +62,46 @@ export default function DuplicateManager() {
   });
 
   const dismissMutation = useMutation({
-    mutationFn: (key: string) =>
-      apiRequest('POST', '/api/aliases/suggestions/dismiss', { key }).then(r => r.json()),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['/api/aliases/suggestions'] }),
+    mutationFn: (keys: string[]) =>
+      apiRequest('POST', '/api/aliases/suggestions/dismiss', { keys }).then(r => {
+        if (!r.ok) throw new Error('Dismiss failed');
+        return r.json();
+      }),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['/api/aliases/suggestions'] });
+      if ((data?.dismissed ?? 1) > 1) {
+        toast({ title: 'Marked as not duplicates', description: `${data.dismissed} suggestions dismissed.` });
+      }
+    },
+    onError: () => toast({ title: 'Dismiss failed', description: 'Could not dismiss — check the server logs.', variant: 'destructive' }),
   });
+
+  // Merges are one transaction each on the server (alias rules + cascade into
+  // the analytics tables + aggregate rebuild), so a bulk merge is a sequence of
+  // them. One failure does not stop the rest; the summary says what happened.
+  const mergeMany = async (items: { canonical: string; variants: string[] }[]) => {
+    let done = 0;
+    const failed: string[] = [];
+    for (const it of items) {
+      try {
+        await apiRequest('POST', '/api/aliases/merge', it).then(r => {
+          if (!r.ok) throw new Error('Merge failed');
+          return r.json();
+        });
+        done++;
+      } catch {
+        failed.push(it.canonical);
+      }
+    }
+    invalidateAll();
+    toast({
+      title: failed.length ? 'Bulk merge finished with errors' : 'Bulk merge complete',
+      description: failed.length
+        ? `${done} merged, ${failed.length} failed: ${failed.slice(0, 3).join(', ')}${failed.length > 3 ? '…' : ''}`
+        : `${done} cluster${done === 1 ? '' : 's'} merged.`,
+      variant: failed.length ? 'destructive' : undefined,
+    });
+  };
 
   const unmergeMutation = useMutation({
     mutationFn: (variant: string) =>
@@ -155,7 +191,8 @@ export default function DuplicateManager() {
               loading={suggLoading}
               busy={busy}
               onMerge={(canonical, variants) => mergeMutation.mutate({ canonical, variants })}
-              onDismiss={key => dismissMutation.mutate(key)}
+              onMergeMany={mergeMany}
+              onDismiss={keys => dismissMutation.mutate(keys)}
             />
           )}
           {view === 'merged' && (
@@ -172,14 +209,65 @@ export default function DuplicateManager() {
 
 // ─── Suggestions queue ────────────────────────────────────────────────────────
 
-function SuggestionList({ suggestions, loading, busy, onMerge, onDismiss }: {
+function SuggestionList({ suggestions, loading, busy, onMerge, onMergeMany, onDismiss }: {
   suggestions: Suggestion[];
   loading: boolean;
   busy: boolean;
   onMerge: (canonical: string, variants: string[]) => void;
-  onDismiss: (key: string) => void;
+  onMergeMany: (items: { canonical: string; variants: string[] }[]) => Promise<void>;
+  onDismiss: (keys: string[]) => void;
 }) {
   const [picks, setPicks] = useState<Record<string, string>>({});
+  // Bulk selection. Checked keys survive a filter change so a reviewer can
+  // search, tick a few, search again, tick more, then act once.
+  const [checked, setChecked] = useState<Record<string, boolean>>({});
+  const [filter, setFilter] = useState('');
+  const [confirmMerge, setConfirmMerge] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
+
+  const visible = useMemo(() => {
+    const q = filter.trim().toUpperCase();
+    if (!q) return suggestions;
+    return suggestions.filter(s => s.entities.some(e => e.entity.includes(q)));
+  }, [suggestions, filter]);
+
+  const visibleKeys = visible.map(s => s.key);
+  const checkedVisible = visibleKeys.filter(k => checked[k]);
+  const allVisibleChecked = visibleKeys.length > 0 && checkedVisible.length === visibleKeys.length;
+  const checkedCount = Object.values(checked).filter(Boolean).length;
+
+  const toggleAllVisible = () =>
+    setChecked(c => {
+      const next = { ...c };
+      for (const k of visibleKeys) next[k] = !allVisibleChecked;
+      return next;
+    });
+  const clearChecked = () => { setChecked({}); setConfirmMerge(false); };
+
+  const checkedItems = () =>
+    suggestions
+      .filter(s => checked[s.key])
+      .map(s => {
+        const canonical = picks[s.key] || s.suggested_canonical;
+        return { key: s.key, canonical, variants: s.entities.map(e => e.entity).filter(e => e !== canonical) };
+      });
+
+  const runBulkMerge = async () => {
+    if (!confirmMerge) { setConfirmMerge(true); return; }
+    const items = checkedItems();
+    setBulkBusy(true);
+    try {
+      await onMergeMany(items.map(({ canonical, variants }) => ({ canonical, variants })));
+    } finally {
+      setBulkBusy(false);
+      clearChecked();
+    }
+  };
+  const runBulkDismiss = () => {
+    const keys = checkedItems().map(i => i.key);
+    onDismiss(keys);
+    clearChecked();
+  };
 
   if (loading) {
     return <div className="space-y-2">{Array(3).fill(0).map((_, i) => <Skeleton key={i} className="h-16 w-full" />)}</div>;
@@ -192,29 +280,107 @@ function SuggestionList({ suggestions, loading, busy, onMerge, onDismiss }: {
     );
   }
 
+  const anyBusy = busy || bulkBusy;
+
   return (
+    <div className="space-y-2">
+      {/* Bulk bar: filter, select-all, and the two actions on the checked set */}
+      <div className="flex flex-wrap items-center gap-2 rounded-md border border-border/70 bg-muted/20 px-3 py-2">
+        <label className="flex items-center gap-1.5 text-xs cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={allVisibleChecked}
+            onChange={toggleAllVisible}
+            disabled={anyBusy || visibleKeys.length === 0}
+            className="accent-[hsl(var(--primary))]"
+          />
+          Select all shown ({visible.length})
+        </label>
+        <div className="relative">
+          <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            placeholder="Filter by name…"
+            value={filter}
+            onChange={e => setFilter(e.target.value)}
+            className="h-7 w-52 text-xs pl-7"
+          />
+        </div>
+        {checkedCount > 0 && (
+          <div className="ml-auto flex items-center gap-1.5">
+            <span className="text-xs text-muted-foreground tabular-nums">{checkedCount} selected</span>
+            <button
+              onClick={runBulkMerge}
+              disabled={anyBusy}
+              className={`flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-medium border transition-colors disabled:opacity-50
+                ${confirmMerge
+                  ? 'bg-primary text-primary-foreground border-primary hover:bg-primary/90'
+                  : 'bg-primary/15 text-primary border-primary/30 hover:bg-primary/25'}`}
+            >
+              <Check size={10} />
+              {bulkBusy ? 'Merging…' : confirmMerge ? `Confirm: merge ${checkedCount}` : `Merge ${checkedCount} selected`}
+            </button>
+            <button
+              onClick={runBulkDismiss}
+              disabled={anyBusy}
+              className="flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-medium border border-border text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+            >
+              <X size={10} /> Not duplicates ({checkedCount})
+            </button>
+            <button
+              onClick={clearChecked}
+              disabled={anyBusy}
+              className="px-2 py-1 rounded text-[11px] text-muted-foreground hover:text-foreground"
+            >
+              Clear
+            </button>
+          </div>
+        )}
+      </div>
+      {confirmMerge && checkedCount > 0 && (
+        <p className="text-[11px] text-amber-600 px-1">
+          Each selected cluster merges into the name marked “keep this name”. Click Confirm to proceed, or Clear to cancel.
+        </p>
+      )}
+
     <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
-      {suggestions.map(s => {
+      {visible.length === 0 && (
+        <p className="text-xs text-muted-foreground py-4 text-center">No suggestions match “{filter}”.</p>
+      )}
+      {visible.map(s => {
         const canonical = picks[s.key] || s.suggested_canonical;
         const variants = s.entities.map(e => e.entity).filter(e => e !== canonical);
+        const isChecked = !!checked[s.key];
         return (
-          <div key={s.key} className="border border-border/70 rounded-md px-3 py-2.5 space-y-1.5">
+          <div
+            key={s.key}
+            className={`border rounded-md px-3 py-2.5 space-y-1.5 transition-colors ${
+              isChecked ? 'border-primary/50 bg-primary/5' : 'border-border/70'}`}
+          >
             <div className="flex items-center justify-between gap-2">
-              <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide
-                ${s.reason === 'variant' ? 'bg-emerald-600/15 text-emerald-600' : 'bg-amber-500/15 text-amber-600'}`}>
-                {s.reason === 'variant' ? 'Exact variant' : 'Possible truncation'}
-              </span>
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={isChecked}
+                  onChange={() => { setChecked(c => ({ ...c, [s.key]: !c[s.key] })); setConfirmMerge(false); }}
+                  disabled={anyBusy}
+                  className="accent-[hsl(var(--primary))]"
+                />
+                <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide
+                  ${s.reason === 'variant' ? 'bg-emerald-600/15 text-emerald-600' : 'bg-amber-500/15 text-amber-600'}`}>
+                  {s.reason === 'variant' ? 'Exact variant' : 'Possible truncation'}
+                </span>
+              </label>
               <div className="flex items-center gap-1.5">
                 <button
                   onClick={() => onMerge(canonical, variants)}
-                  disabled={busy}
+                  disabled={anyBusy}
                   className="flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium bg-primary/15 text-primary border border-primary/30 hover:bg-primary/25 transition-colors disabled:opacity-50"
                 >
                   <Check size={10} /> Merge
                 </button>
                 <button
-                  onClick={() => onDismiss(s.key)}
-                  disabled={busy}
+                  onClick={() => onDismiss([s.key])}
+                  disabled={anyBusy}
                   className="flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium border border-border text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
                 >
                   <X size={10} /> Not a duplicate
@@ -243,6 +409,7 @@ function SuggestionList({ suggestions, loading, busy, onMerge, onDismiss }: {
           </div>
         );
       })}
+    </div>
     </div>
   );
 }

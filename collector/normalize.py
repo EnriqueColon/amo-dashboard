@@ -1296,6 +1296,71 @@ def canonicalize(name: str) -> str:
     return _ALIAS_MAP.get(s, s)
 
 
+def apply_late_aliases(conn, since: str) -> int:
+    """Re-point canonical names for merges made while this run was in progress.
+
+    load_aliases() runs at the START of a rebuild. A merge recorded on the
+    Entities page after that moment is applied to the live tables by the
+    server, and then the rebuild — which never saw the rule — overwrites those
+    tables with the pre-merge names at its final commit. The rule survives in
+    entity_aliases, so the next night's run honours it, but for a whole day the
+    merge has silently come undone. On 15 Oct 2026 the owner merged 140
+    clusters between 09:34 and 10:41 UTC while the nightly run was building,
+    and every one of them reverted at 10:41.
+
+    This runs after both event tables are written and before the entity
+    tables are derived from them, so a late merge lands in every downstream
+    table exactly as if it had been loaded at the start. Chains are followed
+    (a variant whose canonical was itself merged later), types come from the
+    canonical's classification, and txn_type is re-derived — the same cascade
+    the server does, in the same order.
+
+    Returns the number of rows re-pointed.
+    """
+    rows = conn.execute(
+        "SELECT variant, canonical FROM entity_aliases "
+        "WHERE created_at > ? AND COALESCE(scope, 'all') = 'all'", (since,)).fetchall()
+    if not rows:
+        return 0
+    mapping = {str(v).upper(): str(c).upper() for v, c in rows}
+
+    def resolve(name: str) -> str:
+        seen = set()
+        while name in mapping and name not in seen:
+            seen.add(name)
+            name = mapping[name]
+        return name
+
+    mapping = {v: resolve(v) for v in mapping}
+    mapping = {v: c for v, c in mapping.items() if v != c}
+    if not mapping:
+        return 0
+
+    types = dict(conn.execute("SELECT name, category FROM entity_classifications"))
+    canons = tuple(sorted(set(mapping.values())))
+    ph = ','.join('?' * len(canons))
+    touched = 0
+    for table in ('aom_events_clean', 'aom_events_nonloan'):
+        for variant, canon in mapping.items():
+            ctype = types.get(canon)
+            for side in ('assignor', 'assignee'):
+                cur = conn.execute(
+                    f"UPDATE {table} SET {side}_canon = ?, "
+                    f"{side}_type = COALESCE(?, {side}_type) WHERE {side}_canon = ?",
+                    (canon, ctype, variant))
+                touched += cur.rowcount
+        for cfn, a, b, at, bt in conn.execute(
+                f"SELECT cfn, assignor_canon, assignee_canon, assignor_type, assignee_type "
+                f"FROM {table} WHERE assignor_canon IN ({ph}) OR assignee_canon IN ({ph})",
+                canons + canons).fetchall():
+            conn.execute(f"UPDATE {table} SET txn_type = ? WHERE cfn = ?",
+                         (get_txn_type(a, b, at, bt), cfn))
+    conn.commit()
+    print(f"  Late merges: {len(mapping)} rule(s) recorded after this run began, "
+          f"{touched} row(s) re-pointed")
+    return touched
+
+
 def build_normalized_tables():
     # timeout/busy_timeout rather than python's 5s default. This rebuild ends in
     # ONE large commit, and it has to take the write lock to do it. Any other
@@ -1308,6 +1373,10 @@ def build_normalized_tables():
     conn = sqlite3.connect(DB, timeout=300)
     conn.execute('PRAGMA journal_mode=WAL')
     conn.execute('PRAGMA busy_timeout=300000')
+    # When this run began, in the same ISO-UTC shape the server writes to
+    # entity_aliases.created_at, so a plain string comparison finds the merges
+    # made after load_aliases() below took its snapshot.
+    run_started = time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime())
 
     # ── Step 0a: Load user-managed merges so canonicalize() honors them ─────
     n_aliases = load_aliases(conn)
@@ -1810,6 +1879,12 @@ def build_normalized_tables():
                 WHERE cfn = ?
             """, [(c, rb, ra, cfn) for cfn, c, rb, ra in review_rows])
     conn.commit()
+
+    # ── Merges recorded while this run was building ──────────────────────────
+    # Both event tables are written; the entity tables below are derived from
+    # them. Re-pointing here means a merge made during the run reaches every
+    # downstream table, instead of reverting until tomorrow night.
+    apply_late_aliases(conn, run_started)
 
     # Every direction decision that changed a row or needs a human look. Rebuilt
     # each run, like the tables it explains; the Needs-review list is
