@@ -232,14 +232,22 @@ async def reconcile_miami_dade(days_list: list[date], quiet: bool,
 
                     if status == 'CAPPED':
                         # The portal returned its 500-row ceiling, so its own
-                        # answer is incomplete. We cannot know the true count,
-                        # and must not report OK just because we also hold a
-                        # lot. Flagged for the day-splitting repair.
-                        record('MIAMI-DADE', day, doc_type, None, ours, UNKNOWN,
-                               'portal hit the 500-row cap — true count unknown')
-                        findings.append(('MIAMI-DADE', day, doc_type, UNKNOWN,
-                                         'portal capped at 500 rows'))
-                        continue
+                        # answer is incomplete. Ask again the way the collector
+                        # now does — partitioned by first-party name prefix —
+                        # which yields the true document count unless some
+                        # partition is itself still over the cap.
+                        parts, unresolved = await cl.collect_day_partitioned(
+                            state['page'], doc_type, day)
+                        state['searches'] += len(cl.PARTITION_CHARS) + len(cl.PARTITION_PUNCT)
+                        if unresolved:
+                            record('MIAMI-DADE', day, doc_type, None, ours, UNKNOWN,
+                                   f'portal hit the 500-row cap; {unresolved} name '
+                                   'partition(s) still over it — true count unknown')
+                            findings.append(('MIAMI-DADE', day, doc_type, UNKNOWN,
+                                             'portal capped even after name partitioning'))
+                            continue
+                        records = parts
+                        status = 'OK'
                     if status == 'ERROR':
                         record('MIAMI-DADE', day, doc_type, None, ours, UNKNOWN,
                                'search error')

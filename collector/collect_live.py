@@ -127,10 +127,17 @@ async def go_to_search(page: Page):
     await asyncio.sleep(0.3)
 
 
-async def do_search(page: Page, doc_type: str, df: date, dt: date) -> tuple[list, str]:
+async def do_search(page: Page, doc_type: str, df: date, dt: date,
+                    name_prefix: str | None = None) -> tuple[list, str]:
     """
     Run one UI search for doc_type in [df, dt].
     Returns (records, status) where status is 'OK' | 'CAPPED' | 'EMPTY' | 'ERROR'.
+
+    `name_prefix` narrows the search to records whose FIRST-named party starts
+    with it (verified 15 Oct 2026: company mode's one field matches as a prefix
+    of the first party, people included, and 'B' on a capped day returned 15
+    rows, all first-party B, all inside the unfiltered result). That is what
+    lets collect_day_partitioned() get past the 500-row cap on a single day.
 
     The portal searches in TWO steps, and knowing that is the whole point of
     this function's shape:
@@ -168,6 +175,9 @@ async def do_search(page: Page, doc_type: str, df: date, dt: date) -> tuple[list
         await page.select_option("select#documentType", value=doc_type)
         await page.fill("input#dateRangeFrom", ymd(df))
         await page.fill("input#dateRangeTo",   ymd(dt))
+        if name_prefix:
+            await page.click("#companySearchRadio")
+            await page.fill("input#companyName", name_prefix)
 
         page.on("response", handler)
         await page.click("button[type='submit'].button-green")
@@ -188,7 +198,8 @@ async def do_search(page: Page, doc_type: str, df: date, dt: date) -> tuple[list
         models  = state["records"].get("recordingModels", [])
         count   = len(models)
         status  = "CAPPED" if count >= 499 else "OK"
-        log.info(f"  [{status}] {doc_type[:24]} {iso(df)}–{iso(dt)}: {count} rows")
+        tag     = f" [{name_prefix}…]" if name_prefix else ""
+        log.info(f"  [{status}] {doc_type[:24]} {iso(df)}–{iso(dt)}{tag}: {count} rows")
         return parse_models(models, doc_type), status
 
     except Exception as e:
@@ -199,6 +210,63 @@ async def do_search(page: Page, doc_type: str, df: date, dt: date) -> tuple[list
             page.remove_listener("response", handler)
         except Exception:
             pass
+
+
+# ── One day past the cap: partition by first-party name prefix ───────────────
+#
+# The portal returns at most 500 index rows (one per party, not per document),
+# reports no total and no page, and the collector cannot split a date range
+# below one day. So a busy day was stored truncated and logged CAPPED — 23 days
+# between 11 Jan 2023 and 3 Feb 2026, plus three more that only a fresh-session
+# re-check exposed. Nothing read that log.
+#
+# Every row has a first-named party, and the portal's name field is a prefix
+# filter on exactly that party. So the union over A–Z, 0–9 (and the few
+# punctuation marks a clerk's index puts first) covers every document of the
+# day, and any one partition that is itself over the cap recurses a letter
+# deeper, to three. A single first-party name with 500+ rows on one day is
+# not realistic (that would be 500 documents naming it first); a two-letter
+# bucket over the cap on a very busy day is. Documents are deduplicated by CFN
+# as they are gathered.
+
+PARTITION_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+PARTITION_PUNCT = "&'(-./#$@\""
+MAX_PREFIX_LEN  = 3
+
+
+async def collect_day_partitioned(page: Page, doc_type: str, day: date,
+                                  prefix: str = "") -> tuple[list, int]:
+    """Every record of `doc_type` on `day`, gathered by first-party prefix.
+
+    Returns (records, unresolved): records deduplicated by CFN, and the count of
+    partitions that were still over the cap at MAX_PREFIX_LEN or errored — a
+    day with any unresolved partition is logged CAPPED, not OK, so it stays
+    visible and retry-eligible rather than passing as complete.
+    """
+    by_cfn: dict[str, dict] = {}
+    unresolved = 0
+    chars = PARTITION_CHARS + (PARTITION_PUNCT if not prefix else "")
+    for ch in chars:
+        p = prefix + ch
+        records, status = await do_search(page, doc_type, day, day, name_prefix=p)
+        if status == "CAPPED" and len(p) < MAX_PREFIX_LEN:
+            sub, sub_unresolved = await collect_day_partitioned(page, doc_type, day, p)
+            for r in sub:
+                by_cfn.setdefault(r["cfn"], r)
+            unresolved += sub_unresolved
+        elif status == "CAPPED":
+            unresolved += 1
+            log.warning(f"  [CAP] {doc_type[:24]} {iso(day)} prefix {p!r} is still over "
+                        f"the cap at {MAX_PREFIX_LEN} characters — kept what it returned")
+            for r in records:
+                by_cfn.setdefault(r["cfn"], r)
+        elif status == "ERROR":
+            unresolved += 1
+        else:
+            for r in records:
+                by_cfn.setdefault(r["cfn"], r)
+        await asyncio.sleep(0.5)
+    return list(by_cfn.values()), unresolved
 
 
 # ── Recursive range collector ─────────────────────────────────────────────────
@@ -224,6 +292,17 @@ async def collect_range(page: Page, doc_type: str, start: date, end: date,
             log.info(f"  [SPLIT] {iso(cur)}–{iso(chunk_end)} → {new_chunk}-day chunks")
             total += await collect_range(page, doc_type, cur, chunk_end, new_chunk)
         else:
+            if status == "CAPPED":
+                # A single day over the cap: the date axis is exhausted, so
+                # partition by first-party name instead of storing a truncated
+                # day and moving on.
+                log.info(f"  [PARTITION] {doc_type[:24]} {iso(cur)}: one day over the "
+                         f"500-row cap — collecting by first-party name prefix")
+                records, unresolved = await collect_day_partitioned(page, doc_type, cur)
+                status = "CAPPED" if unresolved else "OK"
+                log.info(f"  [PARTITION] {doc_type[:24]} {iso(cur)}: {len(records)} documents"
+                         + (f", {unresolved} partition(s) unresolved — logged CAPPED"
+                            if unresolved else ", complete"))
             # EMPTY is logged but deliberately NOT treated as collected:
             # already_collected() only skips status='OK', so a window the portal
             # currently reports as empty stays eligible for a later run. That is
