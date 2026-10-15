@@ -343,9 +343,15 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       GROUP BY grp`).all() as any[];
     if (!groups.length) return res.json({ active: false });
 
+    // Failures are split by stage so the card can say WHO is failing. On
+    // 15 Oct 2026 every document downloaded and OCR'd fine and then failed at
+    // OpenAI (credits exhausted); the card said "the clerk's site may be
+    // refusing downloads", which sent the diagnosis the wrong way.
     const reads = db.prepare(`
       SELECT SUM(extracted_at > datetime('now', '-60 minutes')) AS last_hour,
              SUM(extracted_at > datetime('now', '-60 minutes') AND status != 'OK') AS errors_last_hour,
+             SUM(extracted_at > datetime('now', '-60 minutes') AND status = 'LLM_ERROR') AS llm_errors_last_hour,
+             SUM(extracted_at > datetime('now', '-60 minutes') AND status IN ('DOWNLOAD_ERROR', 'OCR_ERROR')) AS fetch_errors_last_hour,
              MAX(extracted_at) AS last_read,
              CAST((julianday('now') - julianday(MAX(extracted_at))) * 1440 AS INTEGER) AS minutes_since
       FROM pdf_extractions WHERE county = 'HILLSBOROUGH'`).get() as any;
@@ -354,8 +360,14 @@ export async function registerRoutes(httpServer: Server, app: Express) {
              CAST((julianday('now') - julianday(MAX(collected_at))) * 24 AS INTEGER) AS hours_since
       FROM collection_log WHERE county = 'HILLSBOROUGH'`).get() as any;
 
+    // "read" is status OK. An attempt that failed is not a read: it has no
+    // classification, it is excluded from the analytics, and it will be
+    // retried. Counting attempts showed "34,189 / 34,216 (99%)" on a morning
+    // when 1,474 of those were failures.
     const by = Object.fromEntries(groups.map(g => [g.grp, {
-      total: g.total, read: g.attempted || 0, ok: g.ok || 0, unread: g.total - (g.attempted || 0),
+      total: g.total, read: g.ok || 0, ok: g.ok || 0,
+      failed: (g.attempted || 0) - (g.ok || 0),
+      unread: g.total - (g.ok || 0),
     }]));
     const unread = (by.assignments?.unread || 0) + (by.ucc?.unread || 0);
     const perHour = reads?.last_hour || 0;
@@ -366,6 +378,8 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       ucc: by.ucc ?? null,
       per_hour: perHour,
       errors_last_hour: reads?.errors_last_hour || 0,
+      llm_errors_last_hour: reads?.llm_errors_last_hour || 0,
+      fetch_errors_last_hour: reads?.fetch_errors_last_hour || 0,
       last_read: reads?.last_read ?? null,
       minutes_since_read: reads?.minutes_since ?? null,
       backlog,

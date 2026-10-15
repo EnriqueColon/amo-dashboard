@@ -2,13 +2,15 @@ import { useQuery } from '@tanstack/react-query';
 import { AlertCircle, Loader2 } from 'lucide-react';
 import { apiRequest } from '@/lib/queryClient';
 
-type Group = { total: number; read: number; ok: number; unread: number };
+type Group = { total: number; read: number; ok: number; failed?: number; unread: number };
 type Progress = {
   active: boolean;
   assignments?: Group | null;
   ucc?: Group | null;
   per_hour?: number;
   errors_last_hour?: number;
+  llm_errors_last_hour?: number;
+  fetch_errors_last_hour?: number;
   last_read?: string | null;
   minutes_since_read?: number | null;
   backlog?: boolean;
@@ -71,8 +73,10 @@ export default function HillsboroughProgress() {
       )}
       {errorHeavy && (
         <p className="mt-1.5 text-red-600 dark:text-red-400">
-          {fmt(data.errors_last_hour)} of the {fmt(perHour)} documents tried in the last hour failed —
-          the clerk's site may be refusing downloads.
+          {fmt(data.errors_last_hour)} of the {fmt(perHour)} documents tried in the last hour failed —{' '}
+          {(data.llm_errors_last_hour ?? 0) >= (data.fetch_errors_last_hour ?? 0)
+            ? 'OpenAI rejected the requests. The documents are downloading and OCR-ing fine; check the account’s credit balance and rate limits. Failed documents are retried once it is back.'
+            : 'the clerk’s site may be refusing downloads.'}
         </p>
       )}
       {data.daily_stale && (
@@ -87,7 +91,10 @@ export default function HillsboroughProgress() {
             <div key={label}>
               <div className="flex justify-between text-muted-foreground">
                 <span>{label}</span>
-                <span className="tabular-nums">{fmt(g.read)} / {fmt(g.total)} ({pct(g)}%)</span>
+                <span className="tabular-nums">
+                  {fmt(g.read)} / {fmt(g.total)} ({pct(g)}%)
+                  {(g.failed ?? 0) > 0 && <> · {fmt(g.failed)} failed, to retry</>}
+                </span>
               </div>
               <div className="mt-1 h-1.5 rounded bg-muted">
                 <div className="h-1.5 rounded bg-emerald-500" style={{ width: `${pct(g)}%` }} />

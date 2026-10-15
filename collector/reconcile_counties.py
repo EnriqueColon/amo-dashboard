@@ -176,6 +176,18 @@ def already_verified(county: str, day: date, doc_type: str) -> bool:
 
 # ── Miami-Dade ───────────────────────────────────────────────────────────────
 
+# A long portal session degrades. On the 14–15 Oct 2026 sweep the first ~2,700
+# searches matched the database exactly; from then on the portal returned
+# fewer rows than we hold on 775 consecutive day/type checks (up to 142 short
+# of our count), none of them flagged CAPPED — and every one re-checked the
+# next morning matched exactly in a fresh login. So: a new login every
+# RELOGIN_EVERY searches, and a verdict of AHEAD by a real margin is asked
+# again in a fresh session before it is recorded, because "we hold more than
+# the county" is far more often a tired session than a true surplus.
+RELOGIN_EVERY = 250
+AHEAD_RECHECK_MIN = 3
+
+
 async def reconcile_miami_dade(days_list: list[date], quiet: bool,
                                skip_verified: bool = False) -> list[tuple]:
     import collect_live as cl
@@ -183,11 +195,31 @@ async def reconcile_miami_dade(days_list: list[date], quiet: bool,
 
     findings = []
     async with async_playwright() as pw:
-        browser = await pw.chromium.launch(headless=True, args=['--no-sandbox'])
-        page = await (await browser.new_context(
-            viewport={'width': 1280, 'height': 900})).new_page()
+        state: dict = {'browser': None, 'page': None, 'searches': 0}
+
+        async def login_fresh() -> bool:
+            if state['browser'] is not None:
+                try:
+                    await state['browser'].close()
+                except Exception:
+                    pass
+            state['browser'] = await pw.chromium.launch(headless=True, args=['--no-sandbox'])
+            state['page'] = await (await state['browser'].new_context(
+                viewport={'width': 1280, 'height': 900})).new_page()
+            state['searches'] = 0
+            return await cl.login(state['page'])
+
+        async def search(doc_type: str, day: date):
+            if state['searches'] >= RELOGIN_EVERY:
+                print(f'  MIAMI-DADE: {RELOGIN_EVERY} searches on this login — '
+                      'starting a fresh session', flush=True)
+                if not await login_fresh():
+                    return [], 'ERROR'
+            state['searches'] += 1
+            return await cl.do_search(state['page'], doc_type, day, day)
+
         try:
-            if not await cl.login(page):
+            if not await login_fresh():
                 print('MIAMI-DADE: login failed — cannot reconcile', file=sys.stderr)
                 return [('MIAMI-DADE', None, None, UNKNOWN, 'login failed')]
 
@@ -195,7 +227,7 @@ async def reconcile_miami_dade(days_list: list[date], quiet: bool,
                 for doc_type in cl.DOC_TYPES:
                     if skip_verified and already_verified('MIAMI-DADE', day, doc_type):
                         continue
-                    records, status = await cl.do_search(page, doc_type, day, day)
+                    records, status = await search(doc_type, day)
                     ours = our_count('MIAMI-DADE', doc_type, day)
 
                     if status == 'CAPPED':
@@ -217,7 +249,18 @@ async def reconcile_miami_dade(days_list: list[date], quiet: bool,
 
                     source = len({r['cfn'] for r in records})
                     v = verdict(source, ours)
-                    record('MIAMI-DADE', day, doc_type, source, ours, v)
+                    note = None
+                    if v == AHEAD and ours - source >= AHEAD_RECHECK_MIN:
+                        # Don't believe a surplus from a possibly tired session.
+                        if await login_fresh():
+                            records2, status2 = await search(doc_type, day)
+                            if status2 in ('OK', 'EMPTY'):
+                                source = len({r['cfn'] for r in records2})
+                                v = verdict(source, ours)
+                                note = 'confirmed in a fresh session' if v == AHEAD else None
+                            else:
+                                note = f'fresh-session recheck returned {status2}; first answer kept'
+                    record('MIAMI-DADE', day, doc_type, source, ours, v, note)
                     if v == SHORT:
                         findings.append(('MIAMI-DADE', day, doc_type, v,
                                          f'county {source}, ours {ours}'))
@@ -225,7 +268,8 @@ async def reconcile_miami_dade(days_list: list[date], quiet: bool,
                         print(f'  MIAMI-DADE {day} {doc_type[:30]:30} '
                               f'county={source:4} ours={ours:4} {v}')
         finally:
-            await browser.close()
+            if state['browser'] is not None:
+                await state['browser'].close()
     return findings
 
 

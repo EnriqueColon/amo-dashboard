@@ -884,31 +884,78 @@ def _track_spend(usage: dict):
                                + out_tok * PRICE_OUTPUT_PER_M / 1_000_000)
 
 
+class OpenAIUnavailable(RuntimeError):
+    """OpenAI is refusing every request, not just this document.
+
+    Raised for a 429 whose body says insufficient_quota, and for a 429 or 5xx
+    that is still failing after the retries in _openai_post. The loops must
+    STOP the run and leave the document unrecorded. A per-document LLM_ERROR
+    row is exactly the wrong outcome here: on 15 Oct 2026 the account ran out
+    of credits at ~05:50 UTC and the Hillsborough backlog carried on for four
+    hours writing 4,773 LLM_ERROR rows at ~1,100 an hour — each one counted as
+    "read" by the Overview card and the weekly-email gate, and none would be
+    retried without --retry-errors. Downloads and OCR were fine the whole
+    time, so the card blamed the clerk.
+    """
+
+
+_TRANSIENT_RETRIES = 4
+_MAX_CONSECUTIVE_LLM_ERRORS = 25
+
+
+def _openai_post(body: dict) -> dict:
+    """One chat completion, with the distinction the loops need.
+
+    A genuine per-document problem (a 400, unparseable JSON back) propagates
+    as before and becomes LLM_ERROR. An account-level refusal becomes
+    OpenAIUnavailable. Rate-limit 429s and 5xx are retried with backoff first,
+    honouring Retry-After, because those clear on their own; a quota 429 aborts
+    at once, because it never does.
+    """
+    last = None
+    for attempt in range(_TRANSIENT_RETRIES + 1):
+        resp = requests.post(
+            OPENAI_URL,
+            headers={'Authorization': f'Bearer {OPENAI_KEY}',
+                     'Content-Type': 'application/json'},
+            json=body,
+            timeout=90,
+        )
+        if resp.status_code == 200:
+            return resp.json()
+        if resp.status_code == 429:
+            try:
+                err = resp.json().get('error', {}) or {}
+            except ValueError:
+                err = {}
+            if err.get('type') == 'insufficient_quota':
+                raise OpenAIUnavailable(
+                    f"OpenAI: {err.get('message') or 'insufficient quota'} "
+                    f"(code={err.get('code')})")
+            last = f"429 {err.get('message') or resp.text[:120]}"
+        elif resp.status_code >= 500:
+            last = f'{resp.status_code} {resp.text[:120]}'
+        else:
+            resp.raise_for_status()
+        if attempt < _TRANSIENT_RETRIES:
+            try:
+                delay = float(resp.headers.get('Retry-After') or 0)
+            except ValueError:
+                delay = 0.0
+            time.sleep(max(delay, 2.0 * (2 ** attempt)))
+    raise OpenAIUnavailable(
+        f'OpenAI still failing after {_TRANSIENT_RETRIES} retries: {last}')
+
+
 def llm_extract(ocr_text: str) -> dict | None:
-    resp = requests.post(
-        OPENAI_URL,
-        headers={'Authorization': f'Bearer {OPENAI_KEY}',
-                 'Content-Type': 'application/json'},
-        json=chat_completion_body(ocr_text, SYSTEM_PROMPT),
-        timeout=90,
-    )
-    resp.raise_for_status()
-    body = resp.json()
+    body = _openai_post(chat_completion_body(ocr_text, SYSTEM_PROMPT))
     _track_spend(body.get('usage', {}))
     data = json.loads(body['choices'][0]['message']['content'])
     return postprocess_extraction(data)
 
 
 def llm_extract_facility(ocr_text: str) -> dict | None:
-    resp = requests.post(
-        OPENAI_URL,
-        headers={'Authorization': f'Bearer {OPENAI_KEY}',
-                 'Content-Type': 'application/json'},
-        json=chat_completion_body(ocr_text, FACILITY_SYSTEM_PROMPT),
-        timeout=90,
-    )
-    resp.raise_for_status()
-    body = resp.json()
+    body = _openai_post(chat_completion_body(ocr_text, FACILITY_SYSTEM_PROMPT))
     _track_spend(body.get('usage', {}))
     data = json.loads(body['choices'][0]['message']['content'])
     return postprocess_facility(data)
@@ -1066,6 +1113,10 @@ def process_one(cfn: str, rec_book: str, rec_page: str, doc_county: str) -> tupl
         try:
             data = llm_extract(text)
             data.update(llm_extract_facility(text))
+        except OpenAIUnavailable as e:
+            # Not this document's fault. ABORT tells the loop to stop the run
+            # and record nothing, so the document stays pending.
+            return (cfn, rec_book, rec_page, doc_county, 'ABORT', None, len(text), str(e))
         except Exception as e:
             return (cfn, rec_book, rec_page, doc_county, 'LLM_ERROR', None, len(text),
                     f'LLM failed: {e}')
@@ -1094,6 +1145,7 @@ def run_parallel(docs: list, conn, workers: int):
     counts = {'OK': 0, 'DOWNLOAD_ERROR': 0, 'OCR_ERROR': 0, 'LLM_ERROR': 0}
     categories: dict = {}
     done = 0
+    consecutive_llm_errors = 0
     started = time.time()
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -1101,6 +1153,8 @@ def run_parallel(docs: list, conn, workers: int):
                    for cfn, rb, rp, _rec_date, c in docs]
         for fut in futures:
             cfn, rb, rp, dc, status, data, ocr_chars, note = fut.result()
+            if status == 'ABORT':
+                _stop_run(note, futures, counts)
             if note:
                 print(f'  {cfn} ({dc}) {note}', flush=True)
 
@@ -1128,6 +1182,15 @@ def run_parallel(docs: list, conn, workers: int):
                 cat = data.get('doc_category')
                 categories[cat] = categories.get(cat, 0) + 1
 
+            # A run of LLM failures with nothing succeeding in between is an
+            # outage of some kind, whatever the status code. Stop before it
+            # eats the queue; the rows already written are picked up by
+            # --retry-errors.
+            consecutive_llm_errors = consecutive_llm_errors + 1 if status == 'LLM_ERROR' else 0
+            if consecutive_llm_errors >= _MAX_CONSECUTIVE_LLM_ERRORS:
+                _stop_run(f'{consecutive_llm_errors} LLM failures in a row — '
+                          'OpenAI is not answering usefully', futures, counts)
+
             done += 1
             if done % 50 == 0 or done == len(docs):
                 rate = done / max(time.time() - started, 1)
@@ -1147,6 +1210,21 @@ def run_parallel(docs: list, conn, workers: int):
                 break
 
     return counts, categories
+
+
+def _stop_run(reason: str, futures: list | None, counts: dict) -> None:
+    """Stop the whole run because OpenAI is unavailable, recording nothing more.
+
+    Exit 2 so the cron wrappers log it as a failure. Documents not yet saved
+    stay pending and the next run picks them up — which is the point.
+    """
+    print(f'\n⛔ STOPPING THE RUN: {reason}', flush=True)
+    print('   Nothing was recorded for the document that hit this, nor for any '
+          'still queued — they stay pending for the next run.', flush=True)
+    print(f'   Before stopping: {counts}', flush=True)
+    for f in futures or []:
+        f.cancel()
+    raise SystemExit(2)
 
 
 def run(limit: int, retry_errors: bool, since: str | None = None, redo: bool = False,
@@ -1177,6 +1255,7 @@ def run(limit: int, retry_errors: bool, since: str | None = None, redo: bool = F
 
     counts = {'OK': 0, 'DOWNLOAD_ERROR': 0, 'OCR_ERROR': 0, 'LLM_ERROR': 0}
     categories: dict = {}
+    consecutive_llm_errors = 0
 
     for i, (cfn, rec_book, rec_page, rec_date, doc_county) in enumerate(docs, 1):
         with tempfile.TemporaryDirectory() as workdir:
@@ -1208,13 +1287,20 @@ def run(limit: int, retry_errors: bool, since: str | None = None, redo: bool = F
                 save(conn, cfn, rec_book, rec_page, 'OK', data, len(text),
                      county=doc_county)
                 counts['OK'] += 1
+                consecutive_llm_errors = 0
                 cat = data.get('doc_category')
                 categories[cat] = categories.get(cat, 0) + 1
+            except OpenAIUnavailable as e:
+                _stop_run(str(e), None, counts)
             except Exception as e:
                 print(f'  [{i}] {cfn} LLM failed: {e}')
                 save(conn, cfn, rec_book, rec_page, 'LLM_ERROR', ocr_chars=len(text),
                      county=doc_county)
                 counts['LLM_ERROR'] += 1
+                consecutive_llm_errors += 1
+                if consecutive_llm_errors >= _MAX_CONSECUTIVE_LLM_ERRORS:
+                    _stop_run(f'{consecutive_llm_errors} LLM failures in a row — '
+                              'OpenAI is not answering usefully', None, counts)
 
         if i % 25 == 0 or i == len(docs):
             print(f'  [{i}/{len(docs)}] ok={counts["OK"]} '

@@ -175,8 +175,12 @@ export function buildRollupReport(db: Database.Database, sendDate: string): Roll
   for (const b of bounds) if (COUNTIES.includes(b.county)) { asOf[b.county] = b.last; since[b.county] = b.first; }
   const readShare: Record<string, number> = {};
   for (const [c, g] of Object.entries(READ_GATED)) {
+    // "Read" means status OK. A failed attempt leaves a row too, and on 15 Oct
+    // 2026 an OpenAI credit outage left 1,474 Hillsborough assignments as
+    // LLM_ERROR rows — counting those as read would have let the county into
+    // the email with 4% of its assignments never actually classified.
     const row = db.prepare(`
-      SELECT COUNT(*) AS n, SUM(px.cfn IS NOT NULL) AS r
+      SELECT COUNT(*) AS n, SUM(px.status = 'OK') AS r
       FROM assignments a LEFT JOIN pdf_extractions px ON px.cfn = a.cfn
       WHERE a.county = ? AND a.rec_date >= ? AND a.rec_date <= ?
         AND a.doc_type IN (${g.types.map(() => '?').join(',')})`)

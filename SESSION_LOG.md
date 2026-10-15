@@ -4,6 +4,19 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-10-14 (afternoon) — New SEPARATE tool: `competitor-analysis/` (own private repo, not part of amo-dashboard)
+
+Built a standalone competitive-analysis tool at `competitor-analysis/` for David Ralph (Safe Harbor Capital Partners). Goal: county-records pull on a target entity's FL lending activity (first target: Churchill Real Estate / Churchill Funding I LLC), search both grantor+grantee indexes for every name variant, one standardized per-instrument Excel workbook. **Entity-agnostic — a target is one YAML file.**
+
+- **Deliberately isolated from the dashboard** (owner's explicit instruction: "should not interact"). Own `.venv/`, own config, own per-entity SQLite store `competitor-analysis/data/<slug>.db`. Does NOT import collector/server code or touch `miami_dade_amo.db`. Nothing in the dashboard reads it.
+- **Now its own private GitHub repo: `EnriqueColon/competitor-analysis`** (created this session, pushed, PRIVATE). The folder lives inside this working dir for convenience only; **added to amo-dashboard `.gitignore`** (`competitor-analysis/`) so it is never embedded. `gh` active account was switched RSronin09 → **EnriqueColon** to create it (switch back with `gh auth switch -u RSronin09` if needed).
+- **Architecture:** `crc` package — YAML entity profiles + county registry; name match/variant/trustee-filter/tag engine (`matching.py`); manual-search **worklist** generator; flexible CSV/XLSX **ingest** with auto column mapping + date filtering; **Hillsborough public-API collector** (the one automatable county); openpyxl **workbook** (per-county tabs Miami-Dade first, Summary, Legend). CLI: `python -m crc {list,worklist,ingest,collect,build,status} --entity churchill`.
+- **Data-access reality (why hybrid):** Miami-Dade (login+bot check), Broward (AcclaimWeb blocks automation), Palm Beach (captcha), Monroe — none scrapable; worklist → human runs searches in own browser → exports CSV → `crc ingest`. Only Hillsborough has a public JSON API → `crc collect`. Document-level fields (notary, execution date, signer, original mortgage CFN, prepared-by) only exist in the PDF image; schema has the columns, tool does not yet OCR them.
+- **Trustee filter / extra-credit tags per the brief:** Wilmington Trust / WSFS rows kept only when assignor is a Churchill entity; rows naming Kyle Major / Matthew Dameron / Tommy Garuccio (signer) or ELS Holdings / LGI Title / Shardaey Guevara flagged.
+- Tests pass (`python -m unittest tests.test_crc`): match/filter/tag engine + end-to-end ingest→workbook on `samples/miami_dade_sample.csv`.
+- **OPEN:** Palm Beach + Monroe `search_url`s in `config/counties.yaml` are flagged `verify_url: true` — plausible but unconfirmed; confirm in a browser. No real Churchill data pulled yet (the 4 workbook rows are sample/demo).
+- Documented in Confluence §5.7 (this is the only amo-dashboard-repo footprint: the `.gitignore` line + the §5.7 note).
+
 ## 2026-10-14 (afternoon) — Miami-Dade was a WEEK stale: daily cron + per-county reconciliation (`d790767`, `384ef03`, DEPLOYED)
 
 **Owner's report:** "I searched by CFN for an AMO document and it was not on the tool but on the website" — `2026R696647`. Then: *on day X the tool must hold everything the clerk holds on day X.*

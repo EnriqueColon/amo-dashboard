@@ -697,6 +697,7 @@ amo-dashboard/
 │   └── run_*.sh                   cron wrappers
 ├── tools/
 │   └── droplet-mcp/    MCP server exposing droplet ops as named tools (§6.4a)
+├── competitor-analysis/   SEPARATE tool, OWN private repo (EnriqueColon/competitor-analysis) — gitignored here (§5.7)
 ├── CLAUDE.md           operational facts for AI assistants
 ├── SESSION_LOG.md      dense running history — read before changing anything
 └── ROLLBACK.md         revert paths for in-flight workstreams
@@ -750,6 +751,42 @@ All expensive endpoints are cached in process memory.
 > ⚠️ **The single most common operational mistake in this project:** changing data without clearing
 > the cache. The database is correct and the dashboard still shows the old numbers — for up to a
 > week. See §6.5.
+
+### 5.7 `competitor-analysis/` — a separate sibling tool (not the dashboard)
+
+Added 14 Oct 2026. A **standalone** Python tool for a county-records competitive
+analysis of a target entity (first target: Churchill Real Estate / Churchill
+Funding I LLC) across five Florida counties — Miami-Dade, Broward, Palm Beach,
+Hillsborough, Monroe. It searches both the grantor and grantee indexes for every
+name variant and produces one Excel workbook, a tab per county, a row per
+instrument, with the full column set the requester (David Ralph, Safe Harbor
+Capital Partners) asked for.
+
+**It is deliberately isolated from the dashboard**: its own `.venv/`, its own
+config, and its own per-entity SQLite store under `competitor-analysis/data/`.
+It does **not** import collector/server code or read `miami_dade_amo.db`, and
+the dashboard does not read anything it writes. It is **version-controlled in
+its own private repo** (`EnriqueColon/competitor-analysis`, created 14 Oct 2026)
+and is gitignored by the amo-dashboard repo — the folder lives inside this
+working directory only for convenience. Treat it as a separate project that
+happens to sit here, not a component of the product.
+
+- **Entity-agnostic:** a target is one YAML file in `config/entities/`; counties
+  live in `config/counties.yaml`. New entity = copy the Churchill profile, no code.
+- **Hybrid collection by necessity:** most FL clerk sites block automation
+  (Miami-Dade login + bot check, Broward AcclaimWeb, Palm Beach captcha, Monroe).
+  So the primary path is `crc worklist` → a human runs each search in their own
+  browser and exports CSV → `crc ingest` (auto-maps columns, date-filters,
+  applies the name match + trustee filter, tags extra-credit flags) → `crc build`.
+  Hillsborough has a public JSON API and is the one county `crc collect` pulls
+  directly.
+- **Trustee filter / tags** mirror the brief: Wilmington Trust/WSFS rows are kept
+  only when the assignor is a Churchill entity; rows naming Kyle Major / Matthew
+  Dameron / Tommy Garuccio (signer) or ELS Holdings / LGI Title / Shardaey
+  Guevara are flagged.
+- Setup + usage + "adding an entity" are in `competitor-analysis/README.md`;
+  `python -m unittest tests.test_crc` covers the match/filter/tag engine and an
+  end-to-end ingest→workbook run.
 
 ---
 

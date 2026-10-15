@@ -39,3 +39,9 @@ collector/backup.log
 # Weekly emailed-report previews (server/scripts/sendWeeklyReport.ts --preview) —
 # real production data, regenerable on demand, never committed.
 server/scripts/output/
+
+# competitor-analysis/ is a SEPARATE tool with its own git repo
+# (private: EnriqueColon/competitor-analysis). It lives inside this working
+# directory for convenience but is NOT part of the amo-dashboard repo — ignore
+# it here so it is never embedded. See docs §5.7.
+competitor-analysis/
