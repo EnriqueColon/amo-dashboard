@@ -55,7 +55,7 @@ const COUNTIES = ['MIAMI-DADE', 'BROWARD', 'HILLSBOROUGH'];
 // every "vs prior" change would read as growth that never happened. Counts any
 // attempted read, so a handful of unreadable documents cannot hold it out.
 const READ_GATED: Record<string, { types: string[]; from: string }> = {
-  HILLSBOROUGH: { types: ['ASG', 'ASGT'], from: '2023-01-01' },
+  HILLSBOROUGH: { types: ['ASG', 'ASGT', 'ASINT'], from: '2023-01-01' },
 };
 const READY_SHARE = 0.98;
 // Recency ramp for the 52-week chart: older weeks → last 30 days → last 15 days.

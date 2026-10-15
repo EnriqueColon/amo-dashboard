@@ -88,6 +88,11 @@ SEARCH_URL = f'{API_BASE}/Public/ORIUtilities/DocumentSearch/api/Search'
 DOC_TYPES = {
     'ASG': '(ASG) ASSIGNMENT',
     'ASGT': '(ASGT) ASSIGNMENT/TAXES',
+    # Added 15 Oct 2026. The county's code table (the daily M-file) lists three
+    # assignment codes, and this one was never collected: ~23 a quarter, ~350
+    # since 2023. Miami-Dade's equivalent (AIT) returns nothing; Hillsborough's
+    # does not. Generic like ASG — reaches the analytics only once read.
+    'ASINT': '(ASINT) ASSIGNMENT OF INTEREST',
     'FIN': '(FIN) FINANCING STATEMENT',
 }
 

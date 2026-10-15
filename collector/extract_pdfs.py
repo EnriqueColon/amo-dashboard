@@ -731,7 +731,7 @@ _CAT_RENTS_BODY = re.compile(r'assignment\s+of\s+(?:leases?\s+and\s+)?rents?\b'
 
 _CAT_AMO_DOC_TYPE = 'ASSIGNMENT OF MORTGAGE - AMO'
 # Miami-Dade ASG, Broward AST, Hillsborough ASG / ASGT (assignment with taxes).
-_CAT_GENERIC_DOC_TYPES = ('ASSIGNMENT - ASG', 'AST', 'ASG', 'ASGT')
+_CAT_GENERIC_DOC_TYPES = ('ASSIGNMENT - ASG', 'AST', 'ASG', 'ASGT', 'ASINT')
 
 
 def _cat_text_eligible(doc_type: str | None, doc_title: str | None) -> bool:

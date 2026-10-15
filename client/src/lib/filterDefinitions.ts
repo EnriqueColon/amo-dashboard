@@ -31,7 +31,7 @@ export const DOC_TYPE_DEFS: Record<string, Definition> = {
   amo: d('Mortgage (AMO)', "Miami-Dade's dedicated \"Assignment of Mortgage\" code. Almost always a loan transfer, but check Shows to be sure."),
   asg: d('Generic (ASG)', "Miami-Dade's catch-all \"Assignment\" code. A mix of loan transfers, collateral pledges, rent assignments and permits — use Shows to narrow it down."),
   ast: d('Broward (AST)', 'Assignments recorded in Broward County, under its own filing code.'),
-  hc_asg: d('Hillsborough (ASG)', 'Assignments recorded in Hillsborough County (ASG, plus the rare ASGT assignment of taxes).'),
+  hc_asg: d('Hillsborough (ASG)', 'Assignments recorded in Hillsborough County (ASG, plus the rarer ASINT assignment of interest and ASGT assignment of taxes).'),
 };
 
 // ── Reporting: review status ───────────────────────────────────────────────────

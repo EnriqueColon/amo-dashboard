@@ -1449,7 +1449,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     amo: { label: 'Assignment of Mortgage', match: ['ASSIGNMENT OF MORTGAGE - AMO'] },
     asg: { label: 'Assignment (generic)',   match: ['ASSIGNMENT - ASG'] },
     ast: { label: 'Broward Assignment',     match: ['AST'] },
-    hc_asg: { label: 'Hillsborough Assignment', match: ['ASG', 'ASGT'] },
+    hc_asg: { label: 'Hillsborough Assignment', match: ['ASG', 'ASGT', 'ASINT'] },
   };
 
   function docTypeParam(q: any): string {
