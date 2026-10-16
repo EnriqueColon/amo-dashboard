@@ -691,6 +691,66 @@ def prefer_document_seller(index_name: str | None, pdf_name: str | None,
     return pdf
 
 
+def prefer_known_spelling(index_name: str | None, pdf_name: str | None,
+                          prior_types: dict | None = None,
+                          prior_counts: dict | None = None) -> str | None:
+    """Correct ONE misspelled word in the index with the document's spelling.
+
+    The rule above is "the index wins on spelling, the document wins on which
+    party", and it is right: the index is clerk-typed and the document is OCR.
+    But clerks mistype too. 2026R681106 was indexed "PACIFIC LIFE INURANCE
+    COMPANY" while the document reads "PACIFIC LIFE INSURANCE COMPANY"; the
+    typo became its own two-row entity typed OTHER beside the real one (248
+    rows, BANK), the owner could not find the document under the lender's name,
+    and the deal type flipped to INSTITUTIONAL_OUT. Measured 14 Oct 2026: 552
+    such orphan names holding 677 rows, 310 of them also mistyped.
+
+    This fires only when every one of these holds, each one measured against
+    the near-duplicate list that produced the 552:
+      * same number of words and exactly ONE word differs — "LEGACY MORTGAGE
+        ASSET TRUST 2020 SL1" vs "... 2019 SL3" differs in two, and "LOAN
+        STORE" vs "THE LOAN STORE" in count, so neither is touched;
+      * that word carries no digit and both forms are 5+ letters — series and
+        vintages ("IV" vs "VI", "SL1" vs "SL3") are identity, not spelling;
+      * the two forms are an edit apart (ratio >= 0.8: INURANCE/INSURANCE is
+        0.94), so "FV-1" never becomes "FY-I";
+      * neither side reads as a person, and neither is MERS;
+      * the document's spelling is the ESTABLISHED entity: 10+ rows in the
+        previous run, and the index's spelling has at most 3 (or 5% of it).
+        Without this gate the rule would also "fix" a clean index name with
+        an OCR misread that happened to be one letter off.
+
+    Returns the document's name (so its spelling canonicalizes onto the
+    established entity) or the index's.
+    """
+    pdf = sanitize_ocr_field(pdf_name)
+    idx = (index_name or '').strip()
+    if not pdf or not idx:
+        return index_name
+    if _looks_like_person(idx) or _looks_like_person(pdf):
+        return index_name
+    idx_canon, pdf_canon = canonicalize(idx), canonicalize(pdf)
+    if (idx_canon == pdf_canon or classify_canonical(idx_canon) == 'MERS'
+            or classify_canonical(pdf_canon) == 'MERS'):
+        return index_name
+    idx_words, pdf_words = idx_canon.split(), pdf_canon.split()
+    if len(idx_words) != len(pdf_words):
+        return index_name
+    diffs = [(a, b) for a, b in zip(idx_words, pdf_words) if a != b]
+    if len(diffs) != 1:
+        return index_name
+    a, b = diffs[0]
+    if any(ch.isdigit() for ch in a + b) or len(a) < 5 or len(b) < 5:
+        return index_name
+    if difflib.SequenceMatcher(None, a, b).ratio() < 0.8:
+        return index_name
+    counts = prior_counts or {}
+    n_pdf, n_idx = counts.get(pdf_canon, 0), counts.get(idx_canon, 0)
+    if n_pdf < 10 or n_idx > max(3, n_pdf // 20):
+        return index_name
+    return pdf
+
+
 # ── Property address: reject what is not an address ──────────────────────────
 # The extractor answers in prose when a document does not state an address —
 # "AS DESCRIBED IN SAID MORTGAGE", "not explicitly stated", "more fully
@@ -1670,6 +1730,17 @@ def build_normalized_tables():
             "SELECT assignor_canon, COUNT(*) FROM aom_events_clean GROUP BY assignor_canon"))
     except sqlite3.OperationalError:
         prior_sales = {}
+    # Rows per canonical name on EITHER side in the previous run — the evidence
+    # prefer_known_spelling needs to tell an established entity from a typo.
+    try:
+        prior_counts = dict(conn.execute("""
+            SELECT c, SUM(n) FROM (
+                SELECT assignor_canon AS c, COUNT(*) AS n FROM aom_events_clean GROUP BY 1
+                UNION ALL
+                SELECT assignee_canon, COUNT(*) FROM aom_events_clean GROUP BY 1
+            ) GROUP BY c"""))
+    except sqlite3.OperationalError:
+        prior_counts = {}
 
     print(f"  Processing {len(cfn_groups)} unique CFNs...")
 
@@ -1803,6 +1874,14 @@ def build_normalized_tables():
                                            prior_sales)
             if canonicalize(new_a) != canonicalize(dominant_grantee):
                 dominant_assignor = new_a
+            # Last: a one-word clerk typo yields to the document's spelling
+            # when that spelling is the established entity.
+            new_a = prefer_known_spelling(dominant_assignor, ext.get('assignor_name'),
+                                          prior_types, prior_counts)
+            new_b = prefer_known_spelling(dominant_grantee, ext.get('assignee_name'),
+                                          prior_types, prior_counts)
+            if canonicalize(new_a) != canonicalize(new_b):
+                dominant_assignor, dominant_grantee = new_a, new_b
 
         assignor_canon = canonicalize(dominant_assignor)
         assignee_canon = canonicalize(dominant_grantee)

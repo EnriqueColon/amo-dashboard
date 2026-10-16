@@ -29,7 +29,44 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 
 from normalize import (  # noqa: E402
-    prefer_document_party, pick_listed_party, prefer_document_seller, clean_property_address)
+    prefer_document_party, pick_listed_party, prefer_document_seller, prefer_known_spelling,
+    clean_property_address)
+
+# (index_name, pdf_name, previous-run row counts by canonical name, expected, why).
+# A one-word clerk typo yields to the document's spelling ONLY when the
+# document's spelling is the established entity. 2026R681106, 14-15 Oct 2026.
+ESTABLISHED = {'PACIFIC LIFE INSURANCE': 248, 'PACIFIC LIFE INURANCE': 2,
+               'DREAMBUILDER INVESTMENTS': 17, 'DREAMBULDER INVESTMENTS': 3,
+               'LEGACY MORTGAGE ASSET TRUST 2019 SL3': 30,
+               'LB IGLOO SERIES VI TRUST': 24, 'THE LOAN STORE': 40, 'LOAN STORE': 2}
+SPELLING_CASES = [
+    ('PACIFIC LIFE INURANCE COMPANY', 'PACIFIC LIFE INSURANCE COMPANY', ESTABLISHED,
+     'PACIFIC LIFE INSURANCE COMPANY',
+     '2026R681106: one misspelled word, the document spelling has 248 rows'),
+    ('DREAMBULDER INVESTMENTS LLC', 'DreamBuilder Investments, LLC', ESTABLISHED,
+     'DreamBuilder Investments, LLC', 'one-letter clerk typo, established entity'),
+    ('PACIFIC LIFE INSURANCE COMPANY', 'PACIFIC LIFE INURANCE COMPANY', ESTABLISHED,
+     'PACIFIC LIFE INSURANCE COMPANY',
+     'reversed: the OCR has the typo and the index is the established one — index stays'),
+    ('PACIFIC LIFE INURANCE COMPANY', 'PACIFIC LIFE INSURANCE COMPANY',
+     {'PACIFIC LIFE INSURANCE': 8, 'PACIFIC LIFE INURANCE': 2},
+     'PACIFIC LIFE INURANCE COMPANY', 'evidence gate: fewer than 10 rows is not established'),
+    ('PACIFIC LIFE INURANCE COMPANY', 'PACIFIC LIFE INSURANCE COMPANY',
+     {'PACIFIC LIFE INSURANCE': 40, 'PACIFIC LIFE INURANCE': 9},
+     'PACIFIC LIFE INURANCE COMPANY', 'evidence gate: the index spelling is too common to be a typo'),
+    ('LEGACY MORTGAGE ASSET TRUST 2020 SL1', 'LEGACY MORTGAGE ASSET TRUST 2019 SL3', ESTABLISHED,
+     'LEGACY MORTGAGE ASSET TRUST 2020 SL1', 'vintages differ in two words with digits — different trusts'),
+    ('LB IGLOO SERIES IV TRUST', 'LB IGLOO SERIES VI TRUST', ESTABLISHED,
+     'LB IGLOO SERIES IV TRUST', 'IV vs VI: short tokens are identity, not spelling'),
+    ('LOAN STORE LLC', 'THE LOAN STORE LLC', ESTABLISHED,
+     'LOAN STORE LLC', 'word count differs — not a one-word typo (and the 575-regression case)'),
+    ('FV-1 INC', 'FY-I, INC. IN TRUST FOR MORGAN STANLEY', ESTABLISHED,
+     'FV-1 INC', 'OCR damage, different word count'),
+    ('SOSA JAIME', 'PACIFIC LIFE INSURANCE COMPANY', ESTABLISHED,
+     'SOSA JAIME', 'a person vs an institution is the party rule\'s job, not this one\'s'),
+    ('MORTGAGE ELECTRONIC REGISTRATION SYSTEMS INC', 'MORTGAGE ELECTRONIC REGISTRATON SYSTEMS INC',
+     {'MERS': 500}, 'MORTGAGE ELECTRONIC REGISTRATION SYSTEMS INC', 'MERS is never touched'),
+]
 
 # (index_name, names listed on that side, pdf_name, expected, why). Hillsborough
 # lists each side alphabetically, so the first name is not the seller.
@@ -272,6 +309,12 @@ def main() -> int:
             if prefer_document_party(idx, pdf) in (None, ''):
                 failures.append(f'party rule blanked a party: index={idx!r} pdf={pdf!r}')
 
+    for idx, pdf, counts, expected, why in SPELLING_CASES:
+        got = prefer_known_spelling(idx, pdf, {}, counts)
+        if got != expected:
+            failures.append(f'spelling: index={idx!r} pdf={pdf!r}\n'
+                            f'      got {got!r}, expected {expected!r} — {why}')
+    print(f'  · {len(SPELLING_CASES)} spelling choices')
     print(f'  · {len(PARTY_CASES)} party choices, {len(LISTED_CASES)} listed-party '
           f'choices, {len(SELLER_CASES) + 2} seller choices and {len(PROPERTY_CASES)} property '
           f'values checked, plus a never-blank assertion')
