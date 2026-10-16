@@ -19,8 +19,18 @@ source /opt/amo-dashboard/.env
 
 # Two rebuilds at once empty and refill the same tables under each other.
 # "[n]ormalize" keeps pgrep from matching its own command line.
+#
+# But a skipped rebuild must NOT mean a skipped restart. On Fri 16 Oct 2026
+# the weekly run (06:00) was still rebuilding at 08:30 — it took 4h48m with a
+# document backlog sharing the CPU — so this job exited, and because only this
+# job clears the 7-day API cache, the dashboard served pre-rebuild data all
+# morning. So: wait for the other rebuild to finish, then restart to publish
+# its result, and skip only the redundant second rebuild.
 if pgrep -f "[n]ormalize.py" >/dev/null; then
-    echo "=== nightly normalize SKIPPED: another rebuild is running ($(date -u +%FT%TZ)) ==="
+    echo "=== nightly normalize: another rebuild is running ($(date -u +%FT%TZ)) — waiting for it ==="
+    while pgrep -f "[n]ormalize.py" >/dev/null; do sleep 60; done
+    echo "=== other rebuild finished ($(date -u +%FT%TZ)); restarting to clear the cache, skipping the second rebuild ==="
+    pm2 restart amo-dashboard
     exit 0
 fi
 

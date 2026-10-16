@@ -1,8 +1,12 @@
 #!/bin/bash
 # Friday completeness review — every county, day by day.
 #
-# Cron entry (crontab -e), 11:00 UTC = 07:00 Eastern on Friday:
-#   0 11 * * 5 /opt/amo-dashboard/collector/run_weekly_review.sh >> /opt/amo-dashboard/collector/weekly_review.log 2>&1
+# Cron entry (crontab -e), 17:00 UTC = 13:00 Eastern on Friday — AFTER the
+# day's Miami-Dade (12:30), Hillsborough (13:45) and Broward (15:30) pulls.
+# At 11:00 it ran before Hillsborough's daily re-pull and flagged that county's
+# newest days short every week (16 Oct 2026: three "gaps" that the 13:45 run
+# closed two hours later).
+#   0 17 * * 5 /opt/amo-dashboard/collector/run_weekly_review.sh >> /opt/amo-dashboard/collector/weekly_review.log 2>&1
 #
 # ── Why a weekly review on top of the per-run check ──────────────────────────
 # The Miami-Dade daily job already reconciles the last few days after every
