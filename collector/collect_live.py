@@ -327,7 +327,17 @@ async def login(page: Page) -> bool:
     await page.goto(LOGIN_URL, wait_until="networkidle", timeout=30000)
     await page.locator("input[name='userName']").fill(CLERK_EMAIL)
     await page.locator("input[name='password']").fill(CLERK_PASSWORD)
-    await page.locator("input[name='btnCall'][value='Login']").click()
+    # The Login control was an <input name="btnCall" value="Login"> until
+    # 16 Oct 2026 and is a <button name="btnCall"> since. Match on the name
+    # alone so the next markup change of this kind is not an outage, and say
+    # so plainly if even that stops matching — a raw 30s Playwright timeout on
+    # a locator told nobody what had happened.
+    submit = page.locator("[name='btnCall']")
+    if await submit.count() == 0:
+        raise RuntimeError(
+            "clerk login page has no [name='btnCall'] control — the portal's "
+            "login markup changed again; inspect it and update login()")
+    await submit.first.click()
     try:
         await page.wait_for_load_state("networkidle", timeout=20000)
     except Exception:
