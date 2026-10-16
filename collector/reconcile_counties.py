@@ -42,6 +42,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import subprocess
 import sys
 from datetime import date, datetime, timedelta, timezone
 
@@ -97,6 +98,25 @@ def our_count(county: str, doc_type: str, day: date) -> int:
             (county, doc_type, day.isoformat()),
         ).fetchone()
         return row[0] if row else 0
+    finally:
+        conn.close()
+
+
+def held_anywhere(county: str, cfns: set[str]) -> set[str]:
+    """Which of these CFNs we hold for the county under ANY type or date."""
+    if not cfns:
+        return set()
+    conn = get_conn()
+    try:
+        out: set[str] = set()
+        items = sorted(cfns)
+        for i in range(0, len(items), 500):
+            chunk = items[i:i + 500]
+            ph = ','.join('?' * len(chunk))
+            out |= {r[0] for r in conn.execute(
+                f"SELECT cfn FROM assignments WHERE COALESCE(county,'MIAMI-DADE')=? "
+                f"AND cfn IN ({ph})", (county, *chunk))}
+        return out
     finally:
         conn.close()
 
@@ -189,7 +209,8 @@ AHEAD_RECHECK_MIN = 3
 
 
 async def reconcile_miami_dade(days_list: list[date], quiet: bool,
-                               skip_verified: bool = False) -> list[tuple]:
+                               skip_verified: bool = False,
+                               repair: bool = False) -> list[tuple]:
     import collect_live as cl
     from playwright.async_api import async_playwright
 
@@ -255,9 +276,42 @@ async def reconcile_miami_dade(days_list: list[date], quiet: bool,
                                          'search error'))
                         continue
 
-                    source = len({r['cfn'] for r in records})
+                    portal_cfns = {r['cfn'] for r in records}
+                    source = len(portal_cfns)
                     v = verdict(source, ours)
                     note = None
+                    if v == SHORT:
+                        # The portal lists some documents under two types (an
+                        # AMO that is also returned as ASG); assignments holds
+                        # one row per CFN, so the per-type count comes up one
+                        # short while the document is present. Only a CFN we
+                        # do not hold AT ALL is a real shortfall.
+                        held = held_anywhere('MIAMI-DADE', portal_cfns)
+                        truly_missing = sorted(portal_cfns - held)
+                        if not truly_missing:
+                            v = OK
+                            note = (f'{source - ours} listed by the county under this type '
+                                    'but held under another type or date')
+                        elif repair:
+                            # Re-collect the day with --force (the window is
+                            # usually logged OK from months ago — late postings
+                            # are the common cause) and ask again.
+                            print(f'  MIAMI-DADE {day} {doc_type[:30]}: short by '
+                                  f'{len(truly_missing)} — re-collecting', flush=True)
+                            subprocess.run(
+                                [sys.executable, '-u', 'collect_live.py', '--force',
+                                 '--start', day.isoformat(), '--end', day.isoformat(),
+                                 '--doc-types', doc_type],
+                                cwd=os.path.dirname(os.path.abspath(__file__)),
+                                check=False, timeout=1200)
+                            ours = our_count('MIAMI-DADE', doc_type, day)
+                            held = held_anywhere('MIAMI-DADE', portal_cfns)
+                            truly_missing = sorted(portal_cfns - held)
+                            v = verdict(source, ours) if truly_missing else OK
+                            note = ('repaired: re-collected' if v == OK
+                                    else f'still missing after re-collect: {", ".join(truly_missing[:10])}')
+                        else:
+                            note = f'missing: {", ".join(truly_missing[:10])}'
                     if v == AHEAD and ours - source >= AHEAD_RECHECK_MIN:
                         # Don't believe a surplus from a possibly tired session.
                         if await login_fresh():
@@ -455,6 +509,9 @@ def main() -> int:
     ap.add_argument('--broward-years', action='store_true',
                     help='reconcile Broward from the yearly exports instead of the '
                          'daily feed: day-by-day for a whole year, one file read')
+    ap.add_argument('--repair', action='store_true',
+                    help='Miami-Dade: re-collect a day found short (with --force, so an '
+                         'old OK log does not skip it) and ask again before recording')
     ap.add_argument('--quiet', action='store_true', help='only print findings')
     args = ap.parse_args()
 
@@ -481,7 +538,7 @@ def main() -> int:
         try:
             if county == 'MIAMI-DADE':
                 findings += asyncio.run(
-                    reconcile_miami_dade(days_list, args.quiet, args.resume))
+                    reconcile_miami_dade(days_list, args.quiet, args.resume, args.repair))
             elif county == 'BROWARD':
                 if args.broward_years:
                     years = sorted({d.year for d in days_list})

@@ -58,7 +58,11 @@ if [ -n "${REVIEW_BROWARD_YEARS:-}" ]; then
     [ $? -ne 0 ] && status=1
 fi
 
-"$VENV/bin/python3" -u reconcile_counties.py --all --days "$REVIEW_DAYS"
+# --repair: a Miami-Dade day found short is re-collected on the spot (with
+# --force, so a months-old OK log cannot skip it — late postings are the usual
+# cause) and asked again before its verdict is recorded. The review then
+# reports only what it could NOT fix.
+"$VENV/bin/python3" -u reconcile_counties.py --all --days "$REVIEW_DAYS" --repair
 review_status=$?
 if [ $review_status -ne 0 ]; then
     echo "WEEKLY REVIEW FOUND GAPS (exit $review_status) — see index_coverage"

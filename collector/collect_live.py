@@ -62,6 +62,17 @@ DOC_TYPES = [
 ]
 
 CHUNK_DAYS  = 3          # start conservative; auto-splits if still capped
+
+# --force: collect every window in range even if collection_log says OK.
+#
+# A window logged OK is not finished — the county keeps adding documents to a
+# recording date afterwards. database.RECHECK_DAYS covers that for recent
+# windows; this is for a TARGETED re-collection of an old day that a
+# reconciliation found short. Without it the 16 Oct 2026 re-collection of
+# eight such days silently skipped three of them (their 1-day windows had been
+# logged OK months earlier), and the forced re-run of one returned 212 rows
+# where the original had seen 207.
+FORCE = False
 MIN_CHUNK   = 1          # minimum 1 day
 
 logging.basicConfig(
@@ -279,7 +290,7 @@ async def collect_range(page: Page, doc_type: str, start: date, end: date,
     while cur <= end:
         chunk_end = min(cur + timedelta(days=chunk_days - 1), end)
 
-        if already_collected(iso(cur), iso(chunk_end), doc_type):
+        if not FORCE and already_collected(iso(cur), iso(chunk_end), doc_type):
             log.info(f"  [SKIP] {doc_type[:24]} {iso(cur)}–{iso(chunk_end)}")
             cur = chunk_end + timedelta(days=1)
             continue
@@ -396,7 +407,11 @@ if __name__ == "__main__":
     p.add_argument("--end",   default=date.today().isoformat())
     p.add_argument("--doc-types", default=None,
                    help="comma-separated doc type values; default: all configured types")
+    p.add_argument("--force", action="store_true",
+                   help="collect every window in range even if collection_log says OK — "
+                        "for a targeted re-collection of a day found short")
     args = p.parse_args()
+    FORCE = args.force
     types = ([t.strip() for t in args.doc_types.split(',')] if args.doc_types
              else DOC_TYPES)
     asyncio.run(run(args.start, args.end, types))
