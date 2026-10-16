@@ -480,10 +480,24 @@ def reconcile_hillsborough(days_list: list[date], quiet: bool,
                        our_count('HILLSBOROUGH', code, day), UNKNOWN, str(e)[:200])
                 findings.append(('HILLSBOROUGH', day, code, UNKNOWN, str(e)[:80]))
                 continue
-            source = len({str(r.get('Instrument')) for r in rows})
+            api_cfns = {str(r.get('Instrument')) for r in rows}
+            source = len(api_cfns)
             ours = our_count('HILLSBOROUGH', code, day)
             v = verdict(source, ours)
-            record('HILLSBOROUGH', day, code, source, ours, v)
+            note = None
+            if v == SHORT:
+                # Same as Miami-Dade: the daily feed re-sends corrected
+                # documents under the correction date, and assignments holds
+                # one row per instrument, so the API's per-day count can be
+                # one above ours while the document is present.
+                truly_missing = sorted(api_cfns - held_anywhere('HILLSBOROUGH', api_cfns))
+                if not truly_missing:
+                    v = OK
+                    note = (f'{source - ours} listed by the county on this day '
+                            'but held under another type or date')
+                else:
+                    note = f'missing: {", ".join(truly_missing[:10])}'
+            record('HILLSBOROUGH', day, code, source, ours, v, note)
             if v == SHORT:
                 findings.append(('HILLSBOROUGH', day, code, v,
                                  f'api {source}, ours {ours}'))
