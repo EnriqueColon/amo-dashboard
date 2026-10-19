@@ -1,4 +1,6 @@
-# AMO Tracker — Mortgage Assignment Intelligence Dashboard
+# AOM Tracker — Mortgage Assignment Intelligence Dashboard
+
+> **Renamed 19 Oct 2026 at the owner's request: the product is "AOM Tracker" (Assignment of Mortgage), formerly "AMO Tracker."** The rename covers everything users see — the sidebar, the sign-in page, the Entity Activity Report heading, the Excel export, the chat assistant, and the weekly email (subject and header "AOM Market Monitor", sender name "AOM Dashboard" — from the 19 Oct 2026 send onward if deployed before 07:00 ET, else from 26 Oct). Code identifiers, the repository name and the county's own document code (`ASSIGNMENT OF MORTGAGE - AMO`) are unchanged.
 
 > **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 16 Oct 2026
 > **Production URL:** `http://165.22.35.75:5000` (single shared password)

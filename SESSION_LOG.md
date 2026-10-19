@@ -4,6 +4,12 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-10-19 — Product renamed AMO Tracker → AOM Tracker, email included (`18e7f60`, DEPLOYED)
+
+Owner: "change the Title of UI from AMO to AOM", then "update the email as well." Sidebar header/footer, sign-in page (`auth.ts`), Entity Activity Report heading, Excel export creator/title (`workbook.ts`), chat self-description (`prompt.ts`), weekly email subject/header (`rollupReport.ts`) and sender display name (`sendWeeklyReport.ts`), legacy `report.ts` heading. Code identifiers, repo name and the county's `ASSIGNMENT OF MORTGAGE - AMO` doc code untouched. Built + PM2 restart; verified on the live login page. Confluence H1 renamed with a note. Retry pass from 17 Oct: `pdf_extractions` non-OK for Hillsborough should be re-checked (it was at 1 DL / 12 LLM / 8 OCR and still running when the session was held).
+
+---
+
 ## 2026-10-16 — Spelling rule deployed; capped days recovered; re-sweep verdicts; nightly skipped by the weekly; the clerk changed its login markup (`6593772`, `bee5121`, `4d65976`, DEPLOYED)
 
 Owner: **keep** both questionable merges (replayed 15 Oct); **continue yesterday's unfinished list.**
