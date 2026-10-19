@@ -52,13 +52,13 @@ export default function Sidebar() {
         </button>
         {!collapsed && (
           <div className="flex items-center gap-2 min-w-0">
-            <svg width="22" height="22" viewBox="0 0 32 32" fill="none" aria-label="AMO Tracker">
+            <svg width="22" height="22" viewBox="0 0 32 32" fill="none" aria-label="AOM Tracker">
               <rect x="2" y="2" width="28" height="28" rx="4" fill="hsl(38 95% 55% / 0.15)" stroke="hsl(38 95% 55%)" strokeWidth="1.5"/>
               <path d="M7 24 L12 10 L16 19 L20 14 L25 24" stroke="hsl(38 95% 55%)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
               <circle cx="16" cy="19" r="2" fill="hsl(38 95% 55%)"/>
             </svg>
             <div className="min-w-0">
-              <div className="font-semibold text-sm text-foreground truncate">AMO Tracker</div>
+              <div className="font-semibold text-sm text-foreground truncate">AOM Tracker</div>
               <div className="text-[9px] text-muted-foreground truncate">Official Records</div>
             </div>
           </div>
@@ -144,7 +144,7 @@ export default function Sidebar() {
         </form>
         {!collapsed && (
           <div className="px-1 pt-1">
-            <p className="text-[9px] text-muted-foreground/60">Official Records · AMO</p>
+            <p className="text-[9px] text-muted-foreground/60">Official Records · AOM</p>
           </div>
         )}
       </div>

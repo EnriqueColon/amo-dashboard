@@ -443,7 +443,7 @@ export function buildWeeklyReport(db: Database.Database, startDate: string, endD
   // ── HTML ──────────────────────────────────────────────────────────────────
   const html = `
 <div style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;max-width:900px;margin:0 auto;color:#0f172a;">
-  <h1 style="font-size:18px;margin:0 0 4px;">AMO Dashboard — Activity Report</h1>
+  <h1 style="font-size:18px;margin:0 0 4px;">AOM Dashboard — Activity Report</h1>
   <p style="font-size:13px;color:#64748b;margin:0 0 20px;">Clean AMO events: ${escapeHtml(startDate)} to ${escapeHtml(endDate)} (rolling 15-day window). Lending relationships: current snapshot.</p>
 
   <h2 style="font-size:15px;margin:0 0 8px;border-bottom:1px solid #e2e8f0;padding-bottom:6px;">Clean AMO Events — Last 15 Days</h2>

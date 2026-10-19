@@ -1,4 +1,4 @@
-// Weekly emailed report — the AMO Market Monitor roll-up: the same market over
+// Weekly emailed report — the AOM Market Monitor roll-up: the same market over
 // three horizons (last 15 days, last 30 days, last 360 days), each against the
 // period just before it, with Miami-Dade and Broward held apart throughout.
 //
@@ -74,7 +74,7 @@ async function main() {
 
     console.log('PREVIEW ONLY — nothing was sent.');
     console.log(`Subject: ${subject}`);
-    console.log(`From:    "AMO Dashboard" <${SENDER}>`);
+    console.log(`From:    "AOM Dashboard" <${SENDER}>`);
     console.log(`To:      ${RECIPIENTS.join(', ')}`);
     console.log(`Data through: ${coverage}`);
     console.log(`Transfers (last 15 days): ${report.cleanCount}`);
@@ -115,7 +115,7 @@ async function main() {
 
   const transport = createReportTransport();
   const info = await transport.sendMail({
-    from: `"AMO Dashboard" <${SENDER}>`,
+    from: `"AOM Dashboard" <${SENDER}>`,
     to: RECIPIENTS.join(', '),
     subject,
     html: report.html,

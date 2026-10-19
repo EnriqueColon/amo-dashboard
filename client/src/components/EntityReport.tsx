@@ -314,7 +314,7 @@ function EntityDrilldown({ entity, color, entityType, startDate, endDate, onBack
     <div className="space-y-3">
       {/* Print-only header for the focused entity */}
       <div className="hidden print:block border-b border-border pb-2">
-        <h1 className="text-base font-bold">AMO Activity Report — {countyLabel(county)}</h1>
+        <h1 className="text-base font-bold">AOM Activity Report — {countyLabel(county)}</h1>
         <p className="text-xs">Entity: {entity}</p>
         <p className="text-xs">
           Period: {startDate || 'beginning'} to {endDate || 'present'} · Generated {new Date().toLocaleDateString()}
@@ -493,7 +493,7 @@ export function EntityReport({ entities, startDate, endDate }: {
     <div className="space-y-3">
       {/* Print-only report header */}
       <div className="hidden print:block border-b border-border pb-2">
-        <h1 className="text-base font-bold">AMO Activity Report — {countyLabel(county)}</h1>
+        <h1 className="text-base font-bold">AOM Activity Report — {countyLabel(county)}</h1>
         <p className="text-xs">Entities: {entities.join(', ')}</p>
         <p className="text-xs">
           Period: {startDate || 'beginning'} to {endDate || 'present'} · Generated {new Date().toLocaleDateString()}
