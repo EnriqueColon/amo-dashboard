@@ -59,6 +59,15 @@ const SOURCE: Record<string, string> = {
   HILLSBOROUGH: 'the clerk’s public search API, one query per document type per day',
 };
 const ORDER = ['MIAMI-DADE', 'BROWARD', 'HILLSBOROUGH'];
+// Gaps the check cannot see because the county offers no free source for the
+// period at all — stated on the card so "complete" is never read as "everything
+// since 2023". Broward: the yearly export stops at CY2025 and the daily feed keeps
+// ~10 days, so 1 Jan – 21 Jul 2026 is in neither; the owner deferred the county's
+// paid bulk order on 21 Oct 2026. The index self-heals when CY2026 publishes
+// (~Feb 2027); the images for that window never will.
+const KNOWN_GAP: Record<string, string> = {
+  BROWARD: 'Known gap, not checkable: 1 Jan – 21 Jul 2026 is not in the county’s free feed. Fills itself when the county publishes its 2026 export (~Feb 2027); the paid bulk order is deferred.',
+};
 
 const fmtDay = (d?: string | null) => (d ? d.slice(0, 10) : '—');
 const fmtWhen = (iso?: string | null) => {
@@ -120,6 +129,9 @@ function CountyProof({ row, all, lastCollected }: {
         </dd>
       </dl>
       <p className="text-[11px] text-muted-foreground">Checked against {SOURCE[county] ?? 'the county'}.</p>
+      {KNOWN_GAP[county] && (
+        <p data-testid={`known-gap-${county}`} className="text-[11px] text-amber-700 dark:text-amber-500">{KNOWN_GAP[county]}</p>
+      )}
     </div>
   );
 }

@@ -2031,12 +2031,15 @@ becomes a confident wrong conclusion. Miami-Dade correctly reports no gap; All C
 Broward's, labelled, rather than hiding it in the aggregate. Detection counts only whole empty
 months, so weekends and holidays never trigger it.
 
-The underlying gap is still open:
-Unreachable from the SFTP feed — yearly exports stop at the last completed year (CY2025 published
-17 Feb 2026), and the daily feed retains only ~10 days. Three options, **undecided**:
-scrape AcclaimWeb for that window · request a one-off bulk export from Broward RTT (they invite this,
-954-831-4000) · wait for CY2026 to publish (~Feb 2027) and backfill then. The index self-heals when
-CY2026 lands; **the images for that window never will.**
+The underlying gap is still open, and **the owner decided on 21 Oct 2026 not to place the paid
+bulk order for now** ("that will take some time"). The period is 1 Jan – 21 Jul 2026 precisely
+(our daily harvest began 22 Jul). Unreachable from the SFTP feed — yearly exports stop at the last
+completed year (CY2025 published 17 Feb 2026), and the daily feed retains only ~10 days. Scraping
+AcclaimWeb for the window was rejected (see item 1). So the plan is: **wait for CY2026 to publish
+(~Feb 2027) and backfill the index then**; the index self-heals at that point; **the images for
+that window never will** without the bulk order. The Broward card on the Collection Log states
+this gap in amber so its "complete" badge is never read as "everything since 2023" — the
+completeness check has no county source to compare against for those months and is silent on them.
 
 **3. Cron failures on the droplet are silent** — no `MAILTO` configured for cron itself. A mail
 transport now exists for the weekly report (item 9, `server/email/mailer.ts`) but is not wired to
@@ -2228,9 +2231,12 @@ healthy (640 rows, 57% carrying loan amounts).
    so GitHub's secret scanning never saw it and nothing will auto-revoke it. Open since
    4 Aug 2026 — the oldest item here and the only one with security consequences.
    Revoke → check the account security log → move to an SSH remote / read-only deploy key.
-2. 📞 **Place the Broward bulk image order** — 954-831-4000. Document type `AST`, 2023-01-01 →
-   2025-12-31, ~41,900 documents, TIFF as the daily FTP feed already delivers so it drops straight
-   into the existing pipeline. Would also close the Jan–Jun 2026 index gap if requested together.
+2. 📞 **Broward bulk image order — DEFERRED by the owner, 21 Oct 2026** ("not running it, that
+   will take some time"). Kept here as the recipe for when it is: 954-831-4000, document type
+   `AST`, 2023-01-01 → 2025-12-31, ~41,900 documents, TIFF as the daily FTP feed already delivers
+   so it drops straight into the existing pipeline. Would also close the 1 Jan – 21 Jul 2026 index
+   gap if requested together; otherwise that index gap backfills itself when the county publishes
+   CY2026 (~Feb 2027). Do not re-raise this before then unless the owner brings it up.
 
 3. ✅ **DONE — the DigitalOcean Space exists and the backup job uses it.** Verified 7 Oct 2026: the
    eight most recent runs all recorded `status=ok` against `spaces:amo-dashboard-backups-ec`. This
