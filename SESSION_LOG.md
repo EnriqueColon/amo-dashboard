@@ -4,6 +4,18 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-10-21 — Scrape-completeness QC: instrument-level, every county daily, proof on the Collection Log (`955d7ce`, DEPLOYED)
+
+Owner: before building the staging-table normalize, "a QC mechanism that checks everything on the site against that data table — now and going forward", with "the proof on the UI … by county so it can also be monitoring … displayed somewhere in the Collection Log."
+
+- **`classify(source_cfns, held_cfns, ours)`** in `reconcile_counties.py` — a day is SHORT **iff the county lists an instrument we hold nowhere** (any type, any date); counts never decide (equal counts can hide a swap; a count one short can be a dual-listed document). Missing instruments stored in the new `index_coverage.missing_cfns` (JSON; added by `init_schema` ALTER). All three counties use it — Broward daily (feed instrument set) and yearly (per-day sets from the export, one held-set lookup per year) included. `--repair` now also re-pulls a short Hillsborough day (`hillsborough_collect.py --history --doc-types CODE`) and re-ingests a short Broward day (`broward_collect.py --daily --start/--end`). `tests/check_reconcile_sets.py` (5 scenarios).
+- **`run_daily_reconcile.sh`** — cron **`30 16 * * *`** (12:30 ET, after all three pulls): `--all --days 5 --repair --quiet`; waits for any `collect_live.py`; exit 1 only for what it could not repair. Backup `crontab.before_daily_reconcile.<ts>`. Friday 17:00 review unchanged (14 days).
+- **`GET /api/qc/coverage`** (uncached): per county last-30-days {checks, ok, ahead, short, unknown, last_checked, verified_through, hours_since_check}, all-time {…, first_day, last_day}, exceptions (every SHORT ever + last-30-day non-OK, with parsed `missing_cfns`), last collection per county, `any_short`, `stale` (>48h).
+- **UI:** `CollectionLog.tsx` opens with **"Scrape completeness — proof by county"**: one card per county (badge complete / N days missing documents / check stale; verified through; last checked; last collected; last-30-day and since-2023 verified counts; what it was checked against), a red table of **documents the county lists that are not in the tool** (instrument links via `doc-url.ts` — Hillsborough deep-links, Miami-Dade/Broward plain), and a collapsed list of unverifiable/AHEAD days. `ScrapeCompleteness.tsx` on the Overview: one line per county, red on any SHORT or stale check, links to the Collection Log. Verified on the local dev server with synthetic ledger rows (green / stale / short-with-links) before deploy; `npm run check` + build clean.
+- Deployed 955d7ce (build + PM2 restart, ~2s), cron installed, first live run started immediately — results below when it lands. **Next: the staging-table normalize** (no zeros during the ~2h rebuild).
+
+---
+
 ## 2026-10-19 — Product renamed AMO Tracker → AOM Tracker, email included (`18e7f60`, DEPLOYED)
 
 Owner: "change the Title of UI from AMO to AOM", then "update the email as well." Sidebar header/footer, sign-in page (`auth.ts`), Entity Activity Report heading, Excel export creator/title (`workbook.ts`), chat self-description (`prompt.ts`), weekly email subject/header (`rollupReport.ts`) and sender display name (`sendWeeklyReport.ts`), legacy `report.ts` heading. Code identifiers, repo name and the county's `ASSIGNMENT OF MORTGAGE - AMO` doc code untouched. Built + PM2 restart; verified on the live login page. Confluence H1 renamed with a note. Retry pass from 17 Oct: `pdf_extractions` non-OK for Hillsborough should be re-checked (it was at 1 DL / 12 LLM / 8 OCR and still running when the session was held).
