@@ -73,6 +73,14 @@ CHUNK_DAYS  = 3          # start conservative; auto-splits if still capped
 # logged OK months earlier), and the forced re-run of one returned 212 rows
 # where the original had seen 207.
 FORCE = False
+
+# Windows whose search ERRORed this run. A run with one of these is not a
+# success: on 21 Oct 2026 the 12:30 pull logged ERROR on the window holding
+# 20 Oct, still exited 0, and the wrapper reported "done — exit 0" while 67
+# documents were missing until the completeness check repaired them an hour
+# later. The retry horizon re-collects the window on the next run regardless;
+# this is about not calling a partial run a success.
+ERROR_WINDOWS: list[str] = []
 MIN_CHUNK   = 1          # minimum 1 day
 
 logging.basicConfig(
@@ -322,6 +330,8 @@ async def collect_range(page: Page, doc_type: str, start: date, end: date,
             # retry is cheap now that an empty search returns in ~1s.
             inserted = insert_records(records)
             log_collection(iso(cur), iso(chunk_end), len(records), status, doc_type)
+            if status == "ERROR":
+                ERROR_WINDOWS.append(f"{doc_type} {iso(cur)}–{iso(chunk_end)}")
             total += inserted
             log.info(f"  [DB]   {inserted} new rows inserted")
 
@@ -415,3 +425,8 @@ if __name__ == "__main__":
     types = ([t.strip() for t in args.doc_types.split(',')] if args.doc_types
              else DOC_TYPES)
     asyncio.run(run(args.start, args.end, types))
+    if ERROR_WINDOWS:
+        log.error(f"⚠️  {len(ERROR_WINDOWS)} window(s) ERRORED this run — collection is "
+                  f"INCOMPLETE: {'; '.join(ERROR_WINDOWS[:6])}"
+                  + (" …" if len(ERROR_WINDOWS) > 6 else ""))
+        raise SystemExit(1)
