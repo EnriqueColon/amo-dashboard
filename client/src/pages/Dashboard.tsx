@@ -9,6 +9,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import CategoryBadge from '@/components/CategoryBadge';
 import EntityDetailPanel from '@/components/EntityDetailPanel';
 import HillsboroughProgress from '@/components/HillsboroughProgress';
+import ScrapeCompleteness from '@/components/ScrapeCompleteness';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 const MONTH_LABELS: Record<string, string> = {
@@ -213,6 +214,8 @@ export default function Dashboard() {
           </span>
         </div>
       )}
+
+      <ScrapeCompleteness />
 
       <HillsboroughProgress />
 

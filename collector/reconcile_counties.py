@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
 import subprocess
 import sys
@@ -75,6 +76,11 @@ def init_schema() -> None:
     conn = get_conn()
     try:
         conn.executescript(SCHEMA)
+        # Added 21 Oct 2026: the exact instruments the county lists that we do
+        # not hold, as a JSON array — what the Data QC page links to.
+        cols = {r[1] for r in conn.execute('PRAGMA table_info(index_coverage)')}
+        if 'missing_cfns' not in cols:
+            conn.execute('ALTER TABLE index_coverage ADD COLUMN missing_cfns TEXT')
         conn.commit()
     finally:
         conn.close()
@@ -122,21 +128,23 @@ def held_anywhere(county: str, cfns: set[str]) -> set[str]:
 
 
 def record(county: str, day: date, doc_type: str, source: int | None,
-           ours: int, status: str, note: str | None = None) -> None:
+           ours: int, status: str, note: str | None = None,
+           missing: list[str] | None = None) -> None:
     conn = get_conn()
     try:
         conn.execute(
             """
             INSERT INTO index_coverage
                 (county, rec_date, doc_type, source_count, our_count,
-                 status, note, checked_at)
-            VALUES (?,?,?,?,?,?,?,?)
+                 status, note, missing_cfns, checked_at)
+            VALUES (?,?,?,?,?,?,?,?,?)
             ON CONFLICT(county, rec_date, doc_type) DO UPDATE SET
                 source_count=excluded.source_count, our_count=excluded.our_count,
                 status=excluded.status, note=excluded.note,
-                checked_at=excluded.checked_at
+                missing_cfns=excluded.missing_cfns, checked_at=excluded.checked_at
             """,
-            (county, day.isoformat(), doc_type, source, ours, status, note, now_utc()),
+            (county, day.isoformat(), doc_type, source, ours, status, note,
+             json.dumps(missing) if missing else None, now_utc()),
         )
         conn.commit()
     finally:
@@ -149,6 +157,30 @@ def verdict(source: int, ours: int) -> str:
     if ours > source:
         return AHEAD
     return OK
+
+
+def classify(source_cfns: set[str], held_cfns: set[str],
+             ours: int) -> tuple[str, list[str], str | None]:
+    """Instrument-level verdict for one county / day / document type.
+
+    SHORT if and only if the county lists an instrument we hold NOWHERE — not
+    under this type, not under another, not on another date. Counts never
+    decide: on 16 Oct 2026 a day with an equal count could still have hidden a
+    swap (one document we hold that the county no longer lists, one it lists
+    that we never got), and a day one short by count turned out to hold every
+    document (the county lists some under two types; we store one row per
+    instrument). Returns (verdict, missing instruments, note).
+    """
+    missing = sorted(source_cfns - held_cfns)
+    source = len(source_cfns)
+    if missing:
+        return SHORT, missing, f'missing {len(missing)}: {", ".join(missing[:10])}'
+    if ours < source:
+        return OK, [], (f'{source - ours} listed by the county under this type '
+                        'but held under another type or date')
+    if ours > source:
+        return AHEAD, [], None
+    return OK, [], None
 
 
 def window(days: int, skip_weekends: bool = True) -> list[date]:
@@ -278,54 +310,43 @@ async def reconcile_miami_dade(days_list: list[date], quiet: bool,
 
                     portal_cfns = {r['cfn'] for r in records}
                     source = len(portal_cfns)
-                    v = verdict(source, ours)
-                    note = None
-                    if v == SHORT:
-                        # The portal lists some documents under two types (an
-                        # AMO that is also returned as ASG); assignments holds
-                        # one row per CFN, so the per-type count comes up one
-                        # short while the document is present. Only a CFN we
-                        # do not hold AT ALL is a real shortfall.
-                        held = held_anywhere('MIAMI-DADE', portal_cfns)
-                        truly_missing = sorted(portal_cfns - held)
-                        if not truly_missing:
-                            v = OK
-                            note = (f'{source - ours} listed by the county under this type '
-                                    'but held under another type or date')
-                        elif repair:
-                            # Re-collect the day with --force (the window is
-                            # usually logged OK from months ago — late postings
-                            # are the common cause) and ask again.
-                            print(f'  MIAMI-DADE {day} {doc_type[:30]}: short by '
-                                  f'{len(truly_missing)} — re-collecting', flush=True)
-                            subprocess.run(
-                                [sys.executable, '-u', 'collect_live.py', '--force',
-                                 '--start', day.isoformat(), '--end', day.isoformat(),
-                                 '--doc-types', doc_type],
-                                cwd=os.path.dirname(os.path.abspath(__file__)),
-                                check=False, timeout=1200)
-                            ours = our_count('MIAMI-DADE', doc_type, day)
-                            held = held_anywhere('MIAMI-DADE', portal_cfns)
-                            truly_missing = sorted(portal_cfns - held)
-                            v = verdict(source, ours) if truly_missing else OK
-                            note = ('repaired: re-collected' if v == OK
-                                    else f'still missing after re-collect: {", ".join(truly_missing[:10])}')
-                        else:
-                            note = f'missing: {", ".join(truly_missing[:10])}'
+                    v, missing, note = classify(
+                        portal_cfns, held_anywhere('MIAMI-DADE', portal_cfns), ours)
+                    if v == SHORT and repair:
+                        # Re-collect the day with --force (the window is usually
+                        # logged OK from months ago — late postings are the
+                        # common cause) and ask again.
+                        print(f'  MIAMI-DADE {day} {doc_type[:30]}: {len(missing)} '
+                              'instrument(s) the county lists that we do not hold — '
+                              're-collecting', flush=True)
+                        subprocess.run(
+                            [sys.executable, '-u', 'collect_live.py', '--force',
+                             '--start', day.isoformat(), '--end', day.isoformat(),
+                             '--doc-types', doc_type],
+                            cwd=os.path.dirname(os.path.abspath(__file__)),
+                            check=False, timeout=1200)
+                        ours = our_count('MIAMI-DADE', doc_type, day)
+                        v, missing, note = classify(
+                            portal_cfns, held_anywhere('MIAMI-DADE', portal_cfns), ours)
+                        note = ('repaired: re-collected' if v != SHORT
+                                else f'still missing after re-collect: {", ".join(missing[:10])}')
                     if v == AHEAD and ours - source >= AHEAD_RECHECK_MIN:
                         # Don't believe a surplus from a possibly tired session.
                         if await login_fresh():
                             records2, status2 = await search(doc_type, day)
                             if status2 in ('OK', 'EMPTY'):
-                                source = len({r['cfn'] for r in records2})
-                                v = verdict(source, ours)
-                                note = 'confirmed in a fresh session' if v == AHEAD else None
+                                portal_cfns = {r['cfn'] for r in records2}
+                                source = len(portal_cfns)
+                                v, missing, note = classify(
+                                    portal_cfns, held_anywhere('MIAMI-DADE', portal_cfns), ours)
+                                if v == AHEAD:
+                                    note = 'confirmed in a fresh session'
                             else:
                                 note = f'fresh-session recheck returned {status2}; first answer kept'
-                    record('MIAMI-DADE', day, doc_type, source, ours, v, note)
+                    record('MIAMI-DADE', day, doc_type, source, ours, v, note, missing)
                     if v == SHORT:
                         findings.append(('MIAMI-DADE', day, doc_type, v,
-                                         f'county {source}, ours {ours}'))
+                                         f'county {source}, ours {ours}, missing {len(missing)}'))
                     if not quiet:
                         print(f'  MIAMI-DADE {day} {doc_type[:30]:30} '
                               f'county={source:4} ours={ours:4} {v}')
@@ -338,7 +359,8 @@ async def reconcile_miami_dade(days_list: list[date], quiet: bool,
 # ── Broward ──────────────────────────────────────────────────────────────────
 
 def reconcile_broward(days_list: list[date], quiet: bool,
-                      skip_verified: bool = False) -> list[tuple]:
+                      skip_verified: bool = False,
+                      repair: bool = False) -> list[tuple]:
     """Reconcile Broward from the daily feed files.
 
     Only covers days still on the feed (~12-day retention). Older history is
@@ -371,13 +393,25 @@ def reconcile_broward(days_list: list[date], quiet: bool,
                 continue
             text = bc.read_remote_text(sftp, f'{bc.DAILY_DIR}/{entry}')
             docs = bc.parse_doc_records(text, bc.DOC_TYPES, None, None)
-            source = sum(1 for d in docs.values() if d['rec_date'] == day.isoformat())
+            feed_cfns = {cfn for cfn, d in docs.items() if d['rec_date'] == day.isoformat()}
+            source = len(feed_cfns)
             ours = our_count('BROWARD', 'AST', day)
-            v = verdict(source, ours)
-            record('BROWARD', day, 'AST', source, ours, v)
+            v, missing, note = classify(feed_cfns, held_anywhere('BROWARD', feed_cfns), ours)
+            if v == SHORT and repair:
+                print(f'  BROWARD {day}: {len(missing)} instrument(s) on the feed that we '
+                      'do not hold — re-ingesting the day', flush=True)
+                subprocess.run(
+                    [sys.executable, '-u', 'broward_collect.py', '--daily',
+                     '--start', day.isoformat(), '--end', day.isoformat()],
+                    cwd=os.path.dirname(os.path.abspath(__file__)), check=False, timeout=900)
+                ours = our_count('BROWARD', 'AST', day)
+                v, missing, note = classify(feed_cfns, held_anywhere('BROWARD', feed_cfns), ours)
+                note = ('repaired: re-ingested' if v != SHORT
+                        else f'still missing after re-ingest: {", ".join(missing[:10])}')
+            record('BROWARD', day, 'AST', source, ours, v, note, missing)
             if v == SHORT:
                 findings.append(('BROWARD', day, 'AST', v,
-                                 f'feed {source}, ours {ours}'))
+                                 f'feed {source}, ours {ours}, missing {len(missing)}'))
             if not quiet:
                 print(f'  BROWARD    {day} {"AST":30} feed={source:4} ours={ours:4} {v}')
     finally:
@@ -411,21 +445,15 @@ def reconcile_broward_years(years: list[int], quiet: bool) -> list[tuple]:
                 continue
 
             text = bc.read_remote_text(sftp, f'{bc.YEARLY_DIR}/{name}')
-            per_day: dict[str, int] = {}
+            per_day: dict[str, set[str]] = {}
             for line in text.splitlines():
-                rec = bc.parse_doc_line(line) if hasattr(bc, 'parse_doc_line') else None
-                if rec is None:
-                    f = line.split('|')
-                    if len(f) < 14 or f[4].strip() not in bc.DOC_TYPES:
-                        continue
-                    rd = bc.parse_date(f[1].strip(), f[2].strip())
-                    if not rd:
-                        continue
-                elif rec['doc_type'] not in bc.DOC_TYPES:
+                f = line.split('|')
+                if len(f) < 14 or f[4].strip() not in bc.DOC_TYPES:
                     continue
-                else:
-                    rd = rec['rec_date']
-                per_day[rd] = per_day.get(rd, 0) + 1
+                rd = bc.parse_date(f[1].strip(), f[2].strip())
+                if not rd:
+                    continue
+                per_day.setdefault(rd, set()).add(f[0].strip().lstrip('﻿'))
 
             conn = get_conn()
             try:
@@ -438,21 +466,26 @@ def reconcile_broward_years(years: list[int], quiet: bool) -> list[tuple]:
                     """,
                     (f'{year}-01-01', f'{year}-12-31'),
                 ))
+                # Every Broward instrument we hold in the year, once, so each
+                # day's set comparison is a lookup rather than a query.
+                held_year = {r[0] for r in conn.execute(
+                    "SELECT cfn FROM assignments WHERE COALESCE(county,'MIAMI-DADE')='BROWARD'")}
             finally:
                 conn.close()
 
             short_days = 0
             for rd in sorted(set(per_day) | set(ours_by_day)):
-                source, ours = per_day.get(rd, 0), ours_by_day.get(rd, 0)
-                v = verdict(source, ours)
+                export_cfns = per_day.get(rd, set())
+                source, ours = len(export_cfns), ours_by_day.get(rd, 0)
+                v, missing, note = classify(export_cfns, export_cfns & held_year, ours)
                 day = datetime.strptime(rd, '%Y-%m-%d').date()
                 record('BROWARD', day, 'AST', source, ours, v,
-                       f'CY{year} yearly export')
+                       f'CY{year} yearly export' + (f' — {note}' if note else ''), missing)
                 if v == SHORT:
                     short_days += 1
                     findings.append(('BROWARD', day, 'AST', v,
-                                     f'export {source}, ours {ours}'))
-            total_src, total_ours = sum(per_day.values()), sum(ours_by_day.values())
+                                     f'export {source}, ours {ours}, missing {len(missing)}'))
+            total_src, total_ours = sum(len(s) for s in per_day.values()), sum(ours_by_day.values())
             flag = 'OK' if total_src == total_ours else f'{total_ours - total_src:+,}'
             print(f'  BROWARD CY{year}: export={total_src:,} ours={total_ours:,} '
                   f'{flag} — {len(per_day)} recording days, {short_days} short')
@@ -465,7 +498,8 @@ def reconcile_broward_years(years: list[int], quiet: bool) -> list[tuple]:
 # ── Hillsborough ─────────────────────────────────────────────────────────────
 
 def reconcile_hillsborough(days_list: list[date], quiet: bool,
-                           skip_verified: bool = False) -> list[tuple]:
+                           skip_verified: bool = False,
+                           repair: bool = False) -> list[tuple]:
     import hillsborough_collect as hc
 
     findings = []
@@ -483,24 +517,24 @@ def reconcile_hillsborough(days_list: list[date], quiet: bool,
             api_cfns = {str(r.get('Instrument')) for r in rows}
             source = len(api_cfns)
             ours = our_count('HILLSBOROUGH', code, day)
-            v = verdict(source, ours)
-            note = None
-            if v == SHORT:
-                # Same as Miami-Dade: the daily feed re-sends corrected
-                # documents under the correction date, and assignments holds
-                # one row per instrument, so the API's per-day count can be
-                # one above ours while the document is present.
-                truly_missing = sorted(api_cfns - held_anywhere('HILLSBOROUGH', api_cfns))
-                if not truly_missing:
-                    v = OK
-                    note = (f'{source - ours} listed by the county on this day '
-                            'but held under another type or date')
-                else:
-                    note = f'missing: {", ".join(truly_missing[:10])}'
-            record('HILLSBOROUGH', day, code, source, ours, v, note)
+            v, missing, note = classify(api_cfns, held_anywhere('HILLSBOROUGH', api_cfns), ours)
+            if v == SHORT and repair:
+                # The county indexes some documents days after the recording
+                # date; a one-day --history pull from the live API gets them.
+                print(f'  HILLSBOROUGH {day} {code}: {len(missing)} instrument(s) the county '
+                      'lists that we do not hold — re-pulling the day', flush=True)
+                subprocess.run(
+                    [sys.executable, '-u', 'hillsborough_collect.py', '--history',
+                     '--doc-types', code, '--start', day.isoformat(), '--end', day.isoformat()],
+                    cwd=os.path.dirname(os.path.abspath(__file__)), check=False, timeout=900)
+                ours = our_count('HILLSBOROUGH', code, day)
+                v, missing, note = classify(api_cfns, held_anywhere('HILLSBOROUGH', api_cfns), ours)
+                note = ('repaired: re-pulled' if v != SHORT
+                        else f'still missing after re-pull: {", ".join(missing[:10])}')
+            record('HILLSBOROUGH', day, code, source, ours, v, note, missing)
             if v == SHORT:
                 findings.append(('HILLSBOROUGH', day, code, v,
-                                 f'api {source}, ours {ours}'))
+                                 f'api {source}, ours {ours}, missing {len(missing)}'))
             if not quiet:
                 print(f'  HILLSBOROUGH {day} {code:28} api={source:4} ours={ours:4} {v}')
     return findings
@@ -558,9 +592,9 @@ def main() -> int:
                     years = sorted({d.year for d in days_list})
                     findings += reconcile_broward_years(years, args.quiet)
                 else:
-                    findings += reconcile_broward(days_list, args.quiet, args.resume)
+                    findings += reconcile_broward(days_list, args.quiet, args.resume, args.repair)
             else:
-                findings += reconcile_hillsborough(days_list, args.quiet, args.resume)
+                findings += reconcile_hillsborough(days_list, args.quiet, args.resume, args.repair)
         except Exception as e:
             print(f'{county}: reconciliation FAILED — {e}', file=sys.stderr)
             findings.append((county, None, None, UNKNOWN, f'reconciler failed: {e}'))

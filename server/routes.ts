@@ -390,6 +390,64 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     });
   });
 
+  // ─── GET /api/qc/coverage ─────────────────────────────────────────────────
+  // The scrape-completeness ledger for the Data QC page and the Overview card.
+  // collector/reconcile_counties.py asks each county for the instrument
+  // numbers it lists per day and compares them to what we hold under any type
+  // or date; this reads its verdicts. Uncached on purpose — it exists so a
+  // shortfall is seen the same day.
+  app.get('/api/qc/coverage', (_req, res) => {
+    const hasTable = db.prepare(
+      `SELECT name FROM sqlite_master WHERE type='table' AND name='index_coverage'`).get();
+    if (!hasTable) return res.json({ active: false });
+    const cols = (db.prepare(`PRAGMA table_info(index_coverage)`).all() as any[]).map(c => c.name);
+    const hasMissing = cols.includes('missing_cfns');
+    const since30 = new Date(Date.now() - 30 * 86400e3).toISOString().slice(0, 10);
+
+    const counties = db.prepare(`
+      SELECT county,
+             COUNT(*)                                   AS checks,
+             SUM(status = 'OK')                         AS ok,
+             SUM(status = 'AHEAD')                      AS ahead,
+             SUM(status = 'SHORT')                      AS short,
+             SUM(status = 'UNKNOWN')                    AS unknown,
+             MAX(checked_at)                            AS last_checked,
+             MAX(CASE WHEN status IN ('OK','AHEAD') THEN rec_date END) AS verified_through,
+             CAST((julianday('now') - julianday(MAX(checked_at))) * 24 AS INTEGER) AS hours_since_check
+      FROM index_coverage WHERE rec_date >= ?
+      GROUP BY county`).all(since30) as any[];
+
+    const allTime = db.prepare(`
+      SELECT county, COUNT(*) AS checks, SUM(status = 'OK') AS ok, SUM(status = 'AHEAD') AS ahead,
+             SUM(status = 'SHORT') AS short, SUM(status = 'UNKNOWN') AS unknown,
+             MIN(rec_date) AS first_day, MAX(rec_date) AS last_day
+      FROM index_coverage GROUP BY county`).all() as any[];
+
+    const exceptions = (db.prepare(`
+      SELECT county, rec_date, doc_type, source_count, our_count, status, note,
+             ${hasMissing ? 'missing_cfns' : 'NULL AS missing_cfns'}, checked_at
+      FROM index_coverage
+      WHERE status <> 'OK' AND (status = 'SHORT' OR rec_date >= ?)
+      ORDER BY (status = 'SHORT') DESC, rec_date DESC
+      LIMIT 300`).all(since30) as any[]).map(e => {
+      let missing: string[] = [];
+      try { missing = e.missing_cfns ? JSON.parse(e.missing_cfns) : []; } catch { missing = []; }
+      return { ...e, missing_cfns: missing };
+    });
+
+    const collection = db.prepare(`
+      SELECT COALESCE(county, 'MIAMI-DADE') AS county, MAX(collected_at) AS last_collected
+      FROM collection_log GROUP BY COALESCE(county, 'MIAMI-DADE')`).all();
+
+    res.json({
+      active: true,
+      generated_at: new Date().toISOString(),
+      counties, all_time: allTime, exceptions, collection,
+      any_short: exceptions.some(e => e.status === 'SHORT'),
+      stale: counties.some(c => c.hours_since_check != null && c.hours_since_check > 48),
+    });
+  });
+
   // ─── GET /api/cache/stats ─────────────────────────────────────────────────
   app.get('/api/cache/stats', (_req, res) => {
     res.json(getCacheStats());
