@@ -1356,6 +1356,80 @@ def canonicalize(name: str) -> str:
     return _ALIAS_MAP.get(s, s)
 
 
+# ── Staged rebuild: the dashboard never sees an empty table ──────────────────
+#
+# Every derived table is built as a TEMP table under its own name. SQLite
+# resolves an unqualified name to `temp` before `main`, so every INSERT, UPDATE
+# and SELECT in the build below works on the new copy without being told, while
+# the live table in `main` — the one the server is reading — stays exactly as
+# it was. swap_in() then moves the finished tables into place in ONE write
+# transaction, a few seconds long, and WAL readers see the old data until the
+# commit and the new data after it. Until 21 Oct 2026 the build DROPped each
+# live table at the start and refilled it over ~2 hours, so the dashboard
+# showed zeros from ~08:45 to ~11:00 UTC every morning (the owner hit it on
+# 15 Oct), and the backup job had to wait the rebuild out.
+#
+# A long transaction is not an option: the facility tick, the extractors and
+# the daily pulls all write to this database, and a RESERVED lock held for two
+# hours would turn their inserts into "database is locked" failures.
+#
+# Reads that need the PREVIOUS run's answer must say `main.` explicitly —
+# see prior_sales / prior_counts.
+
+STAGED_TABLES = ('aom_events_clean', 'aom_events_nonloan', 'direction_decisions',
+                 'credit_facility_events', 'entity_relationships', 'entity_nodes')
+
+
+def swap_in(conn, tables=STAGED_TABLES) -> dict:
+    """Replace each live table with its finished TEMP twin, atomically.
+
+    The schema is taken from the temp table itself (temp.sqlite_master), so a
+    column or index added to the build arrives in main without a second copy
+    of the DDL to keep in sync. Returns {table: rows} for the log.
+    """
+    import re as _re
+
+    def ddl_for(kind: str, tbl: str) -> list[str]:
+        col = 'name' if kind == 'table' else 'tbl_name'
+        return [r[0] for r in conn.execute(
+            f"SELECT sql FROM temp.sqlite_master WHERE type=? AND {col}=? AND sql IS NOT NULL",
+            (kind, tbl))]
+
+    moved: dict = {}
+    conn.commit()                       # close any open implicit transaction
+    prev_isolation = conn.isolation_level
+    conn.isolation_level = None         # we control BEGIN/COMMIT ourselves
+    try:
+        conn.execute('BEGIN IMMEDIATE')
+        for tbl in tables:
+            table_sql = ddl_for('table', tbl)
+            if not table_sql:
+                raise RuntimeError(f'swap_in: no temp table {tbl!r} to swap in')
+            create = _re.sub(r'^\s*CREATE\s+(TEMP|TEMPORARY)\s+TABLE\s+',
+                             f'CREATE TABLE main.', table_sql[0], count=1, flags=_re.I)
+            conn.execute(f'DROP TABLE IF EXISTS main."{tbl}"')
+            conn.execute(create)
+            conn.execute(f'INSERT INTO main."{tbl}" SELECT * FROM temp."{tbl}"')
+            for idx_sql in ddl_for('index', tbl):
+                # CREATE INDEX [IF NOT EXISTS] name ON tbl(...)  →  schema on the index name
+                conn.execute(_re.sub(
+                    r'^\s*CREATE\s+(UNIQUE\s+)?INDEX\s+(IF\s+NOT\s+EXISTS\s+)?',
+                    lambda m: f'CREATE {m.group(1) or ""}INDEX IF NOT EXISTS main.',
+                    idx_sql, count=1, flags=_re.I))
+            moved[tbl] = conn.execute(f'SELECT COUNT(*) FROM main."{tbl}"').fetchone()[0]
+            conn.execute(f'DROP TABLE temp."{tbl}"')
+        conn.execute('COMMIT')
+    except Exception:
+        try:
+            conn.execute('ROLLBACK')
+        except Exception:
+            pass
+        raise
+    finally:
+        conn.isolation_level = prev_isolation
+    return moved
+
+
 def apply_late_aliases(conn, since: str) -> int:
     """Re-point canonical names for merges made while this run was in progress.
 
@@ -1505,8 +1579,8 @@ def build_normalized_tables():
         print(f"  Preserving {len(review_rows)} manual review marks")
 
     conn.executescript("""
-        DROP TABLE IF EXISTS aom_events_clean;
-        CREATE TABLE aom_events_clean (
+        DROP TABLE IF EXISTS temp.aom_events_clean;
+        CREATE TEMP TABLE aom_events_clean (
             cfn                  TEXT PRIMARY KEY,
             rec_date             TEXT,
             assignor             TEXT,
@@ -1559,8 +1633,8 @@ def build_normalized_tables():
     # NON_ASSIGNMENT_DOC_TYPES for why their party columns do not mean the same
     # thing.
     conn.executescript("""
-        DROP TABLE IF EXISTS aom_events_nonloan;
-        CREATE TABLE aom_events_nonloan (
+        DROP TABLE IF EXISTS temp.aom_events_nonloan;
+        CREATE TEMP TABLE aom_events_nonloan (
             cfn                  TEXT PRIMARY KEY,
             rec_date             TEXT,
             assignor             TEXT,
@@ -1726,8 +1800,13 @@ def build_normalized_tables():
     # join above misses for most index spellings.
     prior_types = dict(conn.execute("SELECT name, category FROM entity_classifications"))
     try:
+        # main. on purpose: the PREVIOUS run's table. The new one is being built
+        # as a TEMP table under the same unqualified name, and before 21 Oct
+        # 2026 this read the freshly re-created (empty) table — so the sales
+        # guard in prefer_document_seller and the evidence gate in
+        # prefer_known_spelling never fired in production.
         prior_sales = dict(conn.execute(
-            "SELECT assignor_canon, COUNT(*) FROM aom_events_clean GROUP BY assignor_canon"))
+            "SELECT assignor_canon, COUNT(*) FROM main.aom_events_clean GROUP BY assignor_canon"))
     except sqlite3.OperationalError:
         prior_sales = {}
     # Rows per canonical name on EITHER side in the previous run — the evidence
@@ -1735,9 +1814,9 @@ def build_normalized_tables():
     try:
         prior_counts = dict(conn.execute("""
             SELECT c, SUM(n) FROM (
-                SELECT assignor_canon AS c, COUNT(*) AS n FROM aom_events_clean GROUP BY 1
+                SELECT assignor_canon AS c, COUNT(*) AS n FROM main.aom_events_clean GROUP BY 1
                 UNION ALL
-                SELECT assignee_canon, COUNT(*) FROM aom_events_clean GROUP BY 1
+                SELECT assignee_canon, COUNT(*) FROM main.aom_events_clean GROUP BY 1
             ) GROUP BY c"""))
     except sqlite3.OperationalError:
         prior_counts = {}
@@ -1969,8 +2048,8 @@ def build_normalized_tables():
     # each run, like the tables it explains; the Needs-review list is
     # `WHERE needs_review = 1`.
     conn.executescript("""
-        DROP TABLE IF EXISTS direction_decisions;
-        CREATE TABLE direction_decisions (
+        DROP TABLE IF EXISTS temp.direction_decisions;
+        CREATE TEMP TABLE direction_decisions (
             cfn             TEXT PRIMARY KEY,
             bucket          TEXT,     -- D1..D5, see document_direction.py
             text_verdict    TEXT,     -- FORWARD | REVERSED | NULL (text check abstained / no text)
@@ -2040,8 +2119,8 @@ def build_normalized_tables():
     conn.create_function('fac_direction', 3, name_matching.filing_direction)
     conn.create_function('fac_role', 5, name_matching.party_role)
     conn.executescript("""
-        DROP TABLE IF EXISTS credit_facility_events;
-        CREATE TABLE credit_facility_events (
+        DROP TABLE IF EXISTS temp.credit_facility_events;
+        CREATE TEMP TABLE credit_facility_events (
             cfn                      TEXT PRIMARY KEY,
             rec_date                 TEXT,
             doc_type                 TEXT,
@@ -2135,8 +2214,8 @@ def build_normalized_tables():
     print("Building entity_relationships...")
 
     conn.executescript("""
-        DROP TABLE IF EXISTS entity_relationships;
-        CREATE TABLE entity_relationships (
+        DROP TABLE IF EXISTS temp.entity_relationships;
+        CREATE TEMP TABLE entity_relationships (
             source_entity      TEXT,
             target_entity      TEXT,
             transaction_count  INTEGER,
@@ -2169,8 +2248,8 @@ def build_normalized_tables():
     # ── Entity node stats ─────────────────────────────────────────────────────
     print("Building entity_nodes...")
     conn.executescript("""
-        DROP TABLE IF EXISTS entity_nodes;
-        CREATE TABLE entity_nodes (
+        DROP TABLE IF EXISTS temp.entity_nodes;
+        CREATE TEMP TABLE entity_nodes (
             entity         TEXT PRIMARY KEY,
             outbound_vol   INTEGER,  -- total txns as source
             inbound_vol    INTEGER,  -- total txns as target
@@ -2362,6 +2441,9 @@ def build_normalized_tables():
         CREATE INDEX IF NOT EXISTS idx_nodes_vol ON entity_nodes(total_vol DESC);
     """)
 
+    # ── Swap the finished tables into place: one short transaction ──────────
+    moved = swap_in(conn)
+    print("  Swapped in: " + ", ".join(f"{t}={n:,}" for t, n in moved.items()))
     conn.close()
     print("\nNormalization complete.")
 
