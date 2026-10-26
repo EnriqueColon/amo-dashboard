@@ -174,5 +174,17 @@ production default is overridden, and `pm2 save` keeps it across reboots.
 
 ## Status
 
-- 26 Oct 2026 — drafted; code committed on `main` (not pushed, not deployed); nginx file
-  syntax-tested; owner not yet asked.
+- 26 Oct 2026 ~17:15 UTC — drafted; code committed on `main`; nginx file syntax-tested; owner asked.
+- **26 Oct 2026 17:28–17:36 UTC — APPLIED, steps 2–4, on the owner's go-ahead** ("run steps through
+  step 5"; the owner tells Andres and David about the URL themselves, so step 1 was theirs).
+  - Step 2 nginx: backup `/etc/nginx/amo-dashboard.before_close5000.1793035829`, `nginx -t` ok,
+    reloaded. Brotli `POST` to `:80` went from `400 Decompression failed` to
+    `400 Unexpected token 'n', "notbrotli" is not valid JSON`; gzip control still decoded.
+  - Step 3 Node: `63ec058` built (`dist/index.cjs` 17:31 UTC), `pm2 restart --update-env` with
+    `AMO_BIND_HOST=127.0.0.1`, `pm2 save`; log `serving on 127.0.0.1:5000`; `ss` shows
+    `127.0.0.1:5000`. From the Mac: `:5000` → connection refused (curl exit 7), `:80/login` → 200
+    `AOM Tracker — Sign In`.
+  - Step 4 ufw: 22/80/443 allowed, enabled, active on boot. Fresh SSH ok; `nc :5000` times out,
+    `:80`/`:22` succeed; outbound HTTPS (OpenAI, GitHub) and SFTP to `BCFTP.Broward.org:22` still
+    work; PM2 online; the running `collect_live.py` was left alone.
+  - Still open: DigitalOcean cloud firewall (recommended, needs the DO account) and a hostname for TLS.
