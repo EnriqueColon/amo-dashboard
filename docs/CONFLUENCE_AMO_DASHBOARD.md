@@ -2,7 +2,7 @@
 
 > **Renamed 19 Oct 2026 at the owner's request: the product is "AOM Tracker" (Assignment of Mortgage), formerly "AMO Tracker."** The rename covers everything users see — the sidebar, the sign-in page, the Entity Activity Report heading, the Excel export, the chat assistant, and the weekly email (subject and header "AOM Market Monitor", sender name "AOM Dashboard" — from the 19 Oct 2026 send onward if deployed before 07:00 ET, else from 26 Oct). Code identifiers, the repository name and the county's own document code (`ASSIGNMENT OF MORTGAGE - AMO`) are unchanged.
 
-> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 21 Oct 2026
+> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 26 Oct 2026
 > **Production URL:** `http://165.22.35.75:5000` (single shared password)
 > **Repository:** `amo-dashboard` (`origin/main`)
 
@@ -622,7 +622,7 @@ health page** — gaps or `FAILED` rows here mean the pipeline missed a window.
         │
         │  extract_pdfs.py        (real-time, forward collection)
         │  batch_extract_facility.py (OpenAI Batch API, historical backlog)
-        │      download → OCR (poppler + tesseract) → LLM (gpt-4.1-nano)
+        │      download → OCR (poppler + tesseract) → LLM (gpt-5-nano)
         ▼
   ┌──────────────────────────────────────────────────────┐
   │  pdf_extractions  — document-derived truth, cached    │
@@ -843,7 +843,7 @@ System dependencies for OCR: `poppler-utils` and `tesseract-ocr`
 | `PORT` | `server/index.ts` | Default `5000`; the only unfirewalled port |
 | `NODE_ENV` | `server/index.ts` | `production` serves the built bundle; anything else runs Vite |
 | `OPENAI_API_KEY` | `extract_pdfs.py`, `enrich_entities.py`, `batch_extract_facility.py`, **and since 7 Oct 2026 `server/chat/`** | Already in production `.env` for the collectors; **the Node server now reads it too, so it must be pushed into PM2's environment once** (§6.4). Missing → startup warning, `/api/chat` answers 503, the page shows a notice |
-| `OPENAI_MODEL` | collector scripts | Default `gpt-4.1-nano` |
+| `OPENAI_MODEL` | collector scripts | Default `gpt-5-nano` since 26 Oct 2026 (OpenAI retired `gpt-4.1-nano` on 23 Oct 2026). `gpt-5.4-nano` is the tested step-up. The request shape differs by family and is chosen in `extract_pdfs.model_request_params`; the `--budget` prices in `model_prices`. Setting an unknown model is safe: the budget then assumes the dearest known prices, and a model the API does not serve aborts the run instead of failing every document |
 | `OPENAI_CHAT_MODEL` | `server/chat/openai.ts` | Model behind Ask the Data. Default **`gpt-6-astra`** ($10/M in, $50/M out). `gpt-6-sol` ($2/$10) is the cheaper fallback if usage grows |
 | `OPENAI_CHAT_REASONING_EFFORT` | `server/chat/openai.ts` | `low` · `medium` (default) · `high` · `xhigh` · `max` · `none` (omits the `reasoning` parameter). Sent as `reasoning.effort` on the Responses API — Chat Completions will not accept tools + reasoning for GPT-6 models |
 | `OPENAI_BASE_URL` | `server/chat/openai.ts` | Default `https://api.openai.com/v1`; an OpenAI-compatible gateway or a local mock for tests |
@@ -1093,6 +1093,8 @@ npm run check:metrics      # just the metric-direction guardrail
 | Check | Asserts |
 |---|---|
 | `script/check-metric-directions.ts` | Every risk metric points the way it claims to: each peer threshold table's colours agree with its declared `direction`, a bank that is worst on all four metrics colours red on all four, and the CRE/capital scale gets redder as concentration rises. Includes a **negative control** — it feeds itself a deliberately inverted table and fails if it does not catch it |
+| `check_quota_abort.py` | An OpenAI refusal stops the run with nothing written: quota 429, a rate-limit 429 that never clears, and (scenario 5, 26 Oct 2026) a **retired model** — 404 `model_not_found` — or a rejected parameter (400 `unsupported_parameter`), in both the single-worker loop and the thread pool; a per-document failure still becomes `LLM_ERROR`. Fake OpenAI, no network |
+| `check_folio_echo.py` | Every folio echo shape seen in production is nulled (the prompt example, its regroupings and first-pair variants, X masks, placeholder words, repeated digits) and real Miami-Dade / Broward / Hillsborough / multi-parcel folios are kept; the prompt carries no example value; each model family's request shape has exactly one output cap and the right effort/temperature; `--budget` prices follow the configured model. Offline |
 
 **Retired with the Market Intelligence switch (7 Oct 2026): `script/check-fdic-window.ts`.**
 It asserted that the FDIC query window was wide enough for the metrics computed from it, after a
@@ -1169,8 +1171,18 @@ entity. Making them county-aware would mean building them per county, which woul
 cross-county entity resolution the tool exists to provide. The correct fix for a scope complaint is a
 clearer label, not a filter.
 
-**The LLM provider is OpenAI (`gpt-4.1-nano`)**, not Claude/Anthropic. Any `.cursor` rule claiming
-otherwise is stale.
+**The LLM provider is OpenAI (`gpt-5-nano` since 26 Oct 2026; `gpt-4.1-nano` before, until OpenAI
+retired it on 23 Oct 2026)**, not Claude/Anthropic. Any `.cursor` rule claiming otherwise is stale.
+The GPT-5 family takes `max_completion_tokens` and `reasoning_effort` (pinned to the lowest setting —
+extraction wants a transcription, not deliberation) and `gpt-5-nano` rejects any `temperature`; the
+per-family shape lives in one place, `extract_pdfs.model_request_params`, which `enrich_entities.py`
+and the Batch API input builder share. **Never put an example value in an extraction prompt.** The
+folio field's example `01-3124-020-0340` was copied verbatim into 10,624 production rows and as a
+near-variant into ~5,000 more, out of 95,041 non-null folios, by documents that print no folio at
+all (checked against their OCR text). The prompt now describes the format instead;
+`postprocess_extraction` nulls any echo that still arrives (`folio_placeholder_reason`), and
+`collector/clean_folio_echo.py` cleans stored rows. `FACILITY_SYSTEM_PROMPT` is validated and was
+not touched.
 
 **Deal Intelligence was retired on 11 Aug 2026.** The page and its eight
 `/api/deal-intelligence/*` endpoints were removed together — it had been unrouted and unreachable
@@ -1320,6 +1332,32 @@ pm2 start amo-dashboard
 - Broward images restore separately — they are files, not database rows:
   `rclone copy "$BACKUP_REMOTE/broward_images/" /opt/amo-dashboard/collector/broward_images/`
 
+#### Change the extraction model (or recover from a retired one)
+
+The symptom of a retired model is every extraction run stopping at once with
+`OpenAI rejects every request for model '…': … model_not_found` in `miamidade_daily.log` /
+`hillsborough_daily.log` / `cron.log` (since 26 Oct 2026; before that, 25 `404 Client Error` lines and
+a "25 LLM failures in a row" stop). Indexing carries on, so the Collection Log looks healthy — the
+Overview progress card and the Reporting tab's empty property/loan columns are where it shows.
+
+1. Pick the model and check the account can see it:
+   `curl -s https://api.openai.com/v1/models -H "Authorization: Bearer $OPENAI_API_KEY" | grep nano`.
+2. In `collector/extract_pdfs.py`: change the `OPENAI_MODEL` default; if the new model is a new
+   family, add its request shape to `model_request_params` and its prices to `_PRICES`. That is the
+   only place — `enrich_entities.py` and the Batch API builder import it.
+3. `collector/.venv/bin/python3 collector/tests/check_folio_echo.py` and `check_quota_abort.py`
+   must pass, then one real call with the exact body from the droplet (`.env` has the key) before
+   committing.
+4. Commit, push, `git pull` on the droplet — the collector is Python, nothing to build or restart.
+   Then re-read what the outage missed: `extract_pdfs.py --county MIAMI-DADE --retry-errors --limit 400 --budget 2.00`
+   and the same for `HILLSBOROUGH` (`--retry-errors` also picks up facility-only rows the Batch tick
+   wrote during the outage). Verify the run prints `ok>0` and that the day's rows in
+   `pdf_extractions` carry `property_address` / `loan_amount`.
+5. Update §6.2, §6.9, §7 and `CLAUDE.md`, which all name the model.
+
+An `OPENAI_MODEL=` line in `/opt/amo-dashboard/.env` overrides the default for every cron job (there
+is none as of 26 Oct 2026); PM2 is not involved.
+
 #### Before any production data change
 
 1. `sqlite3 miami_dade_amo.db ".backup /opt/amo-dashboard/backup_<what>.db"`, then integrity-check it.
@@ -1332,8 +1370,11 @@ pm2 start amo-dashboard
 
 ### 6.9 Cost
 
-LLM spend is small and capped. Extraction runs at roughly **$0.00024/document** on `gpt-4.1-nano`;
-the Batch API halves that again. The full ~44k-document historical facility backfill was estimated at
+LLM spend is small and capped. Extraction ran at roughly **$0.00024/document** on `gpt-4.1-nano`
+($0.10/M input, $0.40/M output); on `gpt-5-nano` (since 26 Oct 2026: $0.05/M input, $0.40/M output,
+no reasoning tokens at `reasoning_effort: minimal`) the same document costs about **$0.00016** —
+confirm from the `LLM spend:` line the first full run prints. `gpt-5.4-nano` would be $0.20/$1.25, about
+three times the old cost per document. The Batch API halves whichever it is. The full ~44k-document historical facility backfill was estimated at
 **$5–11 total**. `extract_pdfs.py` accepts a hard `--budget` cap per run, and `run_asg_backfill.sh`
 uses `--budget 5.0`.
 
@@ -1386,9 +1427,22 @@ confirmed. Commit messages are written as statements of what changed and why
 
 ---
 
-## 7. Current status — as of 7 Oct 2026
+## 7. Current status — as of 26 Oct 2026
 
 ### 7.1 Overall
+
+🔴 **26 Oct 2026 — document reading has been down since the 24 Oct runs; the fix is built and waits on
+the owner.** OpenAI retired `gpt-4.1-nano` on 23 Oct 2026. Every extraction call since has returned
+404 `model_not_found`: each Miami-Dade daily run wrote 25 failures and stopped, Hillsborough's daily
+did the same (41 failed rows, 20–23 Oct), and the 100 Miami-Dade documents recorded on 23 Oct reached
+the tool with no property address or loan amount (the facility Batch tick, which still accepted the
+old model, wrote facility-only rows for them). Indexing, reconciliation, Broward and the dashboard
+itself were unaffected. **Fix (commit `2581515`, local):** model moved to `gpt-5-nano` (same tier,
+cheaper input; `gpt-5.4-nano` tested as the step-up), a retired model now aborts a run instead of
+failing documents one by one, and the folio echo described in §6.7 is closed. Pending the owner's
+choice of model and go-ahead for the one-off folio cleanup (16,094 `pdf_extractions` rows and 7,691
+`aom_events_clean` rows set to null), then: deploy, re-read the 23–26 Oct backlog, verify the next
+cron run. This paragraph should be rewritten once that has happened.
 
 🟢 **Live, healthy, and delivering.** Checked end to end on 7 Oct 2026: both counties flowing,
 151,824 filings indexed (Miami-Dade through 1 Oct, Broward through 30 Sep), Broward's feed lag back
@@ -1676,10 +1730,10 @@ endpoints healthy across all three county scopes.
 | Index completeness reconciliation | 🟢 **New 14 Oct 2026** (`384ef03`) — `reconcile_counties.py` asks each county for its own per-day document counts and compares them to ours, writing a verdict per county/day/document type into `index_coverage` and exiting non-zero on a shortfall. Runs after every Miami-Dade pull. Verified across all three counties for 8–13 Oct. A Miami-Dade day that hits the portal's 500-row cap is recorded **UNKNOWN, never OK** — the portal reports no total and no paging, so such a day cannot be reconciled, only flagged for the repair below |
 | AIT (Assignment of Interest) collection | 🟢 **Resolved 11 Sep 2026** — never a timeout. The county rejects the search and returns no results, exactly as it does for a day with no filings, and has done so since the type was added on 16 Jun. Now resolves in about a second and records `EMPTY` rather than a false error. **Kept active on purpose**, so collection begins by itself if the county ever starts using it |
 | UCC financing statements (weekly cron) | 🟢 **New 9–11 Sep 2026** — 32,759 filings collected and read, 2023 to present. Now part of the weekly run |
-| Hillsborough index + extraction | 🟡 **LIVE 13 Oct 2026** (`a1265b8`, PM2 restart #68). 65,282 filings since 3 Jan 2023 collected (34,165 `ASG`, 24 `ASGT`, 31,093 `FIN`); daily cron installed. **Backlog being read:** assignments first (~14 docs/min ≈ 40 h, finishing ~Thu 15 Oct), then UCCs (~another 37 h, queued automatically). Deals appear in the analytics as they are read; the weekly email adds Hillsborough at 98% read. **Watch it on the Overview page:** a live progress card (refreshes every minute) turns red if reading stalls for 30 minutes, if downloads start failing, or if the daily job misses a day — the fix for a stall is restarting the backlog command in `SESSION_LOG.md` (13 Oct). **Party fix 14 Oct 2026** (`8627f1a`): the county lists each side's parties alphabetically, so a borrower whose name sorts first could appear as the seller (e.g. 2026400005 showed the property LLC instead of Freddie Mac). Normalize now picks the listed party the document names; about 880 Hillsborough rows are corrected from the 15 Oct nightly run (plus about 1,900 Miami-Dade rows where the clerk indexed only the borrower; see "The Assignor column was showing the borrower"). **15 Oct 2026 — the OpenAI account ran out of credits at ~05:50 UTC, mid-backlog.** Downloads and OCR were fine; every model call failed, and the reader wrote a failure row per document for four hours — **4,773 Hillsborough documents (1,477 assignments, 3,299 UCCs) marked failed**, the card blamed the clerk, and the count showed them as "read". Fixed the same day (`7d12016`): an account-level refusal now **stops the run with nothing written**, the card counts only successful reads and names which stage is failing, and the weekly-email gate counts only successful reads. All 4,773 are being re-read (`collector/hc_reread.sh`, assignments first), after which the UCC backlog resumes. A second finding from that re-read: the model's answer was being cut off on multi-parcel commercial assignments (31 folio numbers on one $7.5M document) — output cap raised 1,024 → 4,096 tokens (`3184713`). **Third assignment code added 15 Oct 2026** (`04946d1`): the county's code table has `ASG`, `ASGT` and `ASINT` (assignment of interest); the last was never collected — 437 documents since 2023 now in, read as they are reached. **Backlog complete 17 Oct 2026:** assignments 34,209 of 34,731 read (98.5%, the rest being the new `ASINT` rows and the newest days, handled by the daily job), UCC filings 31,083 of 31,205 (99.6%). Hillsborough therefore passes the weekly email's 98%-read gate and joins the Monday report from 19 Oct 2026 |
+| Hillsborough index + extraction | 🔴 **Reading down since 24 Oct 2026** (retired model, §7.1; index pull unaffected) · 🟡 **LIVE 13 Oct 2026** (`a1265b8`, PM2 restart #68). 65,282 filings since 3 Jan 2023 collected (34,165 `ASG`, 24 `ASGT`, 31,093 `FIN`); daily cron installed. **Backlog being read:** assignments first (~14 docs/min ≈ 40 h, finishing ~Thu 15 Oct), then UCCs (~another 37 h, queued automatically). Deals appear in the analytics as they are read; the weekly email adds Hillsborough at 98% read. **Watch it on the Overview page:** a live progress card (refreshes every minute) turns red if reading stalls for 30 minutes, if downloads start failing, or if the daily job misses a day — the fix for a stall is restarting the backlog command in `SESSION_LOG.md` (13 Oct). **Party fix 14 Oct 2026** (`8627f1a`): the county lists each side's parties alphabetically, so a borrower whose name sorts first could appear as the seller (e.g. 2026400005 showed the property LLC instead of Freddie Mac). Normalize now picks the listed party the document names; about 880 Hillsborough rows are corrected from the 15 Oct nightly run (plus about 1,900 Miami-Dade rows where the clerk indexed only the borrower; see "The Assignor column was showing the borrower"). **15 Oct 2026 — the OpenAI account ran out of credits at ~05:50 UTC, mid-backlog.** Downloads and OCR were fine; every model call failed, and the reader wrote a failure row per document for four hours — **4,773 Hillsborough documents (1,477 assignments, 3,299 UCCs) marked failed**, the card blamed the clerk, and the count showed them as "read". Fixed the same day (`7d12016`): an account-level refusal now **stops the run with nothing written**, the card counts only successful reads and names which stage is failing, and the weekly-email gate counts only successful reads. All 4,773 are being re-read (`collector/hc_reread.sh`, assignments first), after which the UCC backlog resumes. A second finding from that re-read: the model's answer was being cut off on multi-parcel commercial assignments (31 folio numbers on one $7.5M document) — output cap raised 1,024 → 4,096 tokens (`3184713`). **Third assignment code added 15 Oct 2026** (`04946d1`): the county's code table has `ASG`, `ASGT` and `ASINT` (assignment of interest); the last was never collected — 437 documents since 2023 now in, read as they are reached. **Backlog complete 17 Oct 2026:** assignments 34,209 of 34,731 read (98.5%, the rest being the new `ASINT` rows and the newest days, handled by the daily job), UCC filings 31,083 of 31,205 (99.6%). Hillsborough therefore passes the weekly email's 98%-read gate and joins the Monday report from 19 Oct 2026 |
 | Palm Beach | ⚫ **Deferred 13 Oct 2026** — free portal is captcha-gated; paid FTP route undecided (§7.6 item 12) |
 | Broward index + images + extraction (daily cron) | 🟡 Live — 43,795 index rows, but **41,970 have no image and cannot be read** until the bulk image order lands (§7.6) |
-| PDF extraction — Miami-Dade | 🟢 Live — 107,402 documents read end to end |
+| PDF extraction — Miami-Dade | 🔴 **Down since the 24 Oct 2026 runs** — OpenAI retired the model (§7.1); fix staged, pending the owner. Before that: 🟢 107,402 documents read end to end |
 | PDF extraction — Broward | 🟡 Live **daily**, coverage still thin — blocked on images, not on the extractor |
 | Reporting tab filters (type + category) | 🟢 **Deployed 10–11 Sep 2026** — and every panel on the page now counts the same rows |
 | Facility batch backfill (20-min tick) | 🟢 Live |
@@ -1705,6 +1759,18 @@ endpoints healthy across all three county scopes.
 | Ask the Data (`/ask`, `POST /api/chat`) | 🟡 **DEPLOYED 7 Oct 2026 18:19 UTC as a trial** (`cb76b6d`; tab labelled "TESTING/NOTDEPLOYED" at the owner's request, renamed to a **Beta** badge 18:45 UTC) — chat over the database with GPT-6 Astra and ten read-only lookups (§4.3). `OPENAI_API_KEY` pushed into PM2's env (`--update-env`, `MI_*` confirmed intact), no startup warning, route 401 unauthenticated, backfill processes untouched. Verified before deploy against the 21 Sep production snapshot: all ten tools return correct shapes, the SQL guard rejects writes / multi-statements / PRAGMA, and the full streaming loop ran end to end in the browser against a mock of OpenAI's streaming protocol. **First real question failed** — `gpt-6-astra` rejects function tools with reasoning on `/v1/chat/completions` ("use /v1/responses or set reasoning_effort to 'none'"); rather than drop reasoning, the client was moved to the Responses API with `previous_response_id` chaining and **redeployed 18:27 UTC (`59af9a5`)**. **Made the landing page 18:38 UTC (`5451898`)** — `/` redirects here, Overview moved to `/overview`. **Owner confirmed real answers working the same evening**; voice tuned (interpretation + a one-line preamble before lookups, 23:40 UTC `c9a9ee8`). **8 Oct 2026: clickable table rows** — any row in an answer table expands in place to the filings behind it, matched to the model's own lookups (no model call) with header-heuristic and "Ask about this row" fallbacks (§4.3, `GET /api/chat/drill`). Verified against the 21 Sep snapshot: top-acquirer, month and lending-relationship rows reproduce the table's own counts exactly (1,240 / 1,210 / 31); ratio rows fall through to the model (deployed `319ae14`, PM2 restart #61). **8 Oct 2026: charts** — the prompt asks for a fenced ```chart JSON block when the data is a trend (≥ 4 periods), a ranking (≥ 3 names), a share (≤ 8 parts) or a two-period comparison; the client renders it with recharts (line / area / bar / hbar / donut) in the dashboard's style, shows "Building chart…" while the block streams and an amber fallback for an undrawable spec. Verified in-browser against a mock: all five types at prose width, placeholder during streaming, exact bar labels, legend shares. The `[chat]` PM2 log line per request gives rounds and tokens. Deploy hiccup: build failed once because `npm install` was skipped (§6.4) |
 
 ### 7.4 Known gaps and open items
+
+**−11. 26 Oct 2026 — extraction model retired; fix built, not yet deployed.** See §7.1. Until the
+owner confirms the model and the folio cleanup, nothing recorded since 23 Oct carries a property
+address, loan amount, document-derived parties or category, and Hillsborough's generic `ASG` filings
+from those days are absent from the analytics entirely (they only enter once read). Two things to
+check after the deploy: the retry passes must report `ok>0` with no 404s, and the next 12:30 UTC
+Miami-Dade run must log the same. **Residual from the folio echo:** a few hundred mangled variants
+that do not match the cleanup rules (`11-2222-33-4440`, `01-3044-01-0090`-style invented numbers,
+and junk like `48-23814-WELLS FARGO CMS EAST`) remain; they are not echoes of the example but are
+still fabrications, and the folio column should be treated as unreliable for documents read before
+26 Oct 2026. A `--redo` re-read would cost roughly $20 across the three counties if the column ever
+matters enough.
 
 **−10. DEPLOYED 7 Oct 2026 18:19 UTC as a labelled trial — Ask the Data has not met the real model yet, and has no spend
 cap.** Everything up to the OpenAI call is verified (§7.3); what is not is how `gpt-6-astra` actually
@@ -2212,6 +2278,8 @@ healthy (640 rows, 57% carrying loan amounts).
 | A collection window fails and is never retried | A one-off failure becomes permanent data loss | **Improved 14 Oct 2026.** Miami-Dade now runs three times a day instead of weekly, so a failed window gets ~21 retries inside the 10-day lookback rather than one. Any window ending within 14 days is always re-collected even after a successful run, which also covers documents the county posts to a recording date days later. Windows the county reports as genuinely empty stay retry-eligible indefinitely by design |
 | A county is collected but nobody checks the result against the county | Silent shortfalls persist until a user happens to look up a missing document — which is exactly how the weekly-cron staleness was found, after an unknown number of weeks | **Closed 14 Oct 2026.** `reconcile_counties.py` compares our per-day counts to each county's own and exits non-zero on a shortfall; it runs after every Miami-Dade pull and can be run for any county on demand. Verdicts are kept in `index_coverage` rather than only printed, so a gap is queryable rather than a line in a log — the failure mode that let 23 `CAPPED` days sit unnoticed for three years. **Since 16 Oct 2026 the Friday review also repairs:** a Miami-Dade day found short is re-collected on the spot (bypassing the "already collected" log, since the county adds documents to a date for months afterwards) and asked again before its verdict is recorded, and a document the county lists under two types is recognised as held rather than counted missing. A day-by-day pass over 2023 → present has now been completed for all three counties and every flagged day is verified or explained. **Since 21 Oct 2026 the check is instrument-level** — a day passes only when every instrument number the county lists is held, so equal counts can no longer hide a swap — **runs daily for every county** (not only Fridays), and **its proof is on the Collection Log page by county**, with any missing document linked to the clerk's site |
 | The LLM provider refuses every request (credits exhausted, outage) | **Every document in the queue is marked failed**, counts as "read", and is never retried without a manual flag — 4,773 Hillsborough documents on 15 Oct 2026 | **Closed 15 Oct 2026** (`7d12016`). An account-level refusal (quota 429, or a 429/5xx still failing after four retries) stops the run with nothing written; 25 consecutive model failures also stop it. Reproduced in `tests/check_quota_abort.py`. The progress card counts only successful reads and says whether OpenAI or the clerk is failing |
+| The provider retires the model | Every call returns 404 and **reading stops silently for days** — 23–26 Oct 2026, three runs a day each writing 25 failures and stopping, with the cron log the only place it showed; the facility Batch tick kept accepting the old model and wrote the failed rows back as OK, hiding them from a retry | **Closed 26 Oct 2026** (`2581515`, pending deploy). A 404 `model_not_found`, or a 400 rejecting a parameter, aborts the run at once naming the model (`check_quota_abort.py` scenario 5); `--retry-errors` also covers OK rows with no stored response. **Still open:** nothing alerts a person — the cron log and the Overview progress card are the only signals. OpenAI announces deprecations months ahead at `platform.openai.com/docs/deprecations`; check it when touching the collector |
+| A prompt example is copied into the data | The model writes the example into documents that do not contain the field, and the stored value is **indistinguishable from a real one** — 16,094 folios (17% of all non-null) were the prompt's `01-3124-020-0340` or a variant of it | **Closed 26 Oct 2026** for folio: example removed from the prompt, `postprocess_extraction` nulls echoes, `clean_folio_echo.py` for stored rows, `tests/check_folio_echo.py`. Rule for every prompt: describe a format, never show a value. `FACILITY_SYSTEM_PROMPT` (validated 21/21) carries no example values |
 | A merge is made while the nightly rebuild is running | The merge is applied, then **silently undone** by the rebuild's final commit until the next night — 140 merges on 15 Oct 2026 | **Closed 15 Oct 2026** (`3184713`). The rebuild records when it began and re-applies every rule recorded since, before deriving the entity tables; `tests/check_late_alias_replay.py`. The 140 were replayed the same day through the app's own merge endpoint |
 | A `pm2 restart` while someone is using the dashboard | ~10 seconds of 502 — nginx marked the app dead after one refused connection; two merges were lost this way on 15 Oct 2026 | **Reduced 15 Oct 2026.** Explicit nginx upstream with `max_fails=0` and a 3s connect timeout: the window is now the ~2s Node takes to boot. Deploys are announced; a true zero-downtime reload would need PM2 cluster mode |
 | The model's answer is cut off by the output-token cap | A long document — a multi-parcel commercial assignment, exactly the kind the product is for — fails as a JSON parse error and is never classified | **Closed 15 Oct 2026** (`3184713`). Cap raised 1,024 → 4,096; a truncated answer now fails with a message that says so, and `--retry-errors` picks it up |
@@ -2388,7 +2456,7 @@ scope and the applied scope cannot drift).
 | Hillsborough Clerk Official Records — **live since 13 Oct 2026** | Daily index `publicrec.hillsclerk.com/OfficialRecords/DailyIndexes/` (HTTPS, public); search API + PDF images under `publicaccess.hillsclerk.com/Public/ORIUtilities/` | No login or captcha. ~2-month feed retention, ~6-day lag. Search capped at 6,000 rows (returns empty + `Truncated` when exceeded). Codes `ASG`/`ASGT`, UCC `FIN` |
 | Palm Beach Clerk Official Records — **scoped, not yet collected** | Landmark Web `erec.mypalmbeachclerk.com` (user agreement + **server-enforced reCAPTCHA on every search**); optional paid FTP index ($600/yr, no images) | Up to 10,000 results per search. Codes `ASSIGNMENT`, `ASSIGNMENT TAXABLE`, UCC `FINANCING STATEMENTS (UCC'S)`. Volume not yet measured |
 | Market Intelligence tool — Market Analytics data API | `https://market-intelligence-tool-gilt.vercel.app/api/analytics/v1/*`, bearer key, contract saved at `docs/market-intelligence-meta.json` | FDIC Call Report screening, scores, balance-sheet signals and per-institution trend/history (since 7 Oct 2026; replaced the direct FDIC BankFind proxy). Refreshes on its own daily job, keyed by FDIC quarter |
-| OpenAI | `gpt-4.1-nano`, Chat Completions + Batch API | Document extraction and entity classification fallback |
+| OpenAI | `gpt-5-nano` (since 26 Oct 2026; `gpt-4.1-nano` retired 23 Oct 2026), Chat Completions + Batch API | Document extraction and entity classification fallback |
 
 ### Internal documents
 
