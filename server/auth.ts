@@ -7,23 +7,80 @@
  *   - POST /login checks the password and sets a signed cookie (HMAC-SHA256).
  *   - POST /logout clears the cookie.
  *
- * Configuration (env variables):
- *   AMO_PASSWORD   – the password (default: "amo2024")
- *   AMO_SECRET     – HMAC signing secret (default: derived from password)
+ * Configuration (env variables) — BOTH REQUIRED since 26 Oct 2026:
+ *   AMO_PASSWORD   – the password. Never defaulted; the server refuses to start without it.
+ *   AMO_SECRET     – HMAC signing secret. Required in production (NODE_ENV=production).
+ *                    In development only, a missing secret is replaced by a random one for
+ *                    the life of the process, so cookies stop working across restarts.
  *
- * The cookie value is:   base64(timestamp) + "." + HMAC(base64(timestamp), secret)
- * This prevents trivial forgery without requiring a session store.
+ * The cookie value is:   base64url(timestamp) + "." + HMAC(base64url(timestamp), secret)
+ * This prevents trivial forgery without requiring a session store. The timestamp is
+ * checked on every request, so a token stops working MAX_AGE after it was issued even
+ * if the browser kept the cookie.
+ *
+ * POST /login is rate-limited per client IP (express-rate-limit) and every failed
+ * attempt is logged with the IP. `app.set('trust proxy', 'loopback')` in index.ts makes
+ * req.ip the real client behind the droplet's nginx (upstream 127.0.0.1:5000).
  */
 
 import type { Request, Response, NextFunction, Express } from 'express';
 import crypto from 'crypto';
+import rateLimit from 'express-rate-limit';
 
-const PASSWORD  = process.env.AMO_PASSWORD ?? 'amo2024';
-const SECRET    = process.env.AMO_SECRET   ?? `amo-secret-${PASSWORD}`;
 const COOKIE    = 'amo_auth';
 const MAX_AGE   = 7 * 24 * 60 * 60 * 1000; // 7 days
 
+// ── Credentials (fail fast when unset) ───────────────────────────────────────
+
+function loadCredentials(): { password: string; secret: string } {
+  const production = process.env.NODE_ENV === 'production';
+  const password = process.env.AMO_PASSWORD;
+  let secret = process.env.AMO_SECRET;
+
+  const missing: string[] = [];
+  if (!password) missing.push('AMO_PASSWORD');
+  if (!secret && production) missing.push('AMO_SECRET');
+
+  if (missing.length) {
+    console.error(
+      `[auth] FATAL: ${missing.join(' and ')} ${missing.length > 1 ? 'are' : 'is'} not set. ` +
+      'The dashboard has no built-in password any more. Set the variable(s) in the ' +
+      'environment the server starts with (on the droplet: /opt/amo-dashboard/.env, then ' +
+      '`pm2 restart amo-dashboard --update-env`) and start again.'
+    );
+    process.exit(1);
+  }
+
+  if (!secret) {
+    secret = crypto.randomBytes(32).toString('base64url');
+    console.warn(
+      '[auth] AMO_SECRET is not set — using a random secret for this process (development only). ' +
+      'Existing sign-ins will not survive a restart.'
+    );
+  }
+
+  return { password: password as string, secret };
+}
+
+const { password: PASSWORD, secret: SECRET } = loadCredentials();
+
 // ── Signing helpers ──────────────────────────────────────────────────────────
+
+/** Constant-time string compare that returns false (not throws) on a length mismatch. */
+function safeEqual(a: string, b: string): boolean {
+  const ba = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ba.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ba, bb);
+}
+
+/** Compare the submitted password against the configured one without leaking its length. */
+function passwordMatches(submitted: unknown): boolean {
+  if (typeof submitted !== 'string') return false;
+  const a = crypto.createHash('sha256').update(submitted).digest();
+  const b = crypto.createHash('sha256').update(PASSWORD).digest();
+  return crypto.timingSafeEqual(a, b);
+}
 
 function sign(payload: string): string {
   return crypto.createHmac('sha256', SECRET).update(payload).digest('base64url');
@@ -34,11 +91,35 @@ function makeToken(): string {
   return `${payload}.${sign(payload)}`;
 }
 
+/** Tolerance for a token stamped slightly ahead of the verifying clock. */
+const CLOCK_SKEW_MS = 60 * 1000;
+
 function verifyToken(token: string): boolean {
-  const [payload, sig] = token.split('.');
+  const parts = token.split('.');
+  if (parts.length !== 2) return false;
+  const [payload, sig] = parts;
   if (!payload || !sig) return false;
-  const expected = sign(payload);
-  return crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected));
+
+  if (!safeEqual(sig, sign(payload))) return false;
+
+  // Signature is genuine — now enforce the age carried in the payload.
+  const issued = Number(Buffer.from(payload, 'base64url').toString('utf8'));
+  if (!Number.isFinite(issued)) return false;
+  const age = Date.now() - issued;
+  return age > -CLOCK_SKEW_MS && age <= MAX_AGE;
+}
+
+// ── Redirect target guard ────────────────────────────────────────────────────
+
+/**
+ * A `next` target must be a same-origin path: it starts with a single "/" that is not
+ * followed by another "/" or a backslash (browsers read "//evil.com" and "/\evil.com" as
+ * protocol-relative URLs). Anything else falls back to the dashboard root.
+ */
+const SAFE_NEXT = /^\/(?![\/\\])/;
+
+function safeNext(next: unknown): string {
+  return typeof next === 'string' && SAFE_NEXT.test(next) ? next : '/';
 }
 
 // ── Auth check middleware ────────────────────────────────────────────────────
@@ -48,7 +129,7 @@ export function checkAuth(req: Request, res: Response, next: NextFunction) {
   if (req.path === '/login' || req.path === '/logout') return next();
 
   const token = req.cookies?.[COOKIE];
-  if (token && verifyToken(token)) return next();
+  if (typeof token === 'string' && verifyToken(token)) return next();
 
   // API calls get 401 JSON instead of a redirect
   if (req.path.startsWith('/api/')) {
@@ -174,16 +255,43 @@ function loginPage(error?: string): string {
 </html>`;
 }
 
+// ── Login rate limit ─────────────────────────────────────────────────────────
+
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_MAX_ATTEMPTS = 10;
+
+const loginLimiter = rateLimit({
+  windowMs: LOGIN_WINDOW_MS,
+  limit: LOGIN_MAX_ATTEMPTS,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  handler: (req: Request, res: Response) => {
+    console.warn(`[auth] login rate limit hit — ip=${req.ip} (${LOGIN_MAX_ATTEMPTS} attempts / 15 min)`);
+    res.status(429).setHeader('Content-Type', 'text/html');
+    res.send(loginPage('Too many sign-in attempts. Please wait 15 minutes and try again.'));
+  },
+});
+
 // ── Route registration ───────────────────────────────────────────────────────
 
 export function registerAuthRoutes(app: Express) {
-  // Parse cookies (no extra package — manual parse)
+  // Parse cookies (no extra package — manual parse). A pair whose value is not valid
+  // percent-encoding (e.g. `amo_auth=%`) is skipped instead of throwing before auth runs.
   app.use((req: Request, _res: Response, next: NextFunction) => {
     const raw = req.headers.cookie ?? '';
     req.cookies = req.cookies ?? {};
     raw.split(';').forEach((part) => {
-      const [k, ...v] = part.trim().split('=');
-      if (k) req.cookies[k.trim()] = decodeURIComponent(v.join('='));
+      const trimmed = part.trim();
+      const eq = trimmed.indexOf('=');
+      if (eq <= 0) return;
+      const k = trimmed.slice(0, eq).trim();
+      const v = trimmed.slice(eq + 1);
+      if (!k) return;
+      try {
+        req.cookies[k] = decodeURIComponent(v);
+      } catch {
+        // malformed cookie value — ignore this pair
+      }
     });
     next();
   });
@@ -191,26 +299,25 @@ export function registerAuthRoutes(app: Express) {
   // GET /login
   app.get('/login', (req: Request, res: Response) => {
     const token = req.cookies?.[COOKIE];
-    if (token && verifyToken(token)) {
-      const next = (req.query.next as string) || '/';
-      return res.redirect(next.startsWith('/') ? next : '/');
+    if (typeof token === 'string' && verifyToken(token)) {
+      return res.redirect(safeNext(req.query.next));
     }
     res.setHeader('Content-Type', 'text/html');
     res.send(loginPage());
   });
 
   // POST /login
-  app.post('/login', (req: Request, res: Response) => {
-    const { password, next } = req.body as { password?: string; next?: string };
-    if (password === PASSWORD) {
+  app.post('/login', loginLimiter, (req: Request, res: Response) => {
+    const { password, next } = (req.body ?? {}) as { password?: unknown; next?: unknown };
+    if (passwordMatches(password)) {
       const token = makeToken();
       res.setHeader(
         'Set-Cookie',
         `${COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${MAX_AGE / 1000}`
       );
-      const dest = (next && next.startsWith('/')) ? next : '/';
-      return res.redirect(dest);
+      return res.redirect(safeNext(next));
     }
+    console.warn(`[auth] failed login — ip=${req.ip}`);
     res.setHeader('Content-Type', 'text/html');
     res.send(loginPage('Incorrect password. Please try again.'));
   });

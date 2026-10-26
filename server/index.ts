@@ -10,6 +10,12 @@ import { warnIfChatUnconfigured } from "./chat";
 const app = express();
 const httpServer = createServer(app);
 
+// Production sits behind nginx on the same box (upstream 127.0.0.1:5000); trust only that
+// hop's X-Forwarded-For so req.ip — and the login rate limit keyed on it — is the real client.
+app.set("trust proxy", "loopback");
+// Don't advertise the framework in every response.
+app.disable("x-powered-by");
+
 declare module "http" {
   interface IncomingMessage {
     rawBody: unknown;
@@ -57,7 +63,10 @@ app.use((req, res, next) => {
     if (path.startsWith("/api")) {
       let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
       if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
+        // Echo at most 200 characters of the body — whole responses can run to megabytes
+        // and the PM2 log is not the place for a copy of every API answer.
+        const body = JSON.stringify(capturedJsonResponse) ?? "";
+        logLine += ` :: ${body.length > 200 ? body.slice(0, 200) + "…" : body}`;
       }
 
       log(logLine);
