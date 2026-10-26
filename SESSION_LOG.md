@@ -20,7 +20,11 @@ Side session from the owner's security-audit session. Goal: take the pre-auth Br
 
 ---
 
-## 2026-10-26 — Auth hardening from the security audit (branch `security/auth-hardening`, NOT DEPLOYED — owner approval pending)
+## 2026-10-26 — Auth hardening from the security audit (branch `security/auth-hardening`, merged as `77f5edc` and DEPLOYED 17:41 UTC)
+
+- **Deployed the same day, owner-approved ("deploy the login hardening if this won't impact the users directly").** Impact check first: PM2 already held `AMO_PASSWORD` and `AMO_SECRET` (secret unchanged → no one signed out), the limiter needs 10 login POSTs from one address in 15 min to trip, so normal use is unaffected. Merge conflict was only in the Confluence §6.2 env table (both sides kept). Droplet: `git pull` → `npm install` (added 2 packages) → `npm run build` → `dist/index.cjs` confirmed 1,010,661 bytes → `pm2 restart amo-dashboard` (#89, plain restart; PM2 holds the env). Startup log: `serving on 127.0.0.1:5000`, no `[auth] FATAL`.
+- **Verified live through nginx on :80:** correct password → 302 + `amo_auth` cookie; `/api/cache/stats`, `/api/chat/config`, `/` → 200 with the cookie, 401 without; wrong password → the error page and `[auth] failed login — ip=…` in the PM2 log; `RateLimit: limit=10, remaining=9, reset=900` headers; `/login?next=//evil.com` → page, not a redirect; `Cookie: amo_auth=%` → 302 to login, not a 500; no `X-Powered-By`.
+- Original pre-deploy notes follow.
 
 Side session started by the owner's main session ("AMO dashboard vulnerabilities audit", read-only audit of `server/auth.ts` / `server/index.ts` the same day). Built in a git worktree so the sibling nginx session's checkout was not disturbed; one commit on its own branch, **not pushed, not deployed.**
 
