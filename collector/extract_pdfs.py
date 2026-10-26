@@ -2,7 +2,7 @@
 PDF Extraction Pipeline
 -----------------------
 Downloads the recorded document image for each assignment from the Miami-Dade
-Clerk, OCRs the first pages, and uses OpenAI (gpt-4.1-nano) to extract structured data:
+Clerk, OCRs the first pages, and uses OpenAI (gpt-5-nano) to extract structured data:
 
   - doc_category        LOAN_TRANSFER | RENTS_LEASES | COLLATERAL | OTHER
                         (used to keep only true loan/mortgage transfers in the
@@ -35,7 +35,8 @@ Usage:
     AMO_DB_PATH=... OPENAI_API_KEY=... python3 extract_pdfs.py --limit 500
     python3 extract_pdfs.py --limit 200 --retry-errors   # re-attempt failures
 
-Model is configurable via OPENAI_MODEL (default: gpt-4.1-nano).
+Model is configurable via OPENAI_MODEL (default: gpt-5-nano; see
+model_request_params for what each family accepts).
 """
 import argparse
 import json
@@ -52,9 +53,46 @@ import requests
 
 DB          = os.environ.get('AMO_DB_PATH', '/opt/amo-dashboard/miami_dade_amo.db')
 OPENAI_KEY  = os.environ.get('OPENAI_API_KEY', '')
-OPENAI_MODEL = os.environ.get('OPENAI_MODEL', 'gpt-4.1-nano')
+# gpt-4.1-nano read every document from the start of the project. OpenAI
+# retired it on 23 Oct 2026: every Chat Completions call returned 404
+# model_not_found from the 24 Oct runs on, and nothing reached the dashboard
+# for three days. gpt-5-nano is the same tier (cheaper on input, same on
+# output); gpt-5.4-nano is the next step up. Both were checked against four
+# real documents on 26 Oct 2026 and matched the old model on doc_category,
+# parties, property address and loan amount.
+OPENAI_MODEL = os.environ.get('OPENAI_MODEL', 'gpt-5-nano')
 
 OPENAI_URL  = 'https://api.openai.com/v1/chat/completions'
+
+# 4096, not 1024: a multi-parcel commercial assignment lists dozens of folio
+# numbers (Hillsborough 2026152506, 31 parcels, $7.5M) and the model was cut
+# off mid-list at 1,024 tokens, which parsed as an "Unterminated string"
+# LLM_ERROR — 7% of a Hillsborough re-read on 15 Oct 2026, and precisely the
+# CRE documents the product is for. Output on nano is cheap; a truncated
+# answer is not.
+MAX_OUTPUT_TOKENS = 4096
+
+
+def model_request_params(model: str) -> dict:
+    """The sampling parameters this model accepts — they differ by family.
+
+    The GPT-5 family is a reasoning family: it takes max_completion_tokens
+    (max_tokens is rejected as an unsupported parameter) and the cap counts
+    reasoning tokens too, so the effort is pinned to the lowest setting the
+    model offers — extraction wants a transcription, not deliberation.
+    gpt-5-nano rejects any temperature but its default and knows 'minimal';
+    gpt-5.4 accepts temperature 0 and an effort of 'none'. The 4.1 family
+    keeps the original shape, so OPENAI_MODEL=gpt-4.1-mini still works.
+    Verified against the live API on 26 Oct 2026.
+    """
+    m = model.lower()
+    if m.startswith('gpt-5.4'):
+        return {'max_completion_tokens': MAX_OUTPUT_TOKENS,
+                'reasoning_effort': 'none', 'temperature': 0}
+    if m.startswith('gpt-5'):
+        return {'max_completion_tokens': MAX_OUTPUT_TOKENS,
+                'reasoning_effort': 'minimal'}
+    return {'max_tokens': MAX_OUTPUT_TOKENS, 'temperature': 0}
 
 DOC_IMAGE_URL = ('https://onlineservices.miamidadeclerk.gov/officialrecords/'
                  'api/DocumentImage/getdocumentimage')
@@ -80,9 +118,27 @@ REQUEST_DELAY = 0.6      # polite delay between clerk downloads (seconds)
 # LLM budget cap: script stops gracefully once estimated spend reaches this.
 # Tracked from actual token usage returned by the OpenAI API.
 BUDGET_USD    = float(os.environ.get('OPENAI_BUDGET_USD', '5.0'))
-# gpt-4.1-nano pricing (USD per 1M tokens)
-PRICE_INPUT_PER_M  = 0.10
-PRICE_OUTPUT_PER_M = 0.40
+# USD per 1M tokens by model family (prefix match, first hit wins). An unknown
+# model falls back to the dearest row, so --budget stops a run early rather
+# than late. Keep this in step with OPENAI_MODEL above: the budget is only as
+# honest as these two numbers.
+_PRICES = (
+    ('gpt-5.4-nano', 0.20, 1.25),
+    ('gpt-5-nano',   0.05, 0.40),
+    ('gpt-4.1-nano', 0.10, 0.40),
+)
+
+
+def model_prices(model: str) -> tuple[float, float]:
+    """(input, output) USD per 1M tokens for this model."""
+    m = model.lower()
+    for prefix, price_in, price_out in _PRICES:
+        if m.startswith(prefix):
+            return price_in, price_out
+    return max(p[1] for p in _PRICES), max(p[2] for p in _PRICES)
+
+
+PRICE_INPUT_PER_M, PRICE_OUTPUT_PER_M = model_prices(OPENAI_MODEL)
 
 _spend = {'input_tokens': 0, 'output_tokens': 0, 'cost_usd': 0.0}
 _spend_lock = threading.Lock()
@@ -107,7 +163,7 @@ Return a JSON object with exactly these fields:
 - property_address: the street address of the encumbered property if stated (street, city, state, zip as available - NOT the parties' corporate addresses), else null
 - loan_amount: the original loan / mortgage / note principal amount in dollars if stated, as a number, else null. ALWAYS search carefully for this - look for phrases like "in the original principal amount of", "principal balance of", "in the principal sum of", "given to secure a note in the amount of", "face amount", or a dollar figure next to the mortgage/note recording reference.
 - consideration_amount: the actual consideration paid for the assignment if a genuine amount is stated, as a number. IGNORE nominal recitals like "$10.00 and other good and valuable consideration" - those are null.
-- folio_parcel: the Miami-Dade folio or parcel number for the property. Look for labels like "Folio No.", "Folio #", "Parcel ID", "RE#", "Property ID", or a bare number formatted as XX-XXXX-XXX-XXXX (13 digits with dashes). Also check the legal description block and any "Exhibit A" section. Return only the number string (e.g. "01-3124-020-0340"), not the label. If not present, return null.
+- folio_parcel: the county folio or parcel identification number for the property, ONLY if one is actually printed in the text. Look for labels like "Folio No.", "Folio #", "Folio Number", "Parcel ID", "Parcel No.", "RE#", "Property ID", "Tax ID", or a bare identifier in the legal description block or an "Exhibit A" section. A Miami-Dade folio is 13 digits written in four dash-separated groups of 2, 4, 3 and 4 digits; other counties print their own parcel-ID formats. Copy the identifier exactly as it appears, without the label. NEVER invent, guess, complete or illustrate a folio number: if no folio or parcel number is printed in the text, return null.
 - sponsor_address: the mailing address or business address of the assignee (buyer/lender) if stated in the document body (NOT the property address). Often appears after the assignee's name in the opening recital or in the signature block. Return as a string, else null.
 - signatory_officer: The name and title of the person who signed this document ON BEHALF OF THE ASSIGNOR (the transferring party). Look in the signature block for a line like "By: ___" or "Name: ___" or "Title: ___" directly under the assignor's name. DO NOT return the notary's name — the notary appears in a separate "State of ___, County of ___" acknowledgment block and is not the signatory. DO NOT return the assignee's signer. Prefer the printed/typed name under the signature line over any handwritten scrawl. Return "Name, Title" as a single string (e.g. "Jane Smith, Vice President"), or null if not legible.
 
@@ -320,7 +376,13 @@ def pending_documents(conn: sqlite3.Connection, limit: int, retry_errors: bool,
                          "AND px.signatory_officer IS NULL "
                          "AND px.facility_type IS NULL)")
     elif retry_errors:
-        status_clause = "(px.cfn IS NULL OR px.status != 'OK')"
+        # A retry pass covers everything a normal pass does PLUS the error
+        # rows. Without the raw_json term it covered less: the facility Batch
+        # tick rewrites an LLM_ERROR row as OK (status is kept once OK) with no
+        # main fields, and a retry pass then skipped exactly the documents the
+        # failed run had been trying to read (Miami-Dade 23 Oct 2026, 100 rows).
+        status_clause = ("(px.cfn IS NULL OR px.status != 'OK' "
+                         "OR (px.status = 'OK' AND px.raw_json IS NULL))")
     else:
         # "No row yet" is NOT the same as "never extracted", and treating them as
         # the same silently lost 50,042 Miami-Dade documents between 22 Jul and
@@ -542,20 +604,71 @@ def chat_completion_body(ocr_text: str, system_prompt: str) -> dict:
     """The request body shape shared by the real-time and Batch API paths."""
     return {
         'model': OPENAI_MODEL,
-        # 4096, not 1024: a multi-parcel commercial assignment lists dozens of
-        # folio numbers (Hillsborough 2026152506, 31 parcels, $7.5M) and the
-        # model was cut off mid-list at 1,024 tokens, which parsed as an
-        # "Unterminated string" LLM_ERROR — 7% of a Hillsborough re-read on
-        # 15 Oct 2026, and precisely the CRE documents the product is for.
-        # Output on nano is cheap; a truncated answer is not.
-        'max_tokens': 4096,
-        'temperature': 0,
+        # max_completion_tokens / max_tokens, temperature and reasoning_effort
+        # depend on the model family — see model_request_params. The Batch API
+        # path (batch_extract_facility.py) sends this exact body, so it follows
+        # any model change automatically.
+        **model_request_params(OPENAI_MODEL),
         'response_format': {'type': 'json_object'},
         'messages': [
             {'role': 'system', 'content': system_prompt},
             {'role': 'user',   'content': ocr_text[:MAX_LLM_CHARS]},
         ],
     }
+
+
+# ── Folio numbers the model made up ──────────────────────────────────────────
+# Until 26 Oct 2026 the prompt showed "01-3124-020-0340" as a format example,
+# and the model copied it into documents that print no folio at all: 10,134
+# production rows held it verbatim, ~15,500 held it or a near-variant (digits
+# regrouped, first pair changed, "-020-0340" kept), 861 held a mask such as
+# "XX-XXXX-XXX-XXXX", and the OCR text of sampled documents contained no folio.
+# The example is gone from the prompt; this is the belt to that suspender, and
+# clean_folio_echo.py applies the same rule to the rows already stored.
+_FOLIO_EXAMPLE_DIGITS = '0131240200340'
+_FOLIO_PLACEHOLDER_WORDS = {
+    'null', 'none', 'n/a', 'na', 'unknown', 'not found', 'not present', 'not stated',
+    'not available', 'not provided', 'not legible', 'not applicable', 'not listed',
+}
+
+
+def folio_placeholder_reason(val) -> str | None:
+    """Why a folio_parcel value is an echo of the prompt, or None if it may be real."""
+    if not isinstance(val, str):
+        return None
+    s = val.strip()
+    if not s:
+        return None
+    low = s.lower()
+    if low in _FOLIO_PLACEHOLDER_WORDS or low.startswith('not '):
+        return 'placeholder word'
+    # A mask: only digits, X's and separators, with at least one X.
+    if 'x' in low and re.fullmatch(r'[0-9xX\-\s.,/]+', s):
+        return 'X mask'
+    digits = re.sub(r'[-\s.,/]', '', s)
+    if not digits.isdigit():
+        return None
+    # The example itself, however it was re-grouped ("01-31-24-02-03-40"
+    # and "01-31-24-02-0-340" are the example with one zero dropped).
+    if digits in (_FOLIO_EXAMPLE_DIGITS, '013124020340'):
+        return 'prompt example'
+    # The example with its first pair changed ("11-31-24-020-0340"), or
+    # mangled to 12 digits ("01-3244-02-0340"). No county here has a 12-digit
+    # folio starting 01: Miami-Dade's are 13 digits, Broward's start 4 or 5,
+    # Hillsborough's are alphanumeric.
+    if digits.endswith('0200340') or (
+            len(digits) == 12 and digits.startswith('01') and digits.endswith('020340')):
+        return 'prompt example variant'
+    # "11-11-11-11-111-1111", "48-48-48-…": a one- or two-digit pattern
+    # repeated is never a folio.
+    if len(digits) >= 6 and re.fullmatch(r'(\d{1,2})\1{2,}', digits):
+        return 'repeated digits'
+    return None
+
+
+def folio_is_placeholder(val) -> bool:
+    """True when a folio_parcel value echoes the prompt instead of the document."""
+    return folio_placeholder_reason(val) is not None
 
 
 def postprocess_extraction(data: dict) -> dict:
@@ -566,6 +679,9 @@ def postprocess_extraction(data: dict) -> dict:
     """
     if data.get('doc_category') not in VALID_CATEGORIES:
         data['doc_category'] = 'OTHER'
+
+    if folio_is_placeholder(data.get('folio_parcel')):
+        data['folio_parcel'] = None
 
     for amount_field in ('loan_amount', 'consideration_amount'):
         val = data.get(amount_field)
@@ -893,8 +1009,10 @@ def _track_spend(usage: dict):
 class OpenAIUnavailable(RuntimeError):
     """OpenAI is refusing every request, not just this document.
 
-    Raised for a 429 whose body says insufficient_quota, and for a 429 or 5xx
-    that is still failing after the retries in _openai_post. The loops must
+    Raised for a 429 whose body says insufficient_quota, for a 400/404 that
+    rejects the model or the request shape itself (a retired model fails every
+    document identically — see _openai_post), and for a 429 or 5xx that is
+    still failing after the retries in _openai_post. The loops must
     STOP the run and leave the document unrecorded. A per-document LLM_ERROR
     row is exactly the wrong outcome here: on 15 Oct 2026 the account ran out
     of credits at ~05:50 UTC and the Hillsborough backlog carried on for four
@@ -941,6 +1059,26 @@ def _openai_post(body: dict) -> dict:
             last = f"429 {err.get('message') or resp.text[:120]}"
         elif resp.status_code >= 500:
             last = f'{resp.status_code} {resp.text[:120]}'
+        elif resp.status_code in (400, 404):
+            try:
+                err = resp.json().get('error', {}) or {}
+            except ValueError:
+                err = {}
+            # A model the API no longer serves, or a parameter it refuses, fails
+            # every document the same way — it is our configuration that is
+            # wrong, not the document. When OpenAI retired gpt-4.1-nano on
+            # 23 Oct 2026 each run wrote 25 LLM_ERROR rows and then tripped the
+            # consecutive-failure stop, three times a day for three days, and
+            # the facility Batch tick flipped the rows back to OK behind it.
+            # Abort instead, naming the model, so the cron log says why.
+            if (err.get('code') in ('model_not_found', 'unsupported_parameter',
+                                    'unsupported_value')
+                    or err.get('param') == 'model'):
+                raise OpenAIUnavailable(
+                    f"OpenAI rejects every request for model {body.get('model')!r}: "
+                    f"{err.get('message') or resp.text[:200]} "
+                    f"(HTTP {resp.status_code}, code={err.get('code')})")
+            resp.raise_for_status()
         else:
             resp.raise_for_status()
         if attempt < _TRANSIENT_RETRIES:
@@ -963,7 +1101,8 @@ def _completion_text(body: dict) -> str:
     choice = body['choices'][0]
     if choice.get('finish_reason') == 'length':
         used = (body.get('usage') or {}).get('completion_tokens')
-        raise ValueError(f'model output truncated at the max_tokens cap ({used} tokens)')
+        raise ValueError(f'model output truncated at the {MAX_OUTPUT_TOKENS}-token '
+                         f'output cap ({used} tokens)')
     return choice['message']['content']
 
 

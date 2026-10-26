@@ -3,8 +3,10 @@
 # Cron: 0 6 * * 5 /opt/amo-dashboard/collector/run_weekly.sh >> /opt/amo-dashboard/collector/cron.log 2>&1
 #
 # Required env (loaded from /opt/amo-dashboard/.env, same as run_facility_tick.sh):
-#   OPENAI_API_KEY  - for extract_pdfs.py + enrich_entities.py (gpt-4.1-nano)
-#   OPENAI_MODEL    - optional, defaults to gpt-4.1-nano
+#   OPENAI_API_KEY  - for extract_pdfs.py + enrich_entities.py (gpt-5-nano)
+#   OPENAI_MODEL    - optional, defaults to gpt-5-nano (gpt-4.1-nano was retired
+#                     by OpenAI on 23 Oct 2026; gpt-5.4-nano is the tested
+#                     step-up — see extract_pdfs.model_request_params)
 #   CLERK_EMAIL / CLERK_PASSWORD - clerk portal login (or a local config.py)
 
 set -e

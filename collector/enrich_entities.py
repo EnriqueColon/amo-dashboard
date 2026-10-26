@@ -6,11 +6,14 @@ Only sends entities to OpenAI that couldn't be classified by:
   manual overrides → FDIC match → suffix signals → behavioral patterns → regex rules
 
 Step 1 — Skip high-confidence classifications from normalize.py
-Step 2 — gpt-4.1-nano for remaining entities typed OTHER with no confident source
+Step 2 — the OpenAI model (gpt-5-nano) for remaining entities typed OTHER with no confident source
 Step 3 — Cache results in entity_classifications
 Step 4 — Propagate to entity_nodes + aom_events_clean
 
-Model is configurable via OPENAI_MODEL (default: gpt-4.1-nano).
+Model is configurable via OPENAI_MODEL (default: gpt-5-nano — gpt-4.1-nano was
+retired by OpenAI on 23 Oct 2026). The request parameters each model family
+accepts live in extract_pdfs.model_request_params, shared so the two scripts
+cannot drift.
 """
 import sqlite3
 import os
@@ -20,9 +23,10 @@ import re
 import sys
 import requests
 
+from extract_pdfs import OPENAI_MODEL, model_request_params
+
 DB           = os.environ.get('AMO_DB_PATH', '/opt/amo-dashboard/miami_dade_amo.db')
 OPENAI_KEY   = os.environ.get('OPENAI_API_KEY', '')
-OPENAI_MODEL = os.environ.get('OPENAI_MODEL', 'gpt-4.1-nano')
 OPENAI_URL   = 'https://api.openai.com/v1/chat/completions'
 MIN_VOL    = 1      # lowered: classify all entities (signals handle confidence)
 BATCH_SIZE = 60     # names per request
@@ -88,8 +92,7 @@ def llm_classify_batch(names: list[str]) -> dict[str, str]:
             },
             json={
                 'model': OPENAI_MODEL,
-                'max_tokens': 4096,
-                'temperature': 0,
+                **model_request_params(OPENAI_MODEL),
                 'response_format': {'type': 'json_object'},
                 'messages': [
                     {'role': 'system', 'content': SYSTEM_PROMPT},

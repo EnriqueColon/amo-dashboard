@@ -14,7 +14,10 @@ These checks reproduce that with a fake OpenAI and assert:
   2. a rate-limit 429 is retried and, if it never clears, also stops the run
      with no row written;
   3. a genuine per-document failure (bad JSON back) still becomes LLM_ERROR —
-     the outage path must not swallow real document problems.
+     the outage path must not swallow real document problems;
+  5. a 404 model_not_found (OpenAI retired gpt-4.1-nano on 23 Oct 2026 and
+     each run then wrote 25 LLM_ERROR rows before tripping the consecutive-
+     failure stop) aborts at once with NO row written, naming the model.
 
 Run:  collector/.venv/bin/python3 collector/tests/check_quota_abort.py
 """
@@ -59,6 +62,16 @@ QUOTA_429 = FakeResponse(429, {'error': {
     'code': 'credit_balance_exhausted'}})
 RATE_429 = FakeResponse(429, {'error': {
     'message': 'Rate limit reached', 'type': 'rate_limit_exceeded'}}, {'Retry-After': '0'})
+# Verbatim from the live API on 26 Oct 2026 (note param is null, so the code
+# field is what identifies it).
+MODEL_404 = FakeResponse(404, {'error': {
+    'message': 'The model `gpt-4.1-nano` has been deprecated, learn more here: '
+               'https://platform.openai.com/docs/deprecations',
+    'type': 'invalid_request_error', 'param': None, 'code': 'model_not_found'}})
+PARAM_400 = FakeResponse(400, {'error': {
+    'message': "Unsupported parameter: 'max_tokens' is not supported with this model. "
+               "Use 'max_completion_tokens' instead.",
+    'type': 'invalid_request_error', 'param': 'max_tokens', 'code': 'unsupported_parameter'}})
 GOOD_200 = FakeResponse(200, {
     'usage': {'prompt_tokens': 1, 'completion_tokens': 1},
     'choices': [{'message': {'content': json.dumps({
@@ -174,6 +187,29 @@ def main() -> int:
     code = run_with(ep, [GOOD_200], workers=2, limit=2)
     check('  run completes normally', code, None)
     check('  both documents OK', [s for _, s in rows(db)], ['OK', 'OK'])
+
+    print('5. a retired model (404 model_not_found) or a rejected parameter stops the run')
+    for label, resp in (('model_not_found', MODEL_404), ('unsupported_parameter', PARAM_400)):
+        for workers in (1, 2):
+            db = fresh_db(5)
+            ep = load_module(db)
+            calls = {'n': 0}
+
+            def one_shot(*a, **k):
+                calls['n'] += 1
+                return resp
+            ep.requests.post = one_shot
+            try:
+                ep.run(5, False, county='MIAMI-DADE', workers=workers)
+                code = None
+            except SystemExit as e:
+                code = e.code
+            check(f'  {label} workers={workers}: exit code 2', code, 2)
+            check(f'  {label} workers={workers}: no pdf_extractions rows', rows(db), [])
+            if workers == 1:
+                # With a pool, other workers legitimately fire before the abort
+                # propagates; only the single-worker loop proves "not retried".
+                check(f'  {label} workers={workers}: not retried', calls['n'], 1)
 
     print()
     if failures:
