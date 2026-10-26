@@ -3,7 +3,7 @@
 > **Renamed 19 Oct 2026 at the owner's request: the product is "AOM Tracker" (Assignment of Mortgage), formerly "AMO Tracker."** The rename covers everything users see — the sidebar, the sign-in page, the Entity Activity Report heading, the Excel export, the chat assistant, and the weekly email (subject and header "AOM Market Monitor", sender name "AOM Dashboard" — from the 19 Oct 2026 send onward if deployed before 07:00 ET, else from 26 Oct). Code identifiers, the repository name and the county's own document code (`ASSIGNMENT OF MORTGAGE - AMO`) are unchanged.
 
 > **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 26 Oct 2026
-> **Production URL:** `http://165.22.35.75:5000` (single shared password)
+> **Production URL:** `http://165.22.35.75:5000` (single shared password). **Changing to `http://165.22.35.75/` (port 80, through nginx)** — the switch is drafted in `docs/ops/close-port-5000.md` and waits for the owner's go-ahead; until it is applied both addresses work, and once applied only the new one does
 > **Repository:** `amo-dashboard` (`origin/main`)
 
 ---
@@ -19,7 +19,7 @@
 | **Data volume** | 150,336 recorded filings, 10,431 resolved entities, 56,484 confirmed loan transfers (22 Sep 2026 — see §7.2) |
 | **Refresh cadence** | Broward daily, Miami-Dade weekly, derived tables rebuilt nightly |
 | **Stack** | React + Vite (client) · Express + SQLite (server) · Python (collector) |
-| **Hosting** | Single DigitalOcean droplet, PM2-managed Node process |
+| **Hosting** | Single DigitalOcean droplet, PM2-managed Node process behind nginx on port 80 (Node itself on port 5000 — today still reachable directly from the internet; the pending change in `docs/ops/close-port-5000.md` makes nginx the only entry point) |
 
 ---
 
@@ -840,7 +840,8 @@ System dependencies for OCR: `poppler-utils` and `tesseract-ocr`
 | `AMO_DB_PATH` | server + every collector script | Prod: `/opt/amo-dashboard/miami_dade_amo.db` |
 | `AMO_PASSWORD` | `server/auth.ts` | **Must be set** — weak default |
 | `AMO_SECRET` | `server/auth.ts` | HMAC signing key; derived from password if unset |
-| `PORT` | `server/index.ts` | Default `5000`; the only unfirewalled port |
+| `PORT` | `server/index.ts` | Default `5000`. nginx proxies `:80` → `127.0.0.1:5000`; the droplet has **no firewall at all** today (`ufw` inactive, no DO cloud firewall), so `:5000` is also open to the internet until `docs/ops/close-port-5000.md` is applied |
+| `AMO_BIND_HOST` | `server/index.ts` | Address the Node server listens on. **Default `127.0.0.1` when `NODE_ENV=production`** (nginx is the only way in), `0.0.0.0` otherwise. Set `0.0.0.0` to expose Node directly again (rollback). Added 26 Oct 2026, **not yet deployed** — the first deploy that carries it closes `:5000`, so users must have the new URL first |
 | `NODE_ENV` | `server/index.ts` | `production` serves the built bundle; anything else runs Vite |
 | `OPENAI_API_KEY` | `extract_pdfs.py`, `enrich_entities.py`, `batch_extract_facility.py`, **and since 7 Oct 2026 `server/chat/`** | Already in production `.env` for the collectors; **the Node server now reads it too, so it must be pushed into PM2's environment once** (§6.4). Missing → startup warning, `/api/chat` answers 503, the page shows a notice |
 | `OPENAI_MODEL` | collector scripts | Default `gpt-5-nano` since 26 Oct 2026 (OpenAI retired `gpt-4.1-nano` on 23 Oct 2026). `gpt-5.4-nano` is the tested step-up. The request shape differs by family and is chosen in `extract_pdfs.model_request_params`; the `--budget` prices in `model_prices`. Setting an unknown model is safe: the budget then assumes the dearest known prices, and a model the API does not serve aborts the run instead of failing every document |
@@ -876,7 +877,10 @@ to be pushed in once: see §6.4. `.env.example` in the repo lists every variable
 | Host | DigitalOcean droplet `165.22.35.75` |
 | Spec | 4 vCPU / 8 GB RAM / 160 GB disk (resized 21 Jul 2026 for the full-history backfill) |
 | Path | `/opt/amo-dashboard` |
-| Process | PM2, app name `amo-dashboard`, running `dist/index.cjs` on port 5000 |
+| Process | PM2, app name `amo-dashboard`, running `dist/index.cjs` on port 5000 (started from `ecosystem.config.cjs`; new env vars need `--update-env`, §6.4) |
+| Front door | nginx on port 80 → `127.0.0.1:5000` (`/etc/nginx/sites-available/amo-dashboard`, explicit upstream with `max_fails=0` since 15 Oct 2026). Proposed next version in `docs/ops/nginx-amo-dashboard.conf`: strips `Content-Encoding: br` and adds `X-Forwarded-*` |
+| Firewall | **None** (`ufw` inactive, no DigitalOcean cloud firewall) — `docs/ops/close-port-5000.md` step 4 enables `ufw` for 22/80/443 |
+| TLS | **None** — plain HTTP; a bare IP cannot get a Let's Encrypt certificate, so this waits on the owner choosing a hostname (§7.6) |
 | Clock | UTC, no DST — all cron times below are UTC |
 | Access | SSH key auth (`~/.ssh/id_ed25519`, passphrase in the macOS Keychain) |
 
@@ -2296,6 +2300,7 @@ healthy (640 rows, 57% carrying loan amounts).
 | The rebuild reads its own "previous run" evidence from a table it has just emptied | A normalization rule that depends on last night's data silently never fires — the repeat-seller guard and the typo-spelling correction were both inert in production from 14/16 Oct until 21 Oct 2026, unnoticed because nothing errored | **Closed 21 Oct 2026.** With the staged rebuild the previous run's tables stay intact under `main.` for the whole build, and the two lookups name `main.` explicitly. Lesson recorded: any read of "last night's answer" inside the rebuild must be schema-qualified |
 | A collection run with a failed window reports success | Documents from that window are missing until a later pull or the completeness check catches it — 67 Miami-Dade documents on 21 Oct 2026, from a pull the log called "done — exit 0" | **Closed 21 Oct 2026.** The collector counts windows that errored and exits non-zero when there were any, so the wrapper logs the run FAILED; the daily completeness check repairs the window regardless |
 | A document type is added to the collector without gating the analytical tables | Non-assignment filings silently inflate the Reporting tab and can flip entity types on existing companies | `normalize.NON_ASSIGNMENT_DOC_TYPES` gates both the clean-events build and the raw-name signal sweep; `check_doc_type_scope.py` asserts it, negative control included |
+| The Node process is reachable directly from the internet on `:5000` | Anyone can hit the body parser **before the password check**. Express inflates `Content-Encoding: br` bodies with Node's bundled Brotli, unpatched on the EOL Node 20.20.2 the droplet runs (CVE-2026-111497); verified 26 Oct 2026 that an unauthenticated brotli `POST` from outside reaches the decoder (`400 Decompression failed`). The droplet has no firewall and the documented URL bypasses nginx, so every user is on the exposed path | **Open — fix drafted 26 Oct 2026, awaiting the owner.** `docs/ops/close-port-5000.md`: Node binds `127.0.0.1` in production (`AMO_BIND_HOST`, committed, not deployed), nginx strips `br` before proxying (`docs/ops/nginx-amo-dashboard.conf`, syntax-tested), `ufw` allows 22/80/443 only. Users move to `http://165.22.35.75/`. The Node upgrade itself stays parked (needs a `better-sqlite3` ABI rebuild). TLS is still blocked on a hostname |
 
 ### 7.6 Recommended next steps
 
@@ -2326,6 +2331,13 @@ healthy (640 rows, 57% carrying loan amounts).
    **One piece of hardening still outstanding:** app-only `Mail.Send` permits send-as for *every*
    mailbox in the tenant. Scope it to the one sender with an Exchange `ApplicationAccessPolicy`.
    That needs an M365 administrator and is the only remaining action in this item.
+5. 🔴 **Approve closing port 5000, and pick a hostname** (raised 26 Oct 2026, §7.5 last row,
+   `docs/ops/close-port-5000.md`). Three decisions: (a) a date to tell Andres and David the address
+   becomes `http://165.22.35.75/` and cut over; (b) whether to add a DigitalOcean cloud firewall as
+   well as `ufw` (five minutes in the DO panel, needs the account); (c) **a hostname** — any name
+   under a company domain pointed at the droplet — because Let's Encrypt will not issue a certificate
+   for a bare IP, and until there is one the shared password crosses the wire in clear text on every
+   login. (a) and (b) can run as soon as the owner says yes; (c) unblocks TLS afterwards.
 
 **Engineering:**
 

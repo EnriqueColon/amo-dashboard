@@ -96,20 +96,28 @@ app.use((req, res, next) => {
     await setupVite(httpServer, app);
   }
 
-  // ALWAYS serve the app on the port specified in the environment variable PORT
-  // Other ports are firewalled. Default to 5000 if not specified.
-  // this serves both the API and the client.
-  // It is the only port that is not firewalled.
+  // Serve the API and the client on PORT (default 5000).
+  //
+  // Bind address: AMO_BIND_HOST, defaulting to loopback in production and to
+  // every interface otherwise. In production nginx (:80) is the only public
+  // entry point and proxies to 127.0.0.1:5000; binding Node to loopback keeps
+  // direct internet connections away from the pre-auth body parsing (the
+  // Brotli Content-Encoding path runs inside Node's own zlib, unpatched on the
+  // EOL Node 20 the droplet runs). Set AMO_BIND_HOST=0.0.0.0 to expose it
+  // directly again (rollback — see docs/ops/close-port-5000.md).
   const port = parseInt(process.env.PORT || "5000", 10);
+  const host =
+    process.env.AMO_BIND_HOST ||
+    (process.env.NODE_ENV === "production" ? "127.0.0.1" : "0.0.0.0");
   httpServer.listen(
     {
       port,
-      host: "0.0.0.0",
+      host,
       // reusePort is unsupported on macOS (ENOTSUP) — only enable on Linux
       reusePort: process.platform === "linux",
     },
     () => {
-      log(`serving on port ${port}`);
+      log(`serving on ${host}:${port}`);
     },
   );
 })();

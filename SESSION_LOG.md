@@ -4,6 +4,20 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-10-26 — Close port 5000: nginx as the only public entry point (code + runbook, NOT deployed, owner not yet asked)
+
+Side session from the owner's security-audit session. Goal: take the pre-auth Brotli body-decoding surface of the EOL Node 20.20.2 (CVE-2026-111497) off the internet without upgrading Node (parked: `better-sqlite3` ABI rebuild).
+
+- **Found on the droplet (read-only):** Node listens `0.0.0.0:5000`; nginx `:80` → `upstream amo_app 127.0.0.1:5000` (15 Oct file) works today but nobody uses it — the documented URL is `:5000`; `ufw` inactive, no DO cloud firewall, no `doctl`; PM2 started from `ecosystem.config.cjs` (env: NODE_ENV, PORT, AMO_DB_PATH, AMO_PASSWORD, AMO_SECRET), systemd startup enabled, dump from 7 Oct; Ubuntu 24.04.3; no certbot. **Baseline from the Mac:** `GET :5000/login` 200, `GET :80/login` 200, `POST` with `Content-Encoding: br` to either port → `400 {"message":"Decompression failed"}` (= the brotli decoder ran inside Node, pre-auth); plain bad JSON → `400 Unexpected token`.
+- **Code:** `server/index.ts` listens on `AMO_BIND_HOST`, default `127.0.0.1` when `NODE_ENV=production`, else `0.0.0.0`; log line now `serving on <host>:<port>` (was `serving on port 5000` — nothing in the repo greps it). `tsc --noEmit` clean. `.env.example` documents it. **Pushing/deploying this closes `:5000` for users who do not know the new URL** — step 1 of the runbook (announce `http://165.22.35.75/`) must come first, or deploy with `AMO_BIND_HOST=0.0.0.0` exported.
+- **nginx draft** `docs/ops/nginx-amo-dashboard.conf`: `map $http_content_encoding $strip_ce { br ""; default $http_content_encoding; }` + `proxy_set_header Content-Encoding $strip_ce` (empty value drops the header, so a brotli body hits JSON parsing, never zlib); `X-Real-IP` / `X-Forwarded-For` / `X-Forwarded-Proto`; websocket headers kept but `Connection` via the standard `$connection_upgrade` map (plain requests no longer send `Connection: upgrade` to the keepalive upstream); upstream `max_fails=0` block unchanged. **Syntax-tested on the droplet** with `nginx -t -c` against a throwaway wrapper in `/tmp` (passed, cleaned up); `diff` against the live file shows only those lines.
+- **Runbook** `docs/ops/close-port-5000.md`: 0 baseline curls → 1 announce URL → 2 install nginx file (`:5000` stays open; verify br POST now says "not valid JSON") → 3 `git pull && npm run build && export AMO_BIND_HOST=127.0.0.1 && pm2 restart amo-dashboard --update-env && pm2 save` (never `source .env`) → 4 `ufw allow 22,80,443; ufw --force enable` (SSH first; confirm a second ssh before closing the first) → 5 record. Rollback: `export AMO_BIND_HOST=0.0.0.0 && pm2 restart --update-env && pm2 save`, restore nginx backup, `ufw disable`. Note: the MCP `deploy` tool restarts without `--update-env` — fine after step 3, but do the first one by hand. Server does not read `X-Forwarded-For` yet; `app.set('trust proxy','loopback')` is needed before any `req.ip` use (pending login rate limit).
+- **Owner decisions (Confluence §7.6 item 5):** cutover date; DO cloud firewall yes/no; **a hostname** — bare IP cannot get a Let's Encrypt cert, so TLS waits on it.
+- **Docs:** Confluence header URL line, §1 Hosting, §6.2 (`PORT` note, new `AMO_BIND_HOST` row), §6.3 (Front door / Firewall / TLS rows), §7.5 new row, §7.6 item 5.
+- **Status:** committed on `main`, **not pushed, not applied**; waiting for the owner's explicit yes in the parent session. Sibling session `harden-dashboard-login` was editing the same checkout at the same time — commit paths were listed explicitly.
+
+---
+
 ## 2026-10-26 — OpenAI retired gpt-4.1-nano (23 Oct); extraction moved to gpt-5-nano; folio echo cleaned (`2581515`, `795becb`, `a88defe`, DEPLOYED 13:32 UTC)
 
 Side session started by the owner's main session ("October 23 backend pull missing properties"). **Owner (via that session): "gpt-5-nano (Recommended)" and "Yes, clean them (Recommended)".** Deployed by `git pull` (collector only, no build/restart).
