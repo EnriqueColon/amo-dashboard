@@ -41,8 +41,10 @@ cache bust is needed either way.
   unavailable" and **no figures** — there is no code path that shows a stale number next to a new label.
 - Deploy sequence (from SESSION_LOG 7 Oct): add the two lines to `.env`, `export` **only those two** in
   the shell, `pm2 restart amo-dashboard --update-env && pm2 save`. Do not `source .env` wholesale
-  under `--update-env` — `ecosystem.config.cjs` and `.env` are both known to disagree with the
-  `AMO_PASSWORD` PM2 actually holds (below), and a wholesale push would change the dashboard password.
+  under `--update-env`. Since 26 Oct 2026 `.env` holds the same `AMO_PASSWORD`/`AMO_SECRET` PM2 runs
+  with (copied from PM2 on the owner's instruction), but `ecosystem.config.cjs` still carries a
+  different `AMO_PASSWORD` (below) and lacks `AMO_BIND_HOST`, `MI_*` and `OPENAI_API_KEY`, so
+  exporting only what you mean to change remains the rule.
 - `peer-metrics.ts` and `script/check-metric-directions.ts` remain and `npm run check` still runs the
   direction guardrail. `check:fdic-window` is gone with the window it guarded.
 
@@ -125,9 +127,13 @@ the default scope returned the pre-deploy baseline `70,834 | 28,644 | 13,512` ex
 counts were unchanged.
 
 **Careful with PM2 here:** `ecosystem.config.cjs` on the droplet has drifted from the running
-process — the file's `AMO_PASSWORD` differs from the one PM2 actually holds. `pm2 restart` keeps
-the running env, but a `pm2 delete` + fresh start would adopt the file's value and silently change
-the dashboard password.
+process — the file's `AMO_PASSWORD` differs from the one PM2 actually holds (re-checked 26 Oct 2026:
+password differs, `AMO_SECRET` and `AMO_DB_PATH` match, and the file lacks `AMO_BIND_HOST`, `MI_*`,
+`OPENAI_API_KEY`). `pm2 restart` keeps the running env, but a `pm2 delete` + `pm2 start
+ecosystem.config.cjs` would adopt the file's values: wrong password, Node exposed on `0.0.0.0`
+again, no FDIC Data Analytics, no chat. If PM2's dump is ever lost, rebuild the environment from
+`/opt/amo-dashboard/.env` instead — since 26 Oct 2026 it holds the real `AMO_PASSWORD`/`AMO_SECRET`
+plus everything else the server reads.
 
 **The one-way door is `NORMALIZE_COUNTIES` in `collector/normalize.py`.** Widening it to include
 Broward lets Broward names into the entity-classification signal sweep, which can change

@@ -945,10 +945,13 @@ pm2 logs amo-dashboard --lines 20 --nostream   # no "OPENAI_API_KEY not set" war
 Then `GET /api/chat/config` from a logged-in browser should show `configured: true` and the model.
 `OPENAI_CHAT_MODEL` / `OPENAI_CHAT_REASONING_EFFORT` are optional and only need exporting if set.
 
-Do **not** `source .env` wholesale before `--update-env`: `.env` and `ecosystem.config.cjs` are both
-known to hold an `AMO_PASSWORD` that differs from the one PM2 is actually running with (§7.6), and a
-wholesale push would silently change the dashboard password. Export the two variables and nothing
-else. After this the figures on FDIC Data Analytics change only when Market Intelligence's own daily
+Do **not** `source .env` wholesale before `--update-env`. Since 26 Oct 2026 `.env` holds the same
+`AMO_PASSWORD` and `AMO_SECRET` PM2 is running with (copied from PM2 on the owner's instruction, so
+the sign-in credentials survive a lost PM2 dump), but the habit stays: export the variables you mean
+to change and nothing else, and whenever either value is changed in one place change it in the other
+the same minute, or users get a different password or are all signed out. `ecosystem.config.cjs` on
+the droplet is still stale (different `AMO_PASSWORD`, missing the MI/OpenAI/bind variables) and
+must not be used to start the app (§7.6). After this the figures on FDIC Data Analytics change only when Market Intelligence's own daily
 cache job refreshes (keyed by FDIC quarter), and then within up to seven days here unless the response
 cache is cleared (§5.6, §6.8).
 
@@ -2392,9 +2395,11 @@ healthy (640 rows, 57% carrying loan amounts).
    restart: real sign-in through nginx, authenticated API calls, wrong password logged with the
    client address, `RateLimit` headers present, `X-Powered-By` gone. The password itself is still
    short and shared; the open item is HTTPS (needs a hostname). The Node 22 upgrade landed
-   the same evening (22.23.4). **Noticed during it:** `AMO_PASSWORD` and `AMO_SECRET` live only in
-   PM2's saved process list (`/root/.pm2/dump.pm2`), not in `/opt/amo-dashboard/.env`; if that
-   dump is ever lost the hardened server refuses to start until they are supplied again.
+   the same evening (22.23.4). **Noticed during it:** `AMO_PASSWORD` and `AMO_SECRET` lived only in
+   PM2's saved process list (`/root/.pm2/dump.pm2`), not in `/opt/amo-dashboard/.env`, so a lost
+   dump would have left the hardened server refusing to start. **Fixed the same evening on the
+   owner's instruction:** both were copied from PM2 into `.env` (root-only, gitignored) and verified
+   identical. From now on the two must be kept in step — see §6.4.
    The short password itself is still the owner's to change.
 7. ✅ **Both flagged facility rows checked 15 Aug 2026** — see §7.4 item 7. One confirmed false
    positive, one real with two bad fields. Worth a targeted extractor-prompt fix keyed on
