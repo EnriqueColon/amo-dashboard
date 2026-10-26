@@ -79,9 +79,10 @@ wrong: `cp /etc/nginx/amo-dashboard.before_close5000.* /etc/nginx/sites-availabl
 ### 3. Deploy the bind change (this is the step that closes `:5000`)
 
 The `git pull` in step 2 already fetched the code. `--update-env` is required: PM2 holds the
-environment it was started with (`ecosystem.config.cjs`, Apr 2026) and ignores `.env`. Export **only**
-`AMO_BIND_HOST` — never `source .env` wholesale under `--update-env` (its `AMO_PASSWORD` differs from
-the one PM2 runs with and would silently change the login password).
+environment it was started with and ignores `.env`. Export **only** `AMO_BIND_HOST` — never
+`source .env` wholesale under `--update-env`. (Historical note: when this was written `.env`'s
+`AMO_PASSWORD` differed from PM2's; since 26 Oct 2026 `.env` mirrors PM2 and the stale
+`ecosystem.config.cjs` is gone, but the export-only-what-you-change habit still stands.)
 
 ```bash
 cd /opt/amo-dashboard

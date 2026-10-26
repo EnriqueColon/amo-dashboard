@@ -884,7 +884,7 @@ to be pushed in once: see §6.4. `.env.example` in the repo lists every variable
 | Host | DigitalOcean droplet `165.22.35.75` |
 | Spec | 4 vCPU / 8 GB RAM / 160 GB disk (resized 21 Jul 2026 for the full-history backfill) |
 | Path | `/opt/amo-dashboard` |
-| Process | PM2, app name `amo-dashboard`, running `dist/index.cjs` on port 5000 (started from `ecosystem.config.cjs`; new env vars need `--update-env`, §6.4) |
+| Process | PM2, app name `amo-dashboard`, running `dist/index.cjs` on `127.0.0.1:5000` behind nginx. Its environment lives in PM2's saved process list (`/root/.pm2/dump.pm2`, restored by `pm2 resurrect` at boot) and, since 26 Oct 2026, is mirrored in `/opt/amo-dashboard/.env`; the old `ecosystem.config.cjs` was removed that day (new env vars need `--update-env`, §6.4) |
 | Front door | nginx on port 80 → `127.0.0.1:5000` (`/etc/nginx/sites-available/amo-dashboard` = `docs/ops/nginx-amo-dashboard.conf` since 26 Oct 2026: explicit upstream with `max_fails=0`, `Content-Encoding: br` stripped before Node, `X-Forwarded-*` passed; previous file kept at `/etc/nginx/amo-dashboard.before_close5000.1793035829`) |
 | Firewall | `ufw` active since 26 Oct 2026: inbound 22/80/443 only, outbound open. **No DigitalOcean cloud firewall yet** (recommended as a second layer; needs the DO account) |
 | TLS | **None** — plain HTTP; a bare IP cannot get a Let's Encrypt certificate, so this waits on the owner choosing a hostname (§7.6) |
@@ -949,9 +949,11 @@ Do **not** `source .env` wholesale before `--update-env`. Since 26 Oct 2026 `.en
 `AMO_PASSWORD` and `AMO_SECRET` PM2 is running with (copied from PM2 on the owner's instruction, so
 the sign-in credentials survive a lost PM2 dump), but the habit stays: export the variables you mean
 to change and nothing else, and whenever either value is changed in one place change it in the other
-the same minute, or users get a different password or are all signed out. `ecosystem.config.cjs` on
-the droplet is still stale (different `AMO_PASSWORD`, missing the MI/OpenAI/bind variables) and
-must not be used to start the app (§7.6). After this the figures on FDIC Data Analytics change only when Market Intelligence's own daily
+the same minute, or users get a different password or are all signed out. The stale
+`ecosystem.config.cjs` (April 2026, different `AMO_PASSWORD`, missing the MI/OpenAI/bind variables)
+was removed from the droplet on 26 Oct 2026 on the owner's instruction (kept as
+`/root/ecosystem.config.cjs.removed_<ts>`); if PM2's dump is ever lost, rebuild the app's
+environment from `.env`, not from that file (§7.6). After this the figures on FDIC Data Analytics change only when Market Intelligence's own daily
 cache job refreshes (keyed by FDIC quarter), and then within up to seven days here unless the response
 cache is cleared (§5.6, §6.8).
 
@@ -2384,9 +2386,11 @@ healthy (640 rows, 57% carrying loan amounts).
    the weekly report, item 9 in §7.4) — it is scoped to that report only today, but the same Outlook
    SMTP path could carry cron-failure alerts later without a new vendor.
 6. **Confirm `AMO_PASSWORD` and `AMO_SECRET`** are set in the production environment.
-   ✅ **Verified 15 Aug 2026** — both are present in the live PM2 environment. Two caveats stand:
-   `ecosystem.config.cjs` has drifted from the env PM2 actually holds, so a `pm2 delete` + fresh
-   start would silently change the dashboard password; and the password in use is short and
+   ✅ **Verified 15 Aug 2026** — both are present in the live PM2 environment. Two caveats stood:
+   `ecosystem.config.cjs` had drifted from the env PM2 actually holds, so a `pm2 delete` + fresh
+   start would silently have changed the dashboard password (**resolved 26 Oct 2026:** the file was
+   removed and `.env` now mirrors PM2's values, so there is no stale copy left to start from); and
+   the password in use is short and
    guessable, which matters because the gate is a single shared password with no lockout.
    **26 Oct 2026, DEPLOYED (merge `77f5edc`, PM2 restart #89):** the lockout and the fail-fast
    are live (§7.5, four rows) — a start without the variables crashes loudly instead of falling

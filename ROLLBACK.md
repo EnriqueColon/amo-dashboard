@@ -42,9 +42,9 @@ cache bust is needed either way.
 - Deploy sequence (from SESSION_LOG 7 Oct): add the two lines to `.env`, `export` **only those two** in
   the shell, `pm2 restart amo-dashboard --update-env && pm2 save`. Do not `source .env` wholesale
   under `--update-env`. Since 26 Oct 2026 `.env` holds the same `AMO_PASSWORD`/`AMO_SECRET` PM2 runs
-  with (copied from PM2 on the owner's instruction), but `ecosystem.config.cjs` still carries a
-  different `AMO_PASSWORD` (below) and lacks `AMO_BIND_HOST`, `MI_*` and `OPENAI_API_KEY`, so
-  exporting only what you mean to change remains the rule.
+  with (copied from PM2 on the owner's instruction), and the stale `ecosystem.config.cjs` was removed
+  the same day (below). Exporting only what you mean to change remains the rule, because anything
+  else in the shell environment would be pushed into PM2 too.
 - `peer-metrics.ts` and `script/check-metric-directions.ts` remain and `npm run check` still runs the
   direction guardrail. `check:fdic-window` is gone with the window it guarded.
 
@@ -126,14 +126,17 @@ Pre-deploy backup: `/opt/amo-dashboard/backup_pre_county.db` (92MB, integrity-ch
 the default scope returned the pre-deploy baseline `70,834 | 28,644 | 13,512` exactly, and the DB
 counts were unchanged.
 
-**Careful with PM2 here:** `ecosystem.config.cjs` on the droplet has drifted from the running
-process — the file's `AMO_PASSWORD` differs from the one PM2 actually holds (re-checked 26 Oct 2026:
-password differs, `AMO_SECRET` and `AMO_DB_PATH` match, and the file lacks `AMO_BIND_HOST`, `MI_*`,
-`OPENAI_API_KEY`). `pm2 restart` keeps the running env, but a `pm2 delete` + `pm2 start
-ecosystem.config.cjs` would adopt the file's values: wrong password, Node exposed on `0.0.0.0`
-again, no FDIC Data Analytics, no chat. If PM2's dump is ever lost, rebuild the environment from
-`/opt/amo-dashboard/.env` instead — since 26 Oct 2026 it holds the real `AMO_PASSWORD`/`AMO_SECRET`
-plus everything else the server reads.
+**Careful with PM2 here:** the April 2026 `ecosystem.config.cjs` had drifted from the running
+process (different `AMO_PASSWORD`; no `AMO_BIND_HOST`, `MI_*`, `OPENAI_API_KEY`), so a `pm2 delete`
++ `pm2 start ecosystem.config.cjs` would have adopted stale values: wrong password, Node exposed on
+`0.0.0.0` again, no FDIC Data Analytics, no chat. **Removed 26 Oct 2026** on the owner's instruction
+after confirming nothing starts from it (app script is `dist/index.cjs`, PM2 dump and systemd unit
+don't reference it, no cron/script/MCP tool does); the file is kept as
+`/root/ecosystem.config.cjs.removed_20261026T175907Z`. A plain `pm2 restart` was verified afterwards.
+If PM2's dump is ever lost, rebuild the environment from `/opt/amo-dashboard/.env` — since 26 Oct
+2026 it holds the real `AMO_PASSWORD`/`AMO_SECRET` plus everything else the server reads — e.g.
+`set -a; source /opt/amo-dashboard/.env; set +a; NODE_ENV=production pm2 start dist/index.cjs --name
+amo-dashboard && pm2 save`.
 
 **The one-way door is `NORMALIZE_COUNTIES` in `collector/normalize.py`.** Widening it to include
 Broward lets Broward names into the entity-classification signal sweep, which can change
