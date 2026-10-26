@@ -1106,18 +1106,38 @@ def _completion_text(body: dict) -> str:
     return choice['message']['content']
 
 
+def _parse_answer(body: dict, which: str) -> dict:
+    """json.loads with a diagnosis attached when it fails.
+
+    "Unterminated string starting at: line 7 column 3" says nothing about why
+    the answer was cut short. Four Hillsborough documents failed that way on
+    the first gpt-5-nano retry pass (26 Oct 2026) and one of them parsed fine
+    on a re-run, so the cause is intermittent and only the response itself can
+    show it: the finish reason, the token counts, and the tail of the text.
+    """
+    content = _completion_text(body)
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError as e:
+        choice = body['choices'][0]
+        usage = body.get('usage') or {}
+        raise ValueError(
+            f'{which} answer is not JSON ({e}); finish_reason='
+            f'{choice.get("finish_reason")!r}, completion_tokens='
+            f'{usage.get("completion_tokens")}, {len(content)} chars, '
+            f'tail={content[-120:]!r}') from e
+
+
 def llm_extract(ocr_text: str) -> dict | None:
     body = _openai_post(chat_completion_body(ocr_text, SYSTEM_PROMPT))
     _track_spend(body.get('usage', {}))
-    data = json.loads(_completion_text(body))
-    return postprocess_extraction(data)
+    return postprocess_extraction(_parse_answer(body, 'extraction'))
 
 
 def llm_extract_facility(ocr_text: str) -> dict | None:
     body = _openai_post(chat_completion_body(ocr_text, FACILITY_SYSTEM_PROMPT))
     _track_spend(body.get('usage', {}))
-    data = json.loads(_completion_text(body))
-    return postprocess_facility(data)
+    return postprocess_facility(_parse_answer(body, 'facility'))
 
 
 def save(conn, cfn, rec_book, rec_page, status, data=None, ocr_chars=0,
