@@ -4,7 +4,17 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
-## 2026-10-27 (late) — STAGE 3 BUILT: balance-sheet behaviour signals from our own tables (`920b552`, pushed, NOT deployed)
+## 2026-10-27 (late) — STAGE 3 BUILT and DEPLOYED: balance-sheet behaviour signals from our own tables (`920b552`; deployed 16:26–16:31 UTC)
+
+**Deployed on the owner's "deploy it":** `git pull` 4f180ab → d51e65e; `run_bank_stress.sh` by hand 16:26 →
+16:30:18 UTC exit 0 (third clean production run; 38 new raw columns filled, `bank_behavior` 59,016 rows,
+same national counts as local: 4,308 judged, 1,352 fired); `npm run build` (dist 1,060,857 B, 16:31:00);
+`pm2 restart` #5 online, only `serving on 127.0.0.1:5000` in the log. **Live through nginx:** meta 7
+signals, computed 16:30:13; Florida signals 83 judged / 25 fired, 7,372 B gzipped; National `lt1b` band
+244,056 B / 0.40 s; BCB 35541 HFS transfer + Realized sale, 9 points, 9 steps, reading intact; Ocean Bank
+24156 Modification build; `/` 200. No `npm install`, no env change. **From this point nothing in the
+dashboard reads the Market Intelligence API**; the proxy and the two `MI_*` variables are still present
+(stage 4).
 
 Owner: "lets go to stage 3." A faithful port of Market Intelligence's `lib/analytics/bank-behavior*.ts`
 (read from the sibling repo, read-only) onto our pull, so a bank fires exactly as it did on the page before
