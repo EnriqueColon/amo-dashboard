@@ -4,7 +4,17 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
-## 2026-10-27 (night) — STAGE 2 BUILT: FDIC Data Analytics on our own FDIC tables (`967bec9`, pushed, NOT deployed)
+## 2026-10-27 (night) — STAGE 2 BUILT and DEPLOYED: FDIC Data Analytics on our own FDIC tables (`967bec9`; deployed 14:37–14:42 UTC)
+
+**Deployed on the owner's "deploy it", in the documented order:** `git pull` 546b4e0 → 4f180ab;
+`run_bank_stress.sh` by hand 14:37:xx → 14:41:26 UTC exit 0 (the 16 new raw columns filled — Amerant
+`STNAME FLORIDA`, `CITY CORAL GABLES`, `NALNLS 168,838`, `UCLN 1,376,906`, `RBCT1CER 12.91`, `NIMR 3.317`);
+`npm run build` (dist 1,052,796 B, 14:42:02 UTC); `pm2 restart` #4 online, log shows only `serving on
+127.0.0.1:5000`. **Live through nginx (real sign-in on-box):** Florida screening 85 rows / 32,528 B gzipped /
+0.31 s, **Amerant row identical to the local verification below to the dollar**, top three Interamerican
+67.4 / Amerant 66.8 / BayFirst 64.0; National 1,670,499 B gzipped / 0.98 s; BCB 35541 8 trend points + the
+3 acquisitions, no history error; `/` 200. No `npm install`, no env change. Market Intelligence proxy still
+registered and still configured — unused by the client from now on.
 
 Owner: "lets go to step 2 then." Approach: a re-point, not a rewrite — `server/fdic-analytics.ts`
 answers `/api/fdic/{meta,screening,institution/:cert}` from `bank_stress.db` in the **same envelope and
