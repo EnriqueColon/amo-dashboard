@@ -4,6 +4,47 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-10-27 (night) — STAGE 2 BUILT: FDIC Data Analytics on our own FDIC tables (`967bec9`, pushed, NOT deployed)
+
+Owner: "lets go to step 2 then." Approach: a re-point, not a rewrite — `server/fdic-analytics.ts`
+answers `/api/fdic/{meta,screening,institution/:cert}` from `bank_stress.db` in the **same envelope and
+payload shapes** the page rendered from Market Intelligence, so the client changed paths, score columns
+and labels only. The `/api/mi/*` proxy and `MI_*` variables are untouched (stage 4 removes them).
+
+- **Definitions chosen:** CRE = construction + multifamily + non-owner-occupied nonfarm nonres (owner's
+  decision, now on both pages; the old page's "Other" was `LNREOTH`, which the FDIC properties file
+  titles *1-4 family* — it never belonged in CRE); CRE Concentration on this page stays CRE ÷ net loans
+  (glossary semantics kept), distinct from the ranking's CRE ÷ Tier 1; ROA = quarterly annualized on
+  two-point average assets (glossary updated; equals FDIC `ROAQ`); NIM = FDIC `NIMR`; earnings buffer =
+  TTM net income ÷ CRE loans; NI YoY % from `netinc_ttm_k` at t and t−4; capital category = PCA
+  thresholds (well 5/6.5/8/10, adequate 4/4.5/6/8, CBLR ≥ 9%), binding = smallest headroom; National =
+  every ranked bank (4,286), not MI's ~1,100 screen; unranked de novo banks show a dash and sort last.
+- **Acquisition history** is the one thing not in our tables: fetched live from FDIC `/history` with
+  `filters=ACQ_CERT:<cert> AND CHANGECODE:[200 TO 299]`, deduped by (absorbed cert, date) because the
+  FDIC files the acquirer-side 810 row too; cached 7 days, **not cached on failure**; the drawer shows
+  the error rather than "No acquisitions on record". BCB 35541 → the same three as before (Indus
+  American 2018, Allegiance 2011, Pamrapo 2010); CNB 17281 → 15 back to 1990.
+- **16 fields added to the pull** (`STNAME CITY NALNLS P3LNLS P9LNLS P3ASSET P9ASSET LNRENROW LNRERES
+  UCLN UCCOMRE RBCT1CER RBC1RWAJ RWAJ NIMR`), all verified live first; `db.init_schema` now appends
+  missing columns (`PRAGMA table_info` diff) so an existing file migrates — **values arrive only on the
+  next pull**, hence the deploy order below. Local re-pull done (80 s).
+- **Verified locally:** `/api/fdic/meta` 55 scopes; Florida 85 rows; **Amerant 22953 recomputed by hand
+  from the raw table matches the API to the dollar** (assets 10,274,427,000; loans 6,780,128,000; CRE
+  2,383,007,000; CRE/loans 35.15; NPL 0.0246; NC/loans 0.0249; PD30-89/assets 0.0031; reserve 0.0125;
+  UC 1,376,906,000; CRE UC 477,776,000; CET1 12.91; leverage 9.88; NIMR 3.317; CRE/(T1+T2) 2.184;
+  CRE/equity 2.416; composite 66.8 = bank_scores); CNB 17281 drawer: 8 points, verdict "Watch, composite
+  59.2, rank 439 of 4,286"; unknown scope → 400; page and drawer render, Trend + Acquisition History
+  present, Balance-Sheet Actions absent, no console errors; `tsc` clean. Sizes gzipped: Florida 34 KB,
+  National 1.7 MB (every bank, with 4-quarter trend arrays).
+- **Docs:** Confluence §4.3 (page rewritten), §5.1 data flow, §6.2 env table (+`AMO_BANK_STRESS_DB_PATH`),
+  §7.3 new row, §7.6 4c.
+- **Deploy order when approved:** `git pull` → `collector/run_bank_stress.sh` by hand (~4 min; fills the
+  new columns; no restart needed for the ranking page) → `npm run build && pm2 restart amo-dashboard`
+  (no `npm install`, no env change) → open FDIC Data Analytics, Florida, and compare the Amerant row to
+  the figures above. Rollback: `git revert 967bec9`, build, restart — the MI proxy is still there.
+
+---
+
 ## 2026-10-27 (evening) — gzip on every response + Bank Stress Ranking DEPLOYED (`546b4e0`, 14:04–14:09 UTC)
 
 Owner: "fix this [the 4.5 MB uncompressed National response], and then deploy."
