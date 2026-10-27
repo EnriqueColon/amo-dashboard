@@ -4,7 +4,44 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
-## 2026-10-27 (later) — Bank Stress Ranking STAGE 1 BUILT, verified locally, committed; NOT deployed
+## 2026-10-27 (evening) — gzip on every response + Bank Stress Ranking DEPLOYED (`546b4e0`, 14:04–14:09 UTC)
+
+Owner: "fix this [the 4.5 MB uncompressed National response], and then deploy."
+
+- **Compression (`546b4e0`):** `compression` middleware in `server/index.ts` right after `x-powered-by`,
+  bundled via the build allowlist. Skips `/api/chat*` and any `text/event-stream` response (compression
+  buffers a stream until it ends, which would hold the chat's SSE back). Verified locally: National
+  ranking 4.46 MB → 804 KB, Southeast 679 → 125 KB, bank drawer 25 → 7 KB, `/api/chat/config` untouched,
+  gunzip round-trip parses, pages render, no console errors. **Why it was needed:** the droplet's nginx has
+  `gzip on` but `gzip_types` commented out (HTML only) and `gzip_proxied` off, so no JSON was ever
+  compressed. nginx passes an upstream-gzipped body through untouched.
+- **Deploy over SSH (the MCP `deploy` tool does not run `npm install`, and `package.json` changed):**
+  droplet `package-lock.json` had 26 lines of local `"dev": true` drift → backed up to
+  `/root/package-lock.before_bankstress.<ts>.json`, `git checkout -- package-lock.json`, `git pull --ff-only`
+  c30e6aa → 546b4e0 (8 commits), `npm install` (+7 packages), `npm run build` (dist 1,039,523 B), `pm2 restart`
+  (#3, online), `pm2 save`. Startup log: the expected `[bank-stress] WARNING … not found` then `serving on
+  127.0.0.1:5000`; `/login` via nginx 200. **Gotcha hit twice:** the pre-check `pgrep -f normalize.py` matched
+  the ssh command line's own text — first the pattern, then the *error message* that contained
+  `normalize.py`. Use `normalize.p[y]` AND keep the literal out of every string on that line.
+- **Live gzip through nginx (real sign-in on-box, password never printed):** `/api/mi/screening?scope=National`
+  1,467,717 → **238,367 B**; `/api/mi/meta` 4,702 → 2,186; `/` 2,037 → 768; `/api/chat/config` 293 both
+  ways (excluded, as designed). The §7.4 item −9 "miss" is closed.
+- **First production run of `run_bank_stress.sh` (14:05:11 → 14:09:27 UTC, exit 0):** 20 quarters pulled,
+  92,924 bank-quarters, 4,286 ranked for 20260630, tiers normal 4,089 / watchlist 193 / pressure 4, CRE
+  seller signal 4, backtest 4/9 and 2/7 top-decile, **link 3,594 cert ↔ canonical-name rows** (the AOM
+  `fdic_institution_cache`). `/opt/amo-dashboard/bank_stress.db` = 122.5 MB. Live: `/api/bank-stress/meta`
+  200 `ok:true` computed 14:09:24; Southeast ranking 120 KB gz in 0.14 s; National 773 KB gz in 0.81 s;
+  `/bank/17281` 200. **Crontab installed:** `0 3 * * 0 …/run_bank_stress.sh >> …/bank_stress.log` (backup
+  `collector/crontab.before_bank_stress.<ts>`). Droplet Python is 3.12 — fine, stdlib only.
+- **Decided not to back up `bank_stress.db`:** every table in it is rebuilt from the public FDIC API by the
+  weekly run in ~4 minutes; nothing in it is irreplaceable, and `run_backup.sh`'s rotation/degraded logic
+  is keyed to the one `amo-*.db.gz` archive. Documented in Confluence instead of touching the backup job.
+- **Next:** stage 2 — re-point FDIC Data Analytics to `fdic_financials_raw` / `bank_metrics` and retire the
+  `/api/mi/*` proxy (keep it live until stage 2 is verified); stage 3 — behaviour signals.
+
+---
+
+## 2026-10-27 (later) — Bank Stress Ranking STAGE 1 BUILT, verified locally, committed (deployed the same evening — entry above)
 
 Owner decisions before building: **exclude owner-occupied CRE** (interagency definition), **Tier 1 capital as
 the concentration denominator** (CBLR filers report total RBC as 0), CERT 17281 confirmed, four peer bands,
