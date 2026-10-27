@@ -5,7 +5,6 @@ import { serveStatic } from "./static";
 import { registerAuthRoutes, checkAuth } from "./auth";
 import { createServer } from "http";
 import { registerWeekendStatus } from "./weekend";
-import { warnIfMarketIntelligenceUnconfigured } from "./market-intelligence";
 import { warnIfBankStressMissing } from "./bank-stress";
 import { warnIfChatUnconfigured } from "./chat";
 
@@ -101,7 +100,6 @@ app.use((req, res, next) => {
 });
 
 (async () => {
-  warnIfMarketIntelligenceUnconfigured(log);
   warnIfBankStressMissing(log);
   warnIfChatUnconfigured(log);
   registerWeekendStatus(app);

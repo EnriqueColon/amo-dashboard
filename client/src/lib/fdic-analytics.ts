@@ -1,13 +1,12 @@
 /**
  * Client for the FDIC Data Analytics page's data routes.
  *
- * Since 27 Oct 2026 (stage 2 of the Bank Stress work) these are this app's own
- * /api/fdic/* routes (server/fdic-analytics.ts), computed from the FDIC Call
- * Report rows the weekly collector job pulls directly from the FDIC. Before
- * that they were /api/mi/*, a pass-through to the Market Intelligence tool;
- * the envelope and payload shapes were kept so the page did not have to
- * change, which is why the names in this file still say "Mi". The file is
- * renamed when the Market Intelligence proxy is removed (stage 4).
+ * These are this app's own /api/fdic/* routes (server/fdic-analytics.ts),
+ * computed from the FDIC Call Report rows the weekly collector job pulls
+ * directly from the FDIC. From 7 to 27 Oct 2026 the page read a pass-through
+ * to the Market Intelligence tool instead; the envelope and payload shapes
+ * were kept when the source moved in-house (stage 2), and the module was
+ * renamed from market-intelligence.ts when the proxy was removed (stage 4).
  *
  * Balance-sheet behaviour signals (`meta.signals`, `/behavior-signals`, the
  * drawer's `behavior`) are computed by collector/bank_stress/behavior.py since
@@ -30,13 +29,13 @@ const API_PREFIX = '/api/fdic'
 
 // ── Envelope ────────────────────────────────────────────────────────────────
 
-export type MiMetaStamp = { quarter: string; scope: string; contractVersion: string; servedAt: string }
+export type FdicMetaStamp = { quarter: string; scope: string; contractVersion: string; servedAt: string }
 
-export class MiError extends Error {
+export class FdicError extends Error {
   status: number
   constructor(status: number, message: string) {
     super(message)
-    this.name = 'MiError'
+    this.name = 'FdicError'
     this.status = status
   }
   /** 401/503/502 mean the source is down or misconfigured, not that the user asked for something invalid. */
@@ -45,28 +44,28 @@ export class MiError extends Error {
   }
 }
 
-async function miGet<T>(path: string): Promise<T & { meta: MiMetaStamp }> {
+async function apiGet<T>(path: string): Promise<T & { meta: FdicMetaStamp }> {
   let res: Response
   try {
     res = await fetch(path, { headers: { Accept: 'application/json' } })
   } catch (err) {
-    throw new MiError(0, err instanceof Error ? err.message : 'network error')
+    throw new FdicError(0, err instanceof Error ? err.message : 'network error')
   }
   let body: any
   try {
     body = await res.json()
   } catch {
-    throw new MiError(res.status || 502, `Unexpected non-JSON response (HTTP ${res.status})`)
+    throw new FdicError(res.status || 502, `Unexpected non-JSON response (HTTP ${res.status})`)
   }
   if (!res.ok || !body || body.ok !== true) {
-    throw new MiError(res.status, typeof body?.error === 'string' ? body.error : `HTTP ${res.status}`)
+    throw new FdicError(res.status, typeof body?.error === 'string' ? body.error : `HTTP ${res.status}`)
   }
-  return body as T & { meta: MiMetaStamp }
+  return body as T & { meta: FdicMetaStamp }
 }
 
 // ── /meta ───────────────────────────────────────────────────────────────────
 
-export type MiSignalDef = {
+export type FdicSignalDef = {
   key: string
   label: string
   side: 'action' | 'pressure'
@@ -74,25 +73,25 @@ export type MiSignalDef = {
   rule: string
 }
 
-export type MiAssetBand = { key: string; label: string; maxAssets: number | null }
+export type FdicAssetBand = { key: string; label: string; maxAssets: number | null }
 
-export type MiMeta = {
-  meta: MiMetaStamp & { apiVersion: string; source: string }
+export type FdicMeta = {
+  meta: FdicMetaStamp & { apiVersion: string; source: string }
   scopes: { national: string; states: Record<string, string> }
-  assetBands: MiAssetBand[]
-  signals: MiSignalDef[]
+  assetBands: FdicAssetBand[]
+  signals: FdicSignalDef[]
   signalThresholds: Record<string, number>
   creCategoryLabels: Record<string, string>
   endpoints: Record<string, string>
   cache: { note: string }
 }
 
-let metaPromise: Promise<MiMeta> | null = null
+let metaPromise: Promise<FdicMeta> | null = null
 
 /** One fetch per page load; both the page and the drawer need it. Failures are not memoised. */
-export function loadMiMeta(): Promise<MiMeta> {
+export function loadFdicMeta(): Promise<FdicMeta> {
   if (!metaPromise) {
-    metaPromise = miGet<MiMeta>(`${API_PREFIX}/meta`).catch((err) => {
+    metaPromise = apiGet<FdicMeta>(`${API_PREFIX}/meta`).catch((err) => {
       metaPromise = null
       throw err
     })
@@ -100,12 +99,12 @@ export function loadMiMeta(): Promise<MiMeta> {
   return metaPromise
 }
 
-export function signalsByKey(meta: MiMeta | null): Map<string, MiSignalDef> {
+export function signalsByKey(meta: FdicMeta | null): Map<string, FdicSignalDef> {
   return new Map((meta?.signals ?? []).map((s) => [s.key, s]))
 }
 
 /** "FLORIDA" → "FL" using meta.scopes.states; falls back to the input. */
-export function stateCodeFor(meta: MiMeta | null, stateName: string | undefined): string | undefined {
+export function stateCodeFor(meta: FdicMeta | null, stateName: string | undefined): string | undefined {
   if (!stateName || !meta) return stateName
   const upper = stateName.toUpperCase()
   if (upper.length === 2 && meta.scopes.states[upper]) return upper
@@ -117,18 +116,18 @@ export function stateCodeFor(meta: MiMeta | null, stateName: string | undefined)
 
 // ── /screening ──────────────────────────────────────────────────────────────
 
-export type MiCapitalCategory = { category: string; label: string; binding: string; basis: string }
+export type FdicCapitalCategory = { category: string; label: string; binding: string; basis: string }
 
-export type MiCapitalRatios = {
+export type FdicCapitalRatios = {
   creToTier1Tier2: number | null
   creToEquity: number | null
   constructionToTier1Tier2: number | null
   multifamilyToTier1Tier2: number | null
 }
 
-export type MiTrendPoint = { reportDate: string; creConcentration?: number; nplRatio?: number }
+export type FdicTrendPoint = { reportDate: string; creConcentration?: number; nplRatio?: number }
 
-export type MiScreeningRow = {
+export type FdicScreeningRow = {
   id: string // FDIC CERT
   name: string
   city?: string
@@ -148,7 +147,7 @@ export type MiScreeningRow = {
   loansToDeposits?: number
   cet1Ratio?: number
   leverageRatio?: number
-  capitalCategory?: MiCapitalCategory
+  capitalCategory?: FdicCapitalCategory
   totalUnusedCommitments?: number
   creUnusedCommitments?: number
   constructionLoans?: number
@@ -164,8 +163,8 @@ export type MiScreeningRow = {
   nimLatest?: number | null
   nimDelta4Q?: number | null
   earningsBufferPct?: number | null
-  capitalRatios?: MiCapitalRatios
-  trend: MiTrendPoint[]
+  capitalRatios?: FdicCapitalRatios
+  trend: FdicTrendPoint[]
   stateCode?: string
   // Bank Stress Ranking scores — percentile ranks within the asset band, higher = more stress.
   // Null for banks that are shown but not ranked (established < 3 years ago).
@@ -182,7 +181,7 @@ export type MiScreeningRow = {
   excludedReason: string | null
 }
 
-export type MiScreeningKpis = {
+export type FdicScreeningKpis = {
   institutionsScreened: number
   avgNplRatio: number
   avgNoncurrentToLoans: number
@@ -190,7 +189,7 @@ export type MiScreeningKpis = {
   avgCreConcentration: number
 }
 
-export type MiNplSummary = {
+export type FdicNplSummary = {
   totalLoans: number
   totalNpl: number
   totalCre: number
@@ -200,24 +199,24 @@ export type MiNplSummary = {
   count: number
 }
 
-export type MiScreeningPayload = {
-  rows: MiScreeningRow[]
-  kpis: MiScreeningKpis
-  nplSummary: MiNplSummary
+export type FdicScreeningPayload = {
+  rows: FdicScreeningRow[]
+  kpis: FdicScreeningKpis
+  nplSummary: FdicNplSummary
   quarters: string[]
   quartersDisplay: string[]
   rawRowCount: number
 }
 
-export type MiScreening = { meta: MiMetaStamp; payload: MiScreeningPayload }
+export type FdicScreening = { meta: FdicMetaStamp; payload: FdicScreeningPayload }
 
-export function loadScreening(scope: string): Promise<MiScreening> {
-  return miGet<{ payload: MiScreeningPayload }>(`${API_PREFIX}/screening?scope=${encodeURIComponent(scope)}`)
+export function loadScreening(scope: string): Promise<FdicScreening> {
+  return apiGet<{ payload: FdicScreeningPayload }>(`${API_PREFIX}/screening?scope=${encodeURIComponent(scope)}`)
 }
 
 // ── /behavior-signals ───────────────────────────────────────────────────────
 
-export type MiSignalSummary = {
+export type FdicSignalSummary = {
   cert: string
   name: string
   state: string
@@ -236,17 +235,17 @@ export type MiSignalSummary = {
   percentiles: Record<string, number | null>
 }
 
-export type MiSignalCohort = {
+export type FdicSignalCohort = {
   scope: string
   asOfQuarter: string
   institutionCount: number
   currentCount: number
   unjudgedCount: number
-  summaries: MiSignalSummary[]
+  summaries: FdicSignalSummary[]
 }
 
-export type MiSignalsResult = {
-  byCert: Map<string, MiSignalSummary>
+export type FdicSignalsResult = {
+  byCert: Map<string, FdicSignalSummary>
   institutionCount: number
   currentCount: number
   unjudgedCount: number
@@ -259,7 +258,7 @@ export type MiSignalsResult = {
  * ~3.9 MB, so for National the contract says to fetch per asset band (seven
  * calls of ≤0.6 MB each) and merge. A state fits in one call.
  */
-export async function loadBehaviorSignals(scope: string, meta: MiMeta): Promise<MiSignalsResult> {
+export async function loadBehaviorSignals(scope: string, meta: FdicMeta): Promise<FdicSignalsResult> {
   const isNational = scope === meta.scopes.national
   const urls = isNational
     ? meta.assetBands.map((b) => `${API_PREFIX}/behavior-signals?scope=${encodeURIComponent(scope)}&band=${encodeURIComponent(b.key)}`)
@@ -269,12 +268,12 @@ export async function loadBehaviorSignals(scope: string, meta: MiMeta): Promise<
     const res = await fetch(url, { headers: { Accept: 'application/json' } })
     const text = await res.text()
     let body: any
-    try { body = JSON.parse(text) } catch { throw new MiError(res.status || 502, `Unexpected non-JSON response (HTTP ${res.status})`) }
-    if (!res.ok || body?.ok !== true) throw new MiError(res.status, typeof body?.error === 'string' ? body.error : `HTTP ${res.status}`)
-    return { cohort: body.cohort as MiSignalCohort, bytes: text.length }
+    try { body = JSON.parse(text) } catch { throw new FdicError(res.status || 502, `Unexpected non-JSON response (HTTP ${res.status})`) }
+    if (!res.ok || body?.ok !== true) throw new FdicError(res.status, typeof body?.error === 'string' ? body.error : `HTTP ${res.status}`)
+    return { cohort: body.cohort as FdicSignalCohort, bytes: text.length }
   }))
 
-  const byCert = new Map<string, MiSignalSummary>()
+  const byCert = new Map<string, FdicSignalSummary>()
   let firedCount = 0, largest = 0
   for (const { cohort, bytes } of parts) {
     largest = Math.max(largest, bytes)
@@ -299,7 +298,7 @@ export async function loadBehaviorSignals(scope: string, meta: MiMeta): Promise<
 
 // ── /institution/<cert> ─────────────────────────────────────────────────────
 
-export type MiTrendQuarter = {
+export type FdicTrendQuarter = {
   quarter: string
   label: string
   noncurrentPct: number | null
@@ -315,7 +314,7 @@ export type MiTrendQuarter = {
   capital: { category: string; label: string }
 }
 
-export type MiRollForwardStep = {
+export type FdicRollForwardStep = {
   quarter: string
   label: string
   priorNonaccrual: number
@@ -328,15 +327,15 @@ export type MiRollForwardStep = {
   unexplainedExitShareOfPrior: number
 }
 
-export type MiInstitution = {
-  meta: MiMetaStamp
+export type FdicInstitution = {
+  meta: FdicMetaStamp
   cert: string
   trend: {
     cert: string
     name: string
     city: string
     state: string
-    points: MiTrendQuarter[]
+    points: FdicTrendQuarter[]
     verdict: { tone: string; heading: string; text: string }
     leverageOnly: boolean
   }
@@ -353,19 +352,19 @@ export type MiInstitution = {
     state: string
     asOfQuarter: string
     points: Array<Record<string, number | string | null>>
-    rollForward: MiRollForwardStep[]
-    latestByCategory: Array<{ category: string; label: string; step: MiRollForwardStep }>
+    rollForward: FdicRollForwardStep[]
+    latestByCategory: Array<{ category: string; label: string; step: FdicRollForwardStep }>
     signalsByQuarter: Array<{ quarter: string; label: string; fired: string[]; unjudged: string[] }>
-    latest: MiSignalSummary
+    latest: FdicSignalSummary
     reading: { text: string; signals: string[] }
   }
   /** Present only when requested with ?include=narrative (an OpenAI call upstream). */
   narrative?: { text: string }
 }
 
-export function loadInstitution(cert: string, _opts: { narrative?: boolean } = {}): Promise<MiInstitution> {
+export function loadInstitution(cert: string, _opts: { narrative?: boolean } = {}): Promise<FdicInstitution> {
   // The narrative option was an OpenAI call inside Market Intelligence; there is no equivalent here.
-  return miGet<MiInstitution>(`${API_PREFIX}/institution/${encodeURIComponent(cert)}`)
+  return apiGet<FdicInstitution>(`${API_PREFIX}/institution/${encodeURIComponent(cert)}`)
 }
 
 // ── Display helpers shared by the page and the drawer ───────────────────────
@@ -382,5 +381,5 @@ export function formatQuarterLabel(dateString?: string): string {
   return `Q${Math.floor(parsed.getMonth() / 3) + 1} ${parsed.getFullYear()}`
 }
 
-export const MI_SOURCE_LABEL = 'Source: FDIC Call Reports, pulled directly from the FDIC BankFind API'
-export const MI_UNAVAILABLE_TITLE = 'FDIC data not available'
+export const FDIC_SOURCE_LABEL = 'Source: FDIC Call Reports, pulled directly from the FDIC BankFind API'
+export const FDIC_UNAVAILABLE_TITLE = 'FDIC data not available'

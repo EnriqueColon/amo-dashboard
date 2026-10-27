@@ -9,9 +9,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Skeleton } from "@/components/ui/skeleton"
 import { toast } from "@/hooks/use-toast"
 import {
-  loadInstitution, loadMiMeta, signalsByKey, MiError, MI_UNAVAILABLE_TITLE,
-  type MiInstitution, type MiMeta, type MiRollForwardStep, type MiTrendQuarter,
-} from "@/lib/market-intelligence"
+  loadInstitution, loadFdicMeta, signalsByKey, FdicError, FDIC_UNAVAILABLE_TITLE,
+  type FdicInstitution, type FdicMeta, type FdicRollForwardStep, type FdicTrendQuarter,
+} from "@/lib/fdic-analytics"
 import {
   formatMoney,
   formatCapitalMultiple,
@@ -616,11 +616,10 @@ function ComparisonTable({ rows, cohort, formatAssets, formatQuarter, formatDeci
   )
 }
 
-// ── Per-institution detail from Market Intelligence ──────────────────────────
+// ── Per-institution detail from our own FDIC tables ─────────────────────────
 //
-// /api/mi/institution/<cert> → { trend, history, behavior }. Loaded when one
-// bank is open in the drawer; the narrative (an OpenAI call upstream) is only
-// requested when the user presses the button for it.
+// /api/fdic/institution/<cert> → { trend, history, behavior } (server/fdic-analytics.ts,
+// over bank_stress.db). Loaded when one bank is open in the drawer.
 
 /** Call Report money is in $ thousands; show it as $K / $M / $B. */
 function formatThousands(v: number | null | undefined): string {
@@ -649,7 +648,7 @@ const VERDICT_TONE: Record<string, string> = {
 // guidance (300% CRE / capital, 100% construction / capital) — supervisory
 // thresholds, not anything computed here.
 
-type TrendSeries = { key: Extract<keyof MiTrendQuarter, string>; label: string; color: string; decimals?: number }
+type TrendSeries = { key: Extract<keyof FdicTrendQuarter, string>; label: string; color: string; decimals?: number }
 type TrendPanel = { title: string; hint: string; series: TrendSeries[]; references?: Array<{ y: number; label: string }>; unit: "pct" | "usd" }
 
 const TREND_PANELS: TrendPanel[] = [
@@ -707,7 +706,7 @@ const BALANCE_SERIES: Array<{ key: string; label: string; color: string }> = [
 
 const CHART_AXIS_TICK = { fontSize: 10, fill: "#64748b" }
 
-function TrendPanelChart({ panel, points, leverageOnly }: { panel: TrendPanel; points: MiTrendQuarter[]; leverageOnly: boolean }) {
+function TrendPanelChart({ panel, points, leverageOnly }: { panel: TrendPanel; points: FdicTrendQuarter[]; leverageOnly: boolean }) {
   // Drop a series the bank never reports (CBLR filers have no CET1 / total RBC)
   // rather than drawing an empty line and a dead legend entry.
   const series = panel.series.filter((s) => {
@@ -754,7 +753,7 @@ function TrendPanelChart({ panel, points, leverageOnly }: { panel: TrendPanel; p
   )
 }
 
-function TrendCharts({ points, leverageOnly }: { points: MiTrendQuarter[]; leverageOnly: boolean }) {
+function TrendCharts({ points, leverageOnly }: { points: FdicTrendQuarter[]; leverageOnly: boolean }) {
   if (points.length < 2) return null
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -801,7 +800,7 @@ function BalanceChart({ points }: { points: Array<Record<string, number | string
   )
 }
 
-function RollForwardRow({ step, first }: { step: MiRollForwardStep; first: string }) {
+function RollForwardRow({ step, first }: { step: FdicRollForwardStep; first: string }) {
   return (
     <TableRow>
       <TableCell className="py-1.5 text-xs font-medium text-slate-700 whitespace-nowrap">{first}</TableCell>
@@ -834,21 +833,21 @@ function RollForwardHeader() {
 }
 
 export function InstitutionDetailSections({ cert }: { cert: string }) {
-  const [meta, setMeta] = useState<MiMeta | null>(null)
-  const [detail, setDetail] = useState<MiInstitution | null>(null)
+  const [meta, setMeta] = useState<FdicMeta | null>(null)
+  const [detail, setDetail] = useState<FdicInstitution | null>(null)
   const [error, setError] = useState<{ title: string; detail: string } | null>(null)
 
   useEffect(() => {
     let mounted = true
     setDetail(null)
     setError(null)
-    loadMiMeta().then((m) => { if (mounted) setMeta(m) }).catch(() => {})
+    loadFdicMeta().then((m) => { if (mounted) setMeta(m) }).catch(() => {})
     loadInstitution(cert)
       .then((d) => { if (mounted) setDetail(d) })
       .catch((err) => {
         if (!mounted) return
-        const mi = err instanceof MiError ? err : null
-        setError({ title: mi && !mi.unavailable ? "Could not load institution detail" : MI_UNAVAILABLE_TITLE, detail: err instanceof Error ? err.message : String(err) })
+        const mi = err instanceof FdicError ? err : null
+        setError({ title: mi && !mi.unavailable ? "Could not load institution detail" : FDIC_UNAVAILABLE_TITLE, detail: err instanceof Error ? err.message : String(err) })
       })
     return () => { mounted = false }
   }, [cert])

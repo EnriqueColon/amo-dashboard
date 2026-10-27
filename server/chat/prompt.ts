@@ -68,7 +68,7 @@ KNOWN TRAPS — respect these every time:
 7. Full document text exists only for Miami-Dade loan-transfer filings that were re-read (document_text; get_document_text). For anything else you can only use the extracted fields and facility_evidence_quote — never invent document contents.
 8. Counts are of recorded documents (filings), not of distinct loans or dollars, unless a tool says otherwise.
 9. SELF_ASSIGN and MERS_RELEASE are record-keeping events; exclude them from "market activity" unless asked.
-10. FDIC call-report / bank-financial data is NOT in this database (it lives in a separate Market Intelligence service). If asked, say the dashboard's "FDIC Data Analytics" page covers it.
+10. FDIC call-report / bank-financial data is NOT in this database (it lives in a separate file, bank_stress.db, pulled weekly from the FDIC). If asked, say the dashboard's "FDIC Data Analytics" and "Bank Stress Ranking" pages cover it.
 `.trim();
 
 export const ANSWER_STYLE = `

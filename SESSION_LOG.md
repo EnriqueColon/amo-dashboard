@@ -4,6 +4,35 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-10-27 (last) — STAGE 4 BUILT: Market Intelligence dependency removed from the code (NOT deployed; production env step pending)
+
+Owner: "lets go to stage 4."
+
+- **Deleted:** `server/market-intelligence.ts` (client + `/api/mi/*` routes), its registration in
+  `routes.ts`, the startup warning in `index.ts`, `docs/market-intelligence-meta.json` (the saved
+  contract — the signal definitions now live in `collector/bank_stress/behavior.py` and reach the UI via
+  `bank_stress_meta.definitions`). **Renamed:** `client/src/lib/market-intelligence.ts` →
+  `fdic-analytics.ts`; `Mi*` types → `Fdic*`, `MiError` → `FdicError`, `loadMiMeta` → `loadFdicMeta`,
+  `MI_SOURCE_LABEL` / `MI_UNAVAILABLE_TITLE` → `FDIC_*`, `miGet` → `apiGet` (perl over the three client
+  files; `tsc` clean). `.env.example`: MI block replaced by the optional `AMO_BANK_STRESS_DB_PATH`.
+  `server/chat/prompt.ts` rule 10 no longer names Market Intelligence. CLAUDE.md and the Cursor rule's
+  `--update-env` example reworded; ROLLBACK.md got a new top section for stages 1–4 (the 7 Oct MI section
+  kept as history); Confluence §5.1, §5.3, §5.6, §6.2, §6.4 runbook, §6.7, §7.5, §8 updated.
+- **Grep after:** no reference to `market-intelligence`, `MI_BASE_URL`, `MI_ANALYTICS_API_KEY` or
+  `/api/mi` in `server/`, `client/src`, `shared/`, `script/` or `.env.example` beyond two history
+  comments. `collector/bank_stress/{behavior.py,config.json,README.md}` and `DefTerm.tsx` still *credit*
+  Market Intelligence as the origin of the behaviour rules — provenance, kept on purpose.
+- **Production step (needs approval):** the two variables are still in `/opt/amo-dashboard/.env` and in
+  PM2's held environment. PM2 keeps every variable it was ever given, so removing them cleanly is the
+  documented recovery recipe (§6.4): back up `.env` → delete the two lines → `pm2 delete amo-dashboard`
+  → `set -a; . .env; set +a; NODE_ENV=production pm2 start dist/index.cjs --name amo-dashboard` →
+  `pm2 save` → verify `pm2 env` shows `AMO_PASSWORD`, `AMO_SECRET`, `AMO_BIND_HOST`, `OPENAI_API_KEY`,
+  `AMO_DB_PATH` and no `MI_*`, login 302, `/api/fdic/meta` 200, `/api/chat/config` 200. ~3 s blip. The
+  26 Oct outage came from `pm2 update` racing systemd, not from delete/start; `pm2-root` only runs
+  `pm2 resurrect` at boot, so a saved dump without `MI_*` is what comes back after a reboot too.
+
+---
+
 ## 2026-10-27 (late) — STAGE 3 BUILT and DEPLOYED: balance-sheet behaviour signals from our own tables (`920b552`; deployed 16:26–16:31 UTC)
 
 **Deployed on the owner's "deploy it":** `git pull` 4f180ab → d51e65e; `run_bank_stress.sh` by hand 16:26 →

@@ -1,7 +1,6 @@
 import type { Express } from 'express';
 import type { Server } from 'http';
 import { getDb } from './db';
-import { registerMarketIntelligenceRoutes } from './market-intelligence';
 import { registerBankStressRoutes } from './bank-stress';
 import { registerFdicAnalyticsRoutes } from './fdic-analytics';
 import { registerChatRoutes } from './chat';
@@ -1405,11 +1404,11 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   // Reasoning is in SESSION_LOG.md; git history has the implementation
   // (added 197e947, unrouted by 3b1674a, removed here).
 
-  // ─── /api/mi/* — Market Intelligence (FDIC Data Analytics data source) ────
-  // The former /api/fdic/financials proxy and server/fdic.ts were removed on
-  // 2026-10-07 when the page switched to consuming the Market Intelligence
-  // analytics API. One source, one code path; see server/market-intelligence.ts.
-  registerMarketIntelligenceRoutes(app);
+  // ─── Bank data: /api/bank-stress/* and /api/fdic/* ──────────────────────
+  // Both read bank_stress.db, which collector/bank_stress fills weekly straight
+  // from the FDIC BankFind API. History: server/fdic.ts (live FDIC proxy) was
+  // removed on 2026-10-07 for a Market Intelligence pass-through at /api/mi/*,
+  // which was in turn removed on 2026-10-27 (stage 4 of the Bank Stress work).
   registerBankStressRoutes(app);
   registerFdicAnalyticsRoutes(app);
   registerChatRoutes(app);

@@ -14,10 +14,10 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { FilterHint } from '@/components/FilterHint'
 import { FDIC_SCOPE_DEF } from '@/lib/filterDefinitions'
 import {
-  loadMiMeta, loadScreening, loadBehaviorSignals, signalsByKey, stateCodeFor,
-  formatQuarterLabel, MiError, MI_SOURCE_LABEL, MI_UNAVAILABLE_TITLE,
-  type MiMeta, type MiScreeningPayload, type MiScreeningRow, type MiSignalsResult,
-} from '@/lib/market-intelligence'
+  loadFdicMeta, loadScreening, loadBehaviorSignals, signalsByKey, stateCodeFor,
+  formatQuarterLabel, FdicError, FDIC_SOURCE_LABEL, FDIC_UNAVAILABLE_TITLE,
+  type FdicMeta, type FdicScreeningPayload, type FdicScreeningRow, type FdicSignalsResult,
+} from '@/lib/fdic-analytics'
 import { TIER_LABEL, TIER_TONE } from '@/lib/bank-stress'
 
 // Shown until /meta answers, so the control is never empty. The live list
@@ -37,7 +37,7 @@ const NATIONAL = 'National'
 type SortKey = 'stress' | 'condition' | 'deterioration' | 'cre_exposure' | 'flags' | 'npl' | 'cre'
 
 // Unranked banks (null scores) sort to the bottom on a descending sort.
-const SORT_VALUE: Record<SortKey, (r: MiScreeningRow) => number> = {
+const SORT_VALUE: Record<SortKey, (r: FdicScreeningRow) => number> = {
   stress: (r) => r.stressComposite ?? -1,
   condition: (r) => r.conditionScore ?? -1,
   deterioration: (r) => r.deteriorationScore ?? -1,
@@ -82,22 +82,22 @@ export default function MarketAnalytics() {
   const [showColumnsMenu, setShowColumnsMenu] = useState(false)
   const [tableSortColumn, setTableSortColumn] = useState<SortKey>('stress')
   const [tableSortDesc, setTableSortDesc] = useState(true)
-  const [selectedInstitution, setSelectedInstitution] = useState<MiScreeningRow | null>(null)
-  const [compareRows, setCompareRows] = useState<MiScreeningRow[]>([])
+  const [selectedInstitution, setSelectedInstitution] = useState<FdicScreeningRow | null>(null)
+  const [compareRows, setCompareRows] = useState<FdicScreeningRow[]>([])
   const [loading, setLoading] = useState(false)
-  const [meta, setMeta] = useState<MiMeta | null>(null)
+  const [meta, setMeta] = useState<FdicMeta | null>(null)
   // The payload and the scope it was fetched for travel together, so nothing
   // downstream can pair a new region with the previous region's rows.
-  const [screening, setScreening] = useState<{ scope: string; payload: MiScreeningPayload } | null>(null)
+  const [screening, setScreening] = useState<{ scope: string; payload: FdicScreeningPayload } | null>(null)
   const [asOf, setAsOf] = useState<string | null>(null)
-  const [signals, setSignals] = useState<MiSignalsResult | null>(null)
+  const [signals, setSignals] = useState<FdicSignalsResult | null>(null)
   const [signalsError, setSignalsError] = useState<string | undefined>()
   const [error, setError] = useState<{ title: string; detail: string } | undefined>()
 
   // /meta once: scope list, signal vocabulary, state-code lookup.
   useEffect(() => {
     let mounted = true
-    loadMiMeta().then((m) => { if (mounted) setMeta(m) }).catch(() => { /* surfaced by the screening fetch below */ })
+    loadFdicMeta().then((m) => { if (mounted) setMeta(m) }).catch(() => { /* surfaced by the screening fetch below */ })
     return () => { mounted = false }
   }, [])
 
@@ -121,9 +121,9 @@ export default function MarketAnalytics() {
         setAsOf(res.meta.quarter)
       } catch (err) {
         if (!mounted) return
-        const mi = err instanceof MiError ? err : null
+        const mi = err instanceof FdicError ? err : null
         setError({
-          title: mi && !mi.unavailable ? 'Could not load screening' : MI_UNAVAILABLE_TITLE,
+          title: mi && !mi.unavailable ? 'Could not load screening' : FDIC_UNAVAILABLE_TITLE,
           detail: mi ? mi.message : (err instanceof Error ? err.message : String(err)),
         })
       } finally {
@@ -242,7 +242,7 @@ export default function MarketAnalytics() {
           </p>
           <p className="text-xs text-muted-foreground">
             {asOf ? <>Data as of <span className="font-medium text-foreground">{asOfQuarter}</span> · </> : null}
-            {MI_SOURCE_LABEL}. FDIC data is quarterly and lagged by 1–2 quarters.
+            {FDIC_SOURCE_LABEL}. FDIC data is quarterly and lagged by 1–2 quarters.
           </p>
         </div>
       </div>
@@ -547,7 +547,7 @@ export default function MarketAnalytics() {
         onAddToCompare={(row) => {
           const key = `${row.id}-${row.reportDate ?? ''}`
           if (compareRows.some((r) => `${r.id}-${r.reportDate ?? ''}` === key)) return
-          setCompareRows((prev) => [...prev, row as MiScreeningRow].slice(-10))
+          setCompareRows((prev) => [...prev, row as FdicScreeningRow].slice(-10))
         }}
         onRemoveFromCompare={(id, reportDate) => {
           const next = compareRows.filter((r) => !(r.id === id && (r.reportDate ?? '') === (reportDate ?? '')))

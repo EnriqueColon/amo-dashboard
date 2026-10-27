@@ -707,9 +707,9 @@ The FDIC Data Analytics and Bank Stress Ranking pages read a second SQLite file,
 that `collector/run_bank_stress.sh` rebuilds every Sunday straight from the FDIC BankFind API
 (§4.3, §6.5). The server opens it read-only (`server/bank-stress.ts`, `server/fdic-analytics.ts`).
 History: until 7 Oct 2026 the FDIC page proxied the public FDIC API and computed ratios locally;
-from 7 to 27 Oct the server forwarded `/api/mi/*` to the Market Intelligence tool with a bearer key.
-That proxy (`server/market-intelligence.ts`) is still registered but nothing in the client calls it
-once stage 2 is deployed; it is removed in stage 4.
+from 7 to 27 Oct the server forwarded `/api/mi/*` to the Market Intelligence tool with a bearer key;
+that proxy, its module and its two variables were removed on 27 Oct 2026 (stage 4). Nothing in the
+dashboard talks to Market Intelligence any more.
 
 ### 5.2 Components
 
@@ -738,7 +738,9 @@ amo-dashboard/
 │   ├── db.ts           schema + idempotent migrations, run at startup
 │   ├── auth.ts         single-password HMAC cookie gate
 │   ├── cache.ts        in-memory TTL response cache
-│   ├── market-intelligence.ts   Market Analytics API client + /api/mi/* routes (replaced fdic.ts, 7 Oct 2026)
+│   ├── bank-stress.ts     /api/bank-stress/* — Bank Stress Ranking, read-only over bank_stress.db (27 Oct 2026)
+│   ├── fdic-analytics.ts  /api/fdic/* — FDIC Data Analytics + behaviour signals over the same file (27 Oct 2026;
+│   │                      replaced the Market Intelligence pass-through of 7–27 Oct, which replaced fdic.ts)
 │   └── chat/           "Ask the Data" (7 Oct 2026): index.ts POST /api/chat SSE loop + GET /api/chat/drill
 │                       (records behind a table row, 8 Oct) · tools.ts the ten read-only lookups · prompt.ts
 │                       system prompt + schema + data traps · openai.ts streaming client for the OpenAI
@@ -823,10 +825,10 @@ All expensive endpoints are cached in process memory.
 - Key = request path + sorted query string, so every county/filter/page combination caches separately.
 - `POST /api/cache/bust` clears it; `GET /api/cache/stats` reports live/expired counts.
 - A `pm2 restart` also clears it, because the cache is in memory.
-- Market Intelligence responses (`/api/mi/*`) share the same cache and TTL under keys
-  `mi:<endpoint>` + scope/band/cert. **Only `ok:true` bodies are stored** — an upstream 401/502/503 is
-  never cached, so a bad key cannot leave a week-long error behind once corrected, and a working key
-  cannot be masked by a cached failure.
+- The bank pages (`/api/bank-stress/*`, `/api/fdic/*`) share the same cache and TTL, but every key
+  includes the `computed_at` of the weekly job, so a new run is served immediately without a restart
+  or a bust. The one live upstream call left — FDIC structure history for the drawer's Acquisition
+  History — is cached only on success, so a transient FDIC outage is never pinned for a week.
 
 > ⚠️ **The single most common operational mistake in this project:** changing data without clearing
 > the cache. The database is correct and the dashboard still shows the old numbers — for up to a
@@ -932,8 +934,7 @@ System dependencies for OCR: `poppler-utils` and `tesseract-ocr`
 | `GRAPH_CLIENT_ID` | `server/email/graphMailer.ts` | Azure application (client) ID — **not yet set** |
 | `GRAPH_CLIENT_SECRET` | `server/email/graphMailer.ts` | Azure client secret value — **not yet set** |
 | `REPORT_RECIPIENTS` | `sendWeeklyReport.ts` | Comma-separated; default `andres@safeharborcp.com,david@safeharborcp.com` |
-| `MI_BASE_URL` | `server/market-intelligence.ts` | Market Intelligence tool, `https://market-intelligence-tool-gilt.vercel.app`. Required for FDIC Data Analytics from 7 Oct 2026 **until stage 2 (27 Oct 2026) moved the page onto our own FDIC tables**; after that nothing in the client calls `/api/mi/*`. Still set in production; the proxy and both variables go in stage 4 |
-| `MI_ANALYTICS_API_KEY` | `server/market-intelligence.ts` | Bearer key for its Market Analytics data API. Same status as above. Server-side only, never sent to the browser or written to a log. Missing → startup warning and `/api/mi/*` answers 503 |
+| ~~`MI_BASE_URL`~~, ~~`MI_ANALYTICS_API_KEY`~~ | — | **Removed 27 Oct 2026 (stage 4).** Needed by the Market Intelligence pass-through from 7 to 27 Oct 2026 only. Nothing reads them; they were taken out of `.env` (backup `.env.before_stage4.<ts>`) and out of PM2's environment |
 | `AMO_BANK_STRESS_DB_PATH` | `server/bank-stress.ts`, `collector/bank_stress/db.py` | Optional. Path of the bank-stress SQLite file; default is `bank_stress.db` next to `AMO_DB_PATH`. Not set in production (the default is right) |
 
 Production values live in `/opt/amo-dashboard/.env`, sourced by every cron wrapper. **The Node
@@ -985,13 +986,14 @@ variables went in on 7 Oct 2026). PM2 will not pick a new variable up from `.env
 
 ```bash
 cd /opt/amo-dashboard && git pull && npm run build
-# 1. add MI_BASE_URL=… and MI_ANALYTICS_API_KEY=… to /opt/amo-dashboard/.env (cron wrappers read it)
-# 2. push ONLY those two into the PM2-held environment and persist it:
-export MI_BASE_URL="$(grep '^MI_BASE_URL=' .env | cut -d= -f2-)"
-export MI_ANALYTICS_API_KEY="$(grep '^MI_ANALYTICS_API_KEY=' .env | cut -d= -f2-)"
+# 1. add NEW_VAR=… to /opt/amo-dashboard/.env (cron wrappers read it; PM2 does not)
+# 2. push ONLY that variable into the PM2-held environment and persist it:
+export NEW_VAR="$(grep '^NEW_VAR=' .env | cut -d= -f2-)"
 pm2 restart amo-dashboard --update-env && pm2 save
-# 3. verify — no "Market Intelligence is not configured" line, and login still works:
+# 3. verify — no startup WARNING line for it, and login still works:
 pm2 logs amo-dashboard --lines 20 --nostream
+# (This was the recipe for MI_BASE_URL / MI_ANALYTICS_API_KEY on 7 Oct 2026; both were removed on
+#  27 Oct 2026 — the bank pages read bank_stress.db and need no variable.)
 ```
 
 **Ask the Data went in this way on 7 Oct 2026 18:19 UTC** (kept here as the worked example for the
@@ -1215,13 +1217,13 @@ then fails `npm run build` — `script/build.ts` bundles the server with esbuild
 alias configuration. Server code must import shared modules **relatively** (`../shared/…`). Worth confirming any new
 shared import actually landed in the bundle rather than trusting `tsc`.
 
-**`/api/mi/*` is a pass-through, not a place to compute.** `server/market-intelligence.ts` forwards
-five Market Intelligence endpoints 1:1, caches only `ok:true` bodies, and returns upstream status and
-error text unchanged. Do not add scoring, screening or signal logic on either side of it — the whole
-point of the switch was one source of numbers. The contract this app relies on is the saved
-`docs/market-intelligence-meta.json` (`contractVersion`, scopes, asset bands, signal definitions);
-if the upstream `contractVersion` changes, re-save that file and diff it before touching the UI.
-Signal labels and meanings are read from `meta.signals` at runtime, never hardcoded.
+**The bank numbers are computed in one place — the collector, not the server or the client.**
+`collector/bank_stress/` (metrics, scoring, behaviour) writes `bank_stress.db`; `server/bank-stress.ts`
+and `server/fdic-analytics.ts` only reshape rows into the payloads the pages render, and the pages
+read labels, thresholds, flag and signal definitions from `meta` / `definitions` at runtime, never
+hardcoded. Change a formula in the collector (`README.md` there documents every one), re-run the
+job, and both pages follow. *(Until 27 Oct 2026 the FDIC page was a 1:1 pass-through to the Market
+Intelligence tool under `/api/mi/*`; that module and its saved contract are gone.)*
 
 **`aom_events_clean` rows are unpacked positionally** in `normalize.py` (`entries[0][8]` and
 similar). The `county` column is appended **last** in the source query on purpose. Inserting a column
@@ -1837,6 +1839,7 @@ endpoints healthy across all three county scopes.
 | County audit — all pages/endpoints | 🟢 Complete 11 Aug 2026 |
 | Repo hygiene — WAL files untracked | 🟢 Resolved 11 Aug 2026 — droplet `git status` clean |
 | Entity normalization / duplicate manager | 🟢 Deployed 6 Aug 2026 |
+| Market Intelligence dependency — **stage 4, removal** | 🟡 **BUILT 27 Oct 2026, NOT DEPLOYED.** `server/market-intelligence.ts`, the `/api/mi/*` routes, the startup warning and `docs/market-intelligence-meta.json` deleted; `client/src/lib/market-intelligence.ts` renamed `fdic-analytics.ts` with its `Mi*` types renamed `Fdic*`; `.env.example`, CLAUDE.md, the Cursor rule, ROLLBACK.md and this page updated. `tsc` clean. **Production step still to run (needs the owner's go-ahead):** take `MI_BASE_URL` / `MI_ANALYTICS_API_KEY` out of `/opt/amo-dashboard/.env` (backup `.env.before_stage4.<ts>`) and out of PM2's held environment — PM2 keeps every variable it was ever given, so this is a `pm2 delete` + fresh `pm2 start dist/index.cjs` from `.env` (the documented recovery recipe, §6.4) + `pm2 save`, a ~3 s blip — then pull, build, restart as usual |
 | FDIC analytics — **stage 3, behaviour signals** | 🟢 **DEPLOYED 27 Oct 2026 16:31 UTC** (`920b552`; droplet at `d51e65e`). Deploy order as documented: pull → `run_bank_stress.sh` by hand (16:26–16:30 UTC, exit 0, 59,016 behaviour bank-quarters, 4,308 judged, 1,352 fired) → build (dist 1,060,857 B) → `pm2 restart` (#5, online, no warnings). **Verified live through nginx with a real sign-in:** meta carries the 7 signal definitions; Florida signals 83 judged / 25 fired, 7 KB gzipped; National `lt1b` band 244 KB in 0.4 s; BCB 35541 → HFS transfer + Realized sale with 9 points, 9 roll-forward steps and the reading; Ocean Bank 24156 → Modification build; `/` 200. `collector/bank_stress/behavior.py` ports the Market Intelligence behaviour rules onto our pull (38 more Call Report fields, 18 measures, 7 signals, per-category roll-forward, 12 quarters in `bank_behavior`); `server/fdic-analytics.ts` serves `/api/fdic/behavior-signals` and the drawer's `behavior` object with the ported reading; the Signals column and the Balance-Sheet Actions card are back. Verified locally: Q2 2026 nationally 4,308 judged, 1,352 fired at least one signal (HFS 66 / sale 118 / spike 125 / exit 352 / foreclosure 131 / modification 338 / runoff 515); **BCB Community Bank 35541 fires HFS transfer + Realized sale — the same two chips the page showed from Market Intelligence on 7 Oct**, its Q2 2024 HFS parking and loss are in its history; Ocean Bank 24156 fires Modification build; 76 offline checks pass; no console errors. **Deploy:** pull → `run_bank_stress.sh` by hand (fills the 38 new columns) → build → restart. Not ported: the Seller Likelihood four-state score (the ranking's CRE seller signal covers the question) |
 | FDIC analytics — **stage 2, own data** | 🟢 **DEPLOYED 27 Oct 2026 14:42 UTC** (`967bec9`; droplet at `4f180ab`). Deploy went in the documented order: pull → `run_bank_stress.sh` by hand (14:37–14:41 UTC, exit 0, the 16 new columns filled — Amerant `STNAME FLORIDA`, `CITY CORAL GABLES`, `NALNLS 168,838`, `UCLN 1,376,906`, `RBCT1CER 12.91`) → build (dist 1,052,796 B) → `pm2 restart` (#4, online, no warnings). **Verified live through nginx with a real sign-in:** Florida screening 85 rows, 32 KB gzipped, Amerant row identical to the local check (assets $10,274,427,000, loans $6,780,128,000, CRE $2,383,007,000, CRE/loans 35.15%, noncurrent 2.49%, UC $1,376,906,000, CET1 12.91, NIM 3.317, composite 66.8); top three Interamerican 67.4 / Amerant 66.8 / BayFirst 64.0; National 1.67 MB gzipped in 0.98 s; BCB 35541 drawer 8 points + 3 acquisitions; `/` 200. `server/fdic-analytics.ts` serves `/api/fdic/{meta,screening,institution}` from `bank_stress.db` in the shapes the page already rendered; the client moved its paths, swapped Opportunity / Earnings / Vulnerability for the Bank Stress composite and sub-scores plus a Flags column, dropped the signals column (stage 3) and the narrative button. Verified on the local dev server against real data: Florida 85 banks, Amerant's screening row recomputed by hand from the raw table matches to the dollar (assets $10.27B, CRE $2.38B, CRE/loans 35.15%, noncurrent 2.49%, UC $1.38B), BCB Community Bank's three acquisitions match the previous source, drawer trend 8 quarters, no console errors; National screening 1.7 MB gzipped. **Deploy:** `git pull`, then run `run_bank_stress.sh` once (it fills 16 new raw columns the page needs), then `npm run build && pm2 restart` — in that order, so the page never serves a half-filled table. Rollback = branch revert; the Market Intelligence proxy is untouched until stage 4 |
 | FDIC analytics — Market Intelligence source (7–27 Oct 2026) | 🟢 **Re-sourced to Market Intelligence — deployed 7 Oct 2026 16:56 UTC** (`dfd42f8`); *superseded by the row above once stage 2 is deployed*; **trend charts added to the bank drawer 17:33 UTC** (`4e0f5f4`), owner-confirmed. The page reads the Market Intelligence tool's Market Analytics API via `/api/mi/*` instead of querying FDIC itself: real Opportunity/Earnings/Vulnerability percentile scores (previously hardcoded `0` and hidden), balance-sheet signal chips, and trend / acquisition / roll-forward sections in the drawer; `server/fdic.ts`, the FDIC window and its guardrail are removed. Verified locally: Florida top-3 by Opportunity matches the API in order (35430, 24156, 59278); CERT 35541 chips equal `behavior.latest.fired`; a wrong key shows "Market Intelligence unavailable" and no figures; National loads signals in seven sub-1 MB band calls. Verified live after restart: `/api/mi/meta` `ok:true`, quarter 20260630, same Florida top-3. **Miss, closed 27 Oct 2026:** national screening was one 1.47 MB uncompressed response (no band parameter upstream, no gzip here — §7.4 item −9); since `546b4e0` every JSON response is gzipped (238 KB on the wire). Figures now move only when Market Intelligence's daily job refreshes (+ up to 7 days of local cache). **Next:** stage 2 of the Bank Stress work re-points this page to our own FDIC tables and retires the Market Intelligence dependency (§7.6 item 4c) |
@@ -2354,7 +2357,7 @@ healthy (640 rows, 57% carrying loan amounts).
 | Broward image feed missed for >10 days | **Permanent, unrecoverable data loss** | Cron polls three times daily (15:30/19:30/23:30 UTC) so a moving publication time cannot outrun it; `flock` prevents overlap; ~10-day buffer. The Overview keys on the **per-run heartbeat** in `broward_runs` — red for "job stopped or failed", separately red for "images pending on the feed". Reworked 24 Aug 2026; the previous 48h-since-last-harvest rule false-alarmed every Monday |
 | An alarm that fires on a healthy system | The reader learns to dismiss it, so the **real** alert is ignored too | Liveness is measured from the job's own recorded runs, never inferred from when upstream data last arrived — upstream sources have their own calendars (Broward publishes business days only, ~3 days behind). "Never run" is deliberately **not** treated as a stoppage |
 | A derived metric's input window cannot satisfy its own precondition | The field is `null` **forever**, renders as `—`, and is indistinguishable from missing upstream data. Cost AMO a permanently blank NI YoY column; cost the sibling tool a silently redistributed score weight | Until 7 Oct 2026: `script/check-fdic-window.ts` asserted the window yields enough published quarters, with 18mo and 24mo as negative controls. **Since the Market Intelligence switch (7 Oct 2026) the window and the check have left this codebase** — the metric is computed upstream, where the equivalent precondition now has to be asserted. What this app keeps is the display-side rule: a source that does not answer shows *no* figures rather than dashes that could pass for data |
-| The analytics source and this page disagree | An analyst quotes a score or a signal that the Market Intelligence tool itself does not show | `/api/mi/*` is a 1:1 pass-through with no computation on this side; only `ok:true` responses are cached; the page's columns are the API's fields under the API's names. Verified by sorting the raw API rows and comparing the top three to the page (§7.4 item −9). The remaining gap is time, not logic: this server caches for 7 days, so after an upstream refresh the two can differ for up to a week until a cache bust |
+| The analytics source and this page disagree *(retired 27 Oct 2026 — the page now computes from its own FDIC pull; the Market Intelligence tool is a separate product and may legitimately differ)* | An analyst quotes a score or a signal that the Market Intelligence tool itself does not show | *Historical:* `/api/mi/*` was a 1:1 pass-through with no computation on this side; only `ok:true` responses are cached; the page's columns are the API's fields under the API's names. Verified by sorting the raw API rows and comparing the top three to the page (§7.4 item −9). The remaining gap is time, not logic: this server caches for 7 days, so after an upstream refresh the two can differ for up to a week until a cache bust |
 | A deploy silently fails | Production keeps running old code while checks look fine | `git pull` prints `Updating <old>..<new>` AFTER an abort — **verify by effect** (`git log --oneline -1` on the droplet, or grep `dist/index.cjs`), not by output. Bit us 11 Aug 2026. **Improved 22 Sep 2026:** `git_state` (§6.4a) reports the `dist/index.cjs` build time against the commit time, so a pulled-but-not-built box is visible in one call instead of being inferred; `deploy` performs pull + build + restart as one operation so the build cannot be skipped |
 | A published figure is stale or measured differently from what the tool shows | A non-developer quotes a number outward that the dashboard contradicts | **Partly open.** §7.2 now records the exact query behind each figure so the next reviewer can reproduce them, and `db_query` (§6.4a) makes re-checking cheap. But nothing *asserts* the page and the Overview agree — the 21,517 → 10,431 entity discrepancy (§7.4 item −6) was found by hand, and only because the figures were being re-derived for this review |
 | PM2 restarted mid-normalize | Dashboard shows zeros for up to 7 days — **no longer possible since 21 Oct 2026**: the rebuild now builds every derived table as a temporary table and swaps the finished set into place in one short transaction, so the live tables are never empty at any moment of the ~2-hour rebuild (rehearsed with a reader polling every 10 s: it never saw fewer rows than it started with). A mid-rebuild restart now only means the cache is cleared early | Nightly wrapper restarts only on success; documented in `ROLLBACK.md` and here |
@@ -2570,7 +2573,8 @@ healthy (640 rows, 57% carrying loan amounts).
 | `GET /api/reporting` · `/export` · `/chart` · `/participants` | Reporting tab + CSV |
 | `PATCH /api/reporting/:cfn/review` | Review workflow |
 | `GET /api/targets` · `POST` · `DELETE` | Watchlist |
-| `GET /api/mi/meta` · `/api/mi/screening?scope=` · `/api/mi/visuals?scope=` · `/api/mi/cohort-watch?scope=` · `/api/mi/behavior-signals?scope=&band=` · `/api/mi/institution/:cert[?include=narrative]` | Market Intelligence pass-through (since 7 Oct 2026; replaced `GET /api/fdic/financials`) — 1:1 with its Market Analytics data API, bearer key added server-side, `ok:true` cached 7 days, 503 when unconfigured |
+| `GET /api/bank-stress/meta` · `/api/bank-stress/ranking?quarter&band&states&min_score&tier&cre_only&seller_only&search` · `/api/bank-stress/bank/:cert` | Bank Stress Ranking (27 Oct 2026), read-only over `bank_stress.db` |
+| `GET /api/fdic/meta` · `/api/fdic/screening?scope=` · `/api/fdic/behavior-signals?scope=&band=` · `/api/fdic/institution/:cert` | FDIC Data Analytics + behaviour signals (27 Oct 2026) over the same file; replaced the `/api/mi/*` Market Intelligence pass-through of 7–27 Oct 2026, which had replaced `GET /api/fdic/financials`. Acquisition history inside `institution` is the one live FDIC call (cached 7 days on success) data API, bearer key added server-side, `ok:true` cached 7 days, 503 when unconfigured |
 | `GET /api/collection-log` | Pipeline health |
 | `POST /api/chat` · `GET /api/chat/config` | Ask the Data (7 Oct 2026). Body `{messages:[{role,content}], county}`; answers as Server-Sent Events (`tool`, `tool_done`, `delta`, `done`, `error`). Since 8 Oct `tool_done` carries the drillable part of each lookup's result (capped at 60 KB) so the browser can match table rows to lookups. Never cached. `config` reports whether a key is set and which model answers |
 | `GET /api/chat/drill?kind=filings\|facility_filings&…` | The records behind one answer-table row (8 Oct 2026). No model call: runs the `list_filings` / `list_facility_filings` tool with the remaining query parameters as its arguments (`entity, role, counterparty, county, from, to, txn_type, exclude_self_assign, cfn, limit, offset` / `lender, borrower, lender_key, borrower_group_key, cfn, limit`), same validation and caps (200 / 100 rows). Returns `total_matching`, `rows`, and the `args` it applied. Never cached |

@@ -1,4 +1,24 @@
-# Rollback — FDIC Data Analytics sourced from Market Intelligence (DEPLOYED 7 Oct 2026 16:56 UTC)
+# Rollback — Bank Stress Ranking + FDIC Data Analytics on our own FDIC pull (stages 1–4, 27 Oct 2026)
+
+**State:** the dashboard's two bank pages (`/bank-stress`, `/market-analytics`) read
+`/opt/amo-dashboard/bank_stress.db`, written weekly by `collector/run_bank_stress.sh` (Sunday 03:00
+UTC) straight from the FDIC BankFind API. The Market Intelligence pass-through (`/api/mi/*`,
+`server/market-intelligence.ts`, `MI_BASE_URL` / `MI_ANALYTICS_API_KEY`) was removed in stage 4. The
+section below it is kept as history of the 7–27 Oct 2026 arrangement.
+
+| Piece | Touches prod data? | Revert |
+|---|---|---|
+| `collector/bank_stress/*`, cron line, `bank_stress.db` | **No** — its own file; `miami_dade_amo.db` is only read (the `link` step, read-only) | remove the crontab line, delete the file; nothing else references it |
+| `server/bank-stress.ts`, `server/fdic-analytics.ts`, the pages | No | revert the commits (`0885853`…`920b552` and the stage-4 commit); `git log --oneline --grep="Bank stress\|stage"` lists them |
+| Removal of the MI proxy and variables (stage 4) | No | reinstating the proxy means restoring `server/market-intelligence.ts` from git **and** putting the two variables back into `.env` and PM2's env (`--update-env`); the key is in `/opt/amo-dashboard/.env.before_stage4.*` |
+
+`bank_stress.db` is deliberately not backed up: every table is rebuilt from the public FDIC API by the
+weekly run in four minutes. Deploy order whenever a pull adds raw columns: `git pull` → run the job →
+build → restart, so the page never serves a half-filled table.
+
+---
+
+# Rollback — FDIC Data Analytics sourced from Market Intelligence (DEPLOYED 7 Oct 2026 16:56 UTC — SUPERSEDED 27 Oct 2026, kept as history)
 
 **State:** production runs `a20c840` on `main` (the switch at `dfd42f8`, plus drawer trend charts
 `4e0f5f4` and docs); `origin/main`, the droplet and local `main` agree. The pre-switch `.env` is at
