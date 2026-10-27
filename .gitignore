@@ -45,3 +45,6 @@ server/scripts/output/
 # directory for convenience but is NOT part of the amo-dashboard repo — ignore
 # it here so it is never embedded. See docs §5.7.
 competitor-analysis/
+
+# Local dev-server launch config for the Claude desktop app (holds local-only test credentials)
+.claude/launch.json

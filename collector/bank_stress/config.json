@@ -1,0 +1,97 @@
+{
+  "_comment": "Every tunable of the Bank Stress Ranking. Thresholds, weights and bands live here, not in code. Units: $K = thousands of dollars as the Call Report reports them; pct = percent units (5.0 = 5%); pp = percentage points; x = multiple.",
+
+  "raw_quarters": 20,
+  "history_quarters": 8,
+  "trend_warmup_quarters": 4,
+
+  "peer_bands": [
+    { "key": "lt1b",     "label": "< $1B",     "max_assets_k": 1000000 },
+    { "key": "1b_10b",   "label": "$1–10B",    "max_assets_k": 10000000 },
+    { "key": "10b_100b", "label": "$10–100B",  "max_assets_k": 100000000 },
+    { "key": "gt100b",   "label": "> $100B",   "max_assets_k": null }
+  ],
+
+  "floors": {
+    "_comment": "Denominators below these are treated as not computable (null), never as zero.",
+    "net_chargeoffs_k": 50,
+    "noncurrent_k": 50,
+    "interest_income_k": 1,
+    "interest_expense_k": 1,
+    "revenue_k": 1,
+    "tier1_capital_k": 1,
+    "provision_prior_k": 50
+  },
+
+  "de_novo_years": 3,
+  "merger_asset_jump_pct": 25,
+
+  "weights": {
+    "condition": 0.40,
+    "deterioration": 0.40,
+    "cre_exposure": 0.20
+  },
+
+  "components": {
+    "condition": [
+      { "metric": "roa",               "feature": "level" },
+      { "metric": "core_roa",          "feature": "level" },
+      { "metric": "efficiency_ratio",  "feature": "level" },
+      { "metric": "noncurrent_ratio",  "feature": "level" },
+      { "metric": "reserve_coverage",  "feature": "level" },
+      { "metric": "tier1_leverage",    "feature": "level" },
+      { "metric": "loan_to_deposit",   "feature": "level" }
+    ],
+    "deterioration": [
+      { "metric": "nii_ratio",          "feature": "yoy" },
+      { "metric": "nii_ratio",          "feature": "slope" },
+      { "metric": "funding_cost_ratio", "feature": "yoy" },
+      { "metric": "funding_cost_ratio", "feature": "slope" },
+      { "metric": "provision_ratio",    "feature": "yoy" },
+      { "metric": "provision_ratio",    "feature": "slope" },
+      { "metric": "cre_nco_ratio",      "feature": "yoy" },
+      { "metric": "cre_nco_ratio",      "feature": "slope" },
+      { "metric": "noncurrent_ratio",   "feature": "yoy" },
+      { "metric": "noncurrent_ratio",   "feature": "slope" }
+    ],
+    "cre_exposure": [
+      { "metric": "cre_concentration",     "feature": "level" },
+      { "metric": "cre_chargeoff_share",   "feature": "level" },
+      { "metric": "loan_sale_gains_ratio", "feature": "level" }
+    ]
+  },
+
+  "flags": {
+    "f1_roa_below_pct": 0.5,
+    "f1_core_roa_yoy_drop_pct": 30,
+    "f2_nii_ratio_yoy_drop_pp": 0.25,
+    "f3_funding_cost_yoy_rise_pts": 10,
+    "f4_efficiency_above_pct": 70,
+    "f5_provision_coverage_below_x": 1.0,
+    "f5_consecutive_quarters": 2,
+    "f5_provision_qoq_multiple": 3,
+    "f6_cre_nco_rising_quarters": 2,
+    "f7_payout_above_pct": 100,
+    "watch": {
+      "cre_concentration_above_pct": 300,
+      "construction_concentration_above_pct": 100,
+      "tier1_leverage_watch_below_pct": 8,
+      "tier1_leverage_critical_below_pct": 5,
+      "noncurrent_ratio_above_pct": 2,
+      "loan_to_deposit_above_pct": 100
+    }
+  },
+
+  "tiers": {
+    "watchlist_min_flags": 3,
+    "pressure_min_flags": 5
+  },
+
+  "cre_seller_signal_flags": ["f5", "f6", "f8"],
+
+  "deal_view": {
+    "cre_concentration_min_pct": 200,
+    "cre_loans_min_k": 250000,
+    "default_states": ["FL", "GA", "AL", "SC", "NC", "TN", "MS", "LA"]
+  }
+}
