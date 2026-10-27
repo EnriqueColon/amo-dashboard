@@ -41,6 +41,11 @@ function openDb(): Database.Database | null {
   return _db
 }
 
+/** Shared with server/fdic-analytics.ts, which reads the same file. */
+export function openBankStressDb(): Database.Database | null {
+  return openDb()
+}
+
 export const BANK_STRESS_MISSING_MESSAGE =
   'Bank stress ranking has not been computed yet — run collector/run_bank_stress.sh (it writes bank_stress.db).'
 

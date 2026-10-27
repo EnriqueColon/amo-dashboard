@@ -3,6 +3,7 @@ import type { Server } from 'http';
 import { getDb } from './db';
 import { registerMarketIntelligenceRoutes } from './market-intelligence';
 import { registerBankStressRoutes } from './bank-stress';
+import { registerFdicAnalyticsRoutes } from './fdic-analytics';
 import { registerChatRoutes } from './chat';
 import { queryGroupedFacilities } from './lending/facilities';
 import { buildActivityWorkbook } from './reporting/workbook';
@@ -1410,6 +1411,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   // analytics API. One source, one code path; see server/market-intelligence.ts.
   registerMarketIntelligenceRoutes(app);
   registerBankStressRoutes(app);
+  registerFdicAnalyticsRoutes(app);
   registerChatRoutes(app);
 
   // ═══════════════════════════════════════════════════════════════════════════

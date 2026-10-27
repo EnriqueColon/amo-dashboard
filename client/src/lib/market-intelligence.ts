@@ -1,12 +1,16 @@
 /**
- * Client for this app's /api/mi/* routes, which mirror the Market Intelligence
- * analytics API 1:1 (see server/market-intelligence.ts and
- * docs/market-intelligence-meta.json for the contract).
+ * Client for the FDIC Data Analytics page's data routes.
  *
- * Everything on the FDIC Data Analytics page reads through here. The types
- * below are the subset of the contract the page and the drawer render; the
- * server passes bodies through untouched, so a field present upstream is
- * present here under the same name and in the same unit.
+ * Since 27 Oct 2026 (stage 2 of the Bank Stress work) these are this app's own
+ * /api/fdic/* routes (server/fdic-analytics.ts), computed from the FDIC Call
+ * Report rows the weekly collector job pulls directly from the FDIC. Before
+ * that they were /api/mi/*, a pass-through to the Market Intelligence tool;
+ * the envelope and payload shapes were kept so the page did not have to
+ * change, which is why the names in this file still say "Mi". The file is
+ * renamed when the Market Intelligence proxy is removed (stage 4).
+ *
+ * Balance-sheet behaviour signals (`behavior`, `signals`) are not computed
+ * here yet — stage 3 — so `meta.signals` is empty and `behavior` is null.
  *
  * Units, because they are easy to get wrong:
  *   nplRatio, noncurrent_to_*_ratio, pastDue*, loanLossReserve   fractions (0.0053)
@@ -16,8 +20,11 @@
  *   nplSummary.avgNpl, nplSummary.avgCreToAssets                  percents
  *   dollar fields on rows                                         dollars
  *   behavior.* money fields and trend money fields                $ thousands (Call Report native)
- *   the three scores                                              percentile ranks 0–100 within the scope
+ *   the stress scores                                             percentile ranks 0–100 within the bank's
+ *                                                                 asset-size peer band, higher = more stress
  */
+
+const API_PREFIX = '/api/fdic'
 
 // ── Envelope ────────────────────────────────────────────────────────────────
 
@@ -83,7 +90,7 @@ let metaPromise: Promise<MiMeta> | null = null
 /** One fetch per page load; both the page and the drawer need it. Failures are not memoised. */
 export function loadMiMeta(): Promise<MiMeta> {
   if (!metaPromise) {
-    metaPromise = miGet<MiMeta>('/api/mi/meta').catch((err) => {
+    metaPromise = miGet<MiMeta>(`${API_PREFIX}/meta`).catch((err) => {
       metaPromise = null
       throw err
     })
@@ -157,9 +164,20 @@ export type MiScreeningRow = {
   earningsBufferPct?: number | null
   capitalRatios?: MiCapitalRatios
   trend: MiTrendPoint[]
-  opportunityScore: number
-  earningsScore: number
-  vulnerabilityScore: number
+  stateCode?: string
+  // Bank Stress Ranking scores — percentile ranks within the asset band, higher = more stress.
+  // Null for banks that are shown but not ranked (established < 3 years ago).
+  stressComposite: number | null
+  conditionScore: number | null
+  deteriorationScore: number | null
+  creExposureScore: number | null
+  stressRank: number | null
+  peerBand: string | null
+  flagCount: number
+  flags: string[]
+  tier: 'normal' | 'watchlist' | 'pressure' | null
+  creSellerSignal: boolean
+  excludedReason: string | null
 }
 
 export type MiScreeningKpis = {
@@ -192,7 +210,7 @@ export type MiScreeningPayload = {
 export type MiScreening = { meta: MiMetaStamp; payload: MiScreeningPayload }
 
 export function loadScreening(scope: string): Promise<MiScreening> {
-  return miGet<{ payload: MiScreeningPayload }>(`/api/mi/screening?scope=${encodeURIComponent(scope)}`)
+  return miGet<{ payload: MiScreeningPayload }>(`${API_PREFIX}/screening?scope=${encodeURIComponent(scope)}`)
 }
 
 // ── /behavior-signals ───────────────────────────────────────────────────────
@@ -323,8 +341,11 @@ export type MiInstitution = {
   history: {
     cert: string
     acquisitions: Array<{ date: string; description: string; absorbedCert: string }>
+    /** Set when the live FDIC history lookup failed; the list is then empty, not "none on record". */
+    error?: string
   }
-  behavior: {
+  /** Null until stage 3 computes behaviour signals from our own tables. */
+  behavior: null | {
     cert: string
     name: string
     state: string
@@ -340,9 +361,9 @@ export type MiInstitution = {
   narrative?: { text: string }
 }
 
-export function loadInstitution(cert: string, opts: { narrative?: boolean } = {}): Promise<MiInstitution> {
-  const qs = opts.narrative ? '?include=narrative' : ''
-  return miGet<MiInstitution>(`/api/mi/institution/${encodeURIComponent(cert)}${qs}`)
+export function loadInstitution(cert: string, _opts: { narrative?: boolean } = {}): Promise<MiInstitution> {
+  // The narrative option was an OpenAI call inside Market Intelligence; there is no equivalent here.
+  return miGet<MiInstitution>(`${API_PREFIX}/institution/${encodeURIComponent(cert)}`)
 }
 
 // ── Display helpers shared by the page and the drawer ───────────────────────
@@ -359,5 +380,5 @@ export function formatQuarterLabel(dateString?: string): string {
   return `Q${Math.floor(parsed.getMonth() / 3) + 1} ${parsed.getFullYear()}`
 }
 
-export const MI_SOURCE_LABEL = 'Source: FDIC Call Report via Market Intelligence'
-export const MI_UNAVAILABLE_TITLE = 'Market Intelligence unavailable'
+export const MI_SOURCE_LABEL = 'Source: FDIC Call Reports, pulled directly from the FDIC BankFind API'
+export const MI_UNAVAILABLE_TITLE = 'FDIC data not available'

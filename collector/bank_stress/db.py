@@ -153,3 +153,21 @@ def init_schema(conn: sqlite3.Connection) -> None:
     );
     """)
     conn.commit()
+    _add_missing_columns(conn, "fdic_financials_raw", FINANCIAL_FIELDS)
+    _add_missing_columns(conn, "fdic_institutions", INSTITUTION_FIELDS)
+
+
+def _add_missing_columns(conn: sqlite3.Connection, table: str, fields: list[tuple[str, str, str, str]]) -> None:
+    """A field added to the catalogue after the table was created is appended as a
+    column (ADD COLUMN is metadata-only in SQLite). Values arrive on the next pull;
+    until then the column is NULL, which the field assertion does not see — it
+    checks the API response, not the table — so a pull is required after a change."""
+    have = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+    added = []
+    for code, _basis, sql_type, _title in fields:
+        if code not in have:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {code} {sql_type}")
+            added.append(code)
+    if added:
+        conn.commit()
+        print(f"[db] {table}: added columns {', '.join(added)} — run a pull to fill them")

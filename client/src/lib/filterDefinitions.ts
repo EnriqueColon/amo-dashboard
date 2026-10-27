@@ -125,4 +125,4 @@ export const UCC_TAB_DEFS: Record<string, Definition> = {
 
 // ── Global ─────────────────────────────────────────────────────────────────────
 export const COUNTY_DEF = d('County', "Which county's records every page shows. All Counties combines them. Broward and Hillsborough have far fewer documents read than Miami-Dade, so compare counties with care.");
-export const FDIC_SCOPE_DEF = d('Region', 'Which banks to screen, as scoped by Market Intelligence: United States is the national cohort it covers (the largest institutions); choosing a state shows every bank it covers in that state. Scores are percentile ranks within the chosen scope, so a bank\'s score changes when the scope does.');
+export const FDIC_SCOPE_DEF = d('Region', 'Which banks to screen: United States is every FDIC-reporting bank with a Call Report for the latest quarter (about 4,300); choosing a state shows every bank chartered there. Stress scores are percentile ranks within the bank\'s asset-size peer band nationally, so they do not change when the scope does.');

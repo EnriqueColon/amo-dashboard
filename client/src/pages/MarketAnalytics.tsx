@@ -14,10 +14,11 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { FilterHint } from '@/components/FilterHint'
 import { FDIC_SCOPE_DEF } from '@/lib/filterDefinitions'
 import {
-  loadMiMeta, loadScreening, loadBehaviorSignals, signalsByKey, stateCodeFor,
+  loadMiMeta, loadScreening, stateCodeFor,
   formatQuarterLabel, MiError, MI_SOURCE_LABEL, MI_UNAVAILABLE_TITLE,
-  type MiMeta, type MiScreeningPayload, type MiScreeningRow, type MiSignalsResult,
+  type MiMeta, type MiScreeningPayload, type MiScreeningRow,
 } from '@/lib/market-intelligence'
+import { TIER_LABEL, TIER_TONE } from '@/lib/bank-stress'
 
 // Shown until /meta answers, so the control is never empty. The live list
 // (meta.scopes.states, which includes DC and PR) replaces it on load.
@@ -33,12 +34,15 @@ const FALLBACK_STATES = [
 ]
 const NATIONAL = 'National'
 
-type SortKey = 'opportunity' | 'earnings' | 'vulnerability' | 'npl' | 'cre'
+type SortKey = 'stress' | 'condition' | 'deterioration' | 'cre_exposure' | 'flags' | 'npl' | 'cre'
 
+// Unranked banks (null scores) sort to the bottom on a descending sort.
 const SORT_VALUE: Record<SortKey, (r: MiScreeningRow) => number> = {
-  opportunity: (r) => r.opportunityScore ?? 0,
-  earnings: (r) => r.earningsScore ?? 0,
-  vulnerability: (r) => r.vulnerabilityScore ?? 0,
+  stress: (r) => r.stressComposite ?? -1,
+  condition: (r) => r.conditionScore ?? -1,
+  deterioration: (r) => r.deteriorationScore ?? -1,
+  cre_exposure: (r) => r.creExposureScore ?? -1,
+  flags: (r) => r.flagCount ?? 0,
   npl: (r) => r.nonaccrualLoans ?? 0,
   cre: (r) => r.creConcentration ?? 0,
 }
@@ -76,7 +80,7 @@ export default function MarketAnalytics() {
   const [showCapitalColumns, setShowCapitalColumns] = useState(false)
   const [showEarningsColumns, setShowEarningsColumns] = useState(false)
   const [showColumnsMenu, setShowColumnsMenu] = useState(false)
-  const [tableSortColumn, setTableSortColumn] = useState<SortKey>('opportunity')
+  const [tableSortColumn, setTableSortColumn] = useState<SortKey>('stress')
   const [tableSortDesc, setTableSortDesc] = useState(true)
   const [selectedInstitution, setSelectedInstitution] = useState<MiScreeningRow | null>(null)
   const [compareRows, setCompareRows] = useState<MiScreeningRow[]>([])
@@ -86,8 +90,6 @@ export default function MarketAnalytics() {
   // downstream can pair a new region with the previous region's rows.
   const [screening, setScreening] = useState<{ scope: string; payload: MiScreeningPayload } | null>(null)
   const [asOf, setAsOf] = useState<string | null>(null)
-  const [signals, setSignals] = useState<MiSignalsResult | null>(null)
-  const [signalsError, setSignalsError] = useState<string | undefined>()
   const [error, setError] = useState<{ title: string; detail: string } | undefined>()
 
   // /meta once: scope list, signal vocabulary, state-code lookup.
@@ -105,8 +107,6 @@ export default function MarketAnalytics() {
       setLoading(true)
       setError(undefined)
       setScreening(null)
-      setSignals(null) // the old scope's signal counts must not sit under the new heading
-      setSignalsError(undefined)
       setAsOf(null)
       setSelectedInstitution(null)
       setCompareRows([])
@@ -130,22 +130,8 @@ export default function MarketAnalytics() {
     return () => { mounted = false }
   }, [region])
 
-  // Balance-sheet signals are an overlay on the table: if they fail, the
-  // Signals column says so, but the screening still renders.
-  useEffect(() => {
-    // Wait for the screening of *this* region, not the one still on screen
-    // from the previous region — otherwise the band calls fire twice.
-    if (!meta || !screening || screening.scope !== region) return
-    let mounted = true
-    setSignals(null)
-    setSignalsError(undefined)
-    loadBehaviorSignals(region, meta)
-      .then((s) => { if (mounted) setSignals(s) })
-      .catch((err) => { if (mounted) setSignalsError(err instanceof Error ? err.message : String(err)) })
-    return () => { mounted = false }
-  }, [meta, screening, region])
-
-  const signalDefs = useMemo(() => signalsByKey(meta), [meta])
+  // Balance-sheet behaviour signals come back in stage 3, computed from our
+  // own Call Report tables; until then the page shows condition and stress only.
 
   const scopeOptions = useMemo(() => {
     if (meta) {
@@ -162,7 +148,7 @@ export default function MarketAnalytics() {
 
   const sortedScreeningTable = useMemo(() => {
     const value = SORT_VALUE[tableSortColumn]
-    // Stable sort over API order, so ties keep the order Market Intelligence returned.
+    // Stable sort over API order (most stressed first), so ties keep that order.
     return [...rows].sort((a, b) => tableSortDesc ? value(b) - value(a) : value(a) - value(b))
   }, [rows, tableSortColumn, tableSortDesc])
 
@@ -193,17 +179,19 @@ export default function MarketAnalytics() {
     const count = rows.length.toLocaleString('en-US')
     const total = payload.kpis.institutionsScreened
     const base = total > rows.length
-      ? `Screening ${count} of the ${total.toLocaleString('en-US')} FDIC-reporting institutions Market Intelligence covers in ${regionDisplay}`
+      ? `Screening ${count} of the ${total.toLocaleString('en-US')} FDIC-reporting institutions in ${regionDisplay}`
       : `Screening all ${count} FDIC-reporting institutions in ${regionDisplay}`
-    return `${base}. Scores are percentile ranks within this scope, and peer percentiles in the profile drawer are relative to this cohort.`
-  }, [payload, rows.length, regionDisplay])
+    const unranked = rows.filter((r) => r.stressComposite == null).length
+    return `${base}. Stress scores are percentile ranks within each bank's asset-size peer band nationally${unranked ? ` (${unranked} shown but not ranked: established in the last three years)` : ''}; peer percentiles in the profile drawer are relative to this cohort.`
+  }, [payload, rows, regionDisplay])
 
-  const signalsNote = useMemo(() => {
-    if (!payload) return null // payload is scope-gated; nothing from the previous scope may show
-    if (signalsError) return `Balance-sheet signals unavailable: ${signalsError}`
-    if (!signals) return null
-    return `${signals.firedCount.toLocaleString('en-US')} of ${signals.currentCount.toLocaleString('en-US')} institutions fired at least one balance-sheet signal in ${asOfQuarter}.`
-  }, [payload, signals, signalsError, asOfQuarter])
+  const tierNote = useMemo(() => {
+    if (!payload || rows.length === 0) return null
+    const watch = rows.filter((r) => r.tier === 'watchlist').length
+    const pressure = rows.filter((r) => r.tier === 'pressure').length
+    const sellers = rows.filter((r) => r.creSellerSignal).length
+    return `${pressure.toLocaleString('en-US')} in likely pressure (5+ flags), ${watch.toLocaleString('en-US')} on the watchlist (3–4 flags), ${sellers.toLocaleString('en-US')} with the CRE seller signal in ${asOfQuarter}. Balance-sheet behaviour signals return in a later stage.`
+  }, [payload, rows, asOfQuarter])
 
   const sortButton = (col: { label: string; term: string; sortKey?: SortKey }) => col.sortKey ? (
     <button type="button" className="cursor-pointer border-b border-dashed border-muted-foreground/50 hover:opacity-80 text-left font-normal flex items-center gap-1 text-xs"
@@ -225,7 +213,7 @@ export default function MarketAnalytics() {
             <h1 className="text-xl font-semibold">FDIC Data Analytics</h1>
           </div>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Bank screening, scores and balance-sheet signals from FDIC Call Report data.
+            Bank screening and stress scores from FDIC Call Report data, computed by this dashboard.
           </p>
           <p className="text-xs text-muted-foreground">
             {asOf ? <>Data as of <span className="font-medium text-foreground">{asOfQuarter}</span> · </> : null}
@@ -278,7 +266,7 @@ export default function MarketAnalytics() {
       {/* Loading / Error */}
       {loading && (
         <div className="bg-card border border-border rounded-lg p-4 space-y-2">
-          <p className="text-sm font-medium">Loading Market Intelligence screening for {regionDisplay}…</p>
+          <p className="text-sm font-medium">Loading FDIC screening for {regionDisplay}…</p>
           <div className="space-y-2">
             {[1,2,3].map((i) => <Skeleton key={i} className="h-4 rounded" />)}
           </div>
@@ -302,7 +290,7 @@ export default function MarketAnalytics() {
               { label: 'Total Loans', value: loading ? '…' : formatMoney(nplLoansSummary.totalLoans), sub: 'Net loans & leases' },
               { label: 'Avg NPL Ratio', value: loading ? '…' : formatPercent(nplLoansSummary.avgNpl), sub: 'Nonaccrual ÷ total loans' },
               { label: 'NPL ($)', value: loading ? '…' : formatMoney(nplLoansSummary.totalNpl), sub: 'Total nonaccrual loans', amber: true },
-              { label: 'CRE Loans', value: loading ? '…' : formatMoney(nplLoansSummary.totalCre), sub: 'Constr + MF + Non-res + Other' },
+              { label: 'CRE Loans', value: loading ? '…' : formatMoney(nplLoansSummary.totalCre), sub: 'Constr + MF + non-owner-occupied non-res' },
               { label: 'CRE / Assets', value: loading ? '…' : formatPercent(nplLoansSummary.avgCreToAssets), sub: 'CRE as % of total assets' },
               { label: 'Total Assets', value: loading ? '…' : formatMoney(nplLoansSummary.totalAssets), sub: `${nplLoansSummary.count} institutions` },
             ].map((kpi) => (
@@ -337,13 +325,13 @@ export default function MarketAnalytics() {
           <div>
             <h3 className="text-base font-semibold mb-1">Target Screening List</h3>
             <p className="text-xs text-muted-foreground">
-              Bank-level screening ranked by Opportunity Score, with Earnings and Vulnerability scores, NPL (nonaccrual loans in dollars), CRE loans and CRE concentration. Click any underlined header to sort.
+              Bank-level screening ranked by the Bank Stress composite, with its Condition, Deterioration and CRE Exposure sub-scores and rule flags, NPL (nonaccrual loans in dollars), CRE loans and CRE concentration. Click any underlined header to sort.
             </p>
             {cohortNote && !loading && (
               <p className="mt-1 text-xs text-muted-foreground">{cohortNote}</p>
             )}
-            {signalsNote && !loading && (
-              <p className="mt-1 text-xs text-muted-foreground">{signalsNote}</p>
+            {tierNote && !loading && (
+              <p className="mt-1 text-xs text-muted-foreground">{tierNote}</p>
             )}
           </div>
           {!loading && rows.length > 0 && (
@@ -376,10 +364,11 @@ export default function MarketAnalytics() {
                 {[
                   { label: 'Institution', term: 'Institution' }, { label: 'State', term: 'State' },
                   { label: 'Report', term: 'Report' },
-                  { label: 'Opp.', term: 'Opportunity Score', sortKey: 'opportunity' as const },
-                  { label: 'Earn.', term: 'Earnings Score', sortKey: 'earnings' as const },
-                  { label: 'Vuln.', term: 'Vulnerability Score', sortKey: 'vulnerability' as const },
-                  { label: 'Signals', term: 'Balance-Sheet Signals' },
+                  { label: 'Stress', term: 'Stress Composite', sortKey: 'stress' as const },
+                  { label: 'Cond.', term: 'Condition Score', sortKey: 'condition' as const },
+                  { label: 'Deter.', term: 'Deterioration Score', sortKey: 'deterioration' as const },
+                  { label: 'CRE Exp.', term: 'CRE Exposure Score', sortKey: 'cre_exposure' as const },
+                  { label: 'Flags', term: 'Flags', sortKey: 'flags' as const },
                   { label: 'Total Assets', term: 'Total Assets' },
                   { label: 'Total Loans', term: 'Total Loans' }, { label: 'CRE Loans', term: 'CRE Loans' },
                   { label: 'CRE Conc.', term: 'CRE Concentration', sortKey: 'cre' as const },
@@ -413,11 +402,10 @@ export default function MarketAnalytics() {
               {loading ? (
                 Array(10).fill(0).map((_, i) => (
                   <tr key={i} className="border-b border-border/30">
-                    {Array(21).fill(0).map((_, j) => <td key={j} className="py-2 px-2"><Skeleton className="h-3 w-16" /></td>)}
+                    {Array(22).fill(0).map((_, j) => <td key={j} className="py-2 px-2"><Skeleton className="h-3 w-16" /></td>)}
                   </tr>
                 ))
               ) : sortedScreeningTable.map((item, index) => {
-                const fired = signals?.byCert.get(item.id)?.fired ?? []
                 return (
                 <tr key={`${item.id}-${item.reportDate || 'na'}-${index}`} className="border-b border-border/30 cursor-pointer hover:bg-muted/50 transition-colors"
                   onClick={() => {
@@ -428,27 +416,17 @@ export default function MarketAnalytics() {
                   <td className="py-1.5 px-2 font-medium text-foreground">{item.name}</td>
                   <td className="py-1.5 px-2 text-muted-foreground">{stateCodeFor(meta, item.state) || '—'}</td>
                   <td className="py-1.5 px-2 text-muted-foreground">{formatQuarterLabel(item.reportDate)}</td>
-                  <td className={`py-1.5 px-2 tabular-nums font-medium ${getScoreColor(item.opportunityScore, 'structural')}`}>{formatScore(item.opportunityScore)}</td>
-                  <td className={`py-1.5 px-2 tabular-nums font-medium ${getScoreColor(item.earningsScore, 'earnings')}`}>{formatScore(item.earningsScore)}</td>
-                  <td className={`py-1.5 px-2 tabular-nums font-medium ${getScoreColor(item.vulnerabilityScore, 'vulnerability')}`}>{formatScore(item.vulnerabilityScore)}</td>
-                  <td className="py-1.5 px-2">
-                    {signals == null && !signalsError ? (
-                      <Skeleton className="h-3 w-12" />
-                    ) : fired.length === 0 ? (
-                      <span className="text-muted-foreground">—</span>
-                    ) : (
-                      <div className="flex flex-wrap gap-1 max-w-[180px]">
-                        {fired.map((key) => {
-                          const def = signalDefs.get(key)
-                          return (
-                            <span key={key} title={def ? `${def.meaning}\n\n${def.rule}` : key}
-                              className={`inline-block rounded border px-1.5 py-0.5 text-[10px] leading-none whitespace-nowrap ${def?.side === 'pressure' ? 'border-amber-300 bg-amber-50 text-amber-900' : 'border-sky-300 bg-sky-50 text-sky-900'}`}>
-                              {def?.label ?? key}
-                            </span>
-                          )
-                        })}
-                      </div>
-                    )}
+                  <td className={`py-1.5 px-2 tabular-nums font-medium ${item.stressComposite == null ? 'text-muted-foreground' : getScoreColor(item.stressComposite, 'vulnerability')}`} title={item.excludedReason ? `Not ranked: ${item.excludedReason.replace('_', ' ')}` : item.stressRank != null ? `Rank ${item.stressRank} nationally` : undefined}>{formatScore(item.stressComposite)}</td>
+                  <td className={`py-1.5 px-2 tabular-nums ${item.conditionScore == null ? 'text-muted-foreground' : getScoreColor(item.conditionScore, 'vulnerability')}`}>{formatScore(item.conditionScore)}</td>
+                  <td className={`py-1.5 px-2 tabular-nums ${item.deteriorationScore == null ? 'text-muted-foreground' : getScoreColor(item.deteriorationScore, 'vulnerability')}`}>{formatScore(item.deteriorationScore)}</td>
+                  <td className={`py-1.5 px-2 tabular-nums ${item.creExposureScore == null ? 'text-muted-foreground' : getScoreColor(item.creExposureScore, 'vulnerability')}`}>{formatScore(item.creExposureScore)}</td>
+                  <td className="py-1.5 px-2 whitespace-nowrap">
+                    {item.tier ? (
+                      <span className={`inline-block rounded border px-1.5 py-0.5 text-[10px] leading-none ${TIER_TONE[item.tier]}`} title={item.flags.length ? item.flags.map((f) => f.toUpperCase()).join(' ') : 'no flags'}>
+                        {item.flagCount} · {TIER_LABEL[item.tier]}
+                      </span>
+                    ) : <span className="text-muted-foreground">—</span>}
+                    {item.creSellerSignal && <span className="ml-1 inline-block rounded bg-red-600 text-white px-1.5 py-0.5 text-[10px] leading-none" title="Flags 5, 6 and 8 together">CRE seller</span>}
                   </td>
                   <td className="py-1.5 px-2 tabular-nums">{formatCurrency(item.totalAssets)}</td>
                   <td className="py-1.5 px-2 tabular-nums">{formatCurrency(item.totalLoans)}</td>

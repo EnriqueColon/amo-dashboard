@@ -106,9 +106,13 @@ export type InstitutionProfileRow = {
   capitalCategory?: { category: string; label: string; binding: string; basis: string }
   totalUnusedCommitments?: number
   creUnusedCommitments?: number
-  opportunityScore: number
-  earningsScore: number
-  vulnerabilityScore: number
+  stressComposite?: number | null
+  conditionScore?: number | null
+  deteriorationScore?: number | null
+  creExposureScore?: number | null
+  flagCount?: number
+  tier?: 'normal' | 'watchlist' | 'pressure' | null
+  creSellerSignal?: boolean
   roaLatest?: number | null
   roaDelta4Q?: number | null
   netIncomeTTM?: number | null
@@ -949,7 +953,9 @@ export function InstitutionDetailSections({ cert }: { cert: string }) {
           <CardDescription className="text-xs">Institutions this bank has absorbed, per FDIC structure records.</CardDescription>
         </CardHeader>
         <CardContent className="p-4 pt-0">
-          {history?.acquisitions?.length ? (
+          {history?.error ? (
+            <p className="text-sm text-amber-700">FDIC structure records could not be fetched right now ({history.error}).</p>
+          ) : history?.acquisitions?.length ? (
             <ul className="space-y-1 text-sm text-slate-700">
               {history.acquisitions.map((a) => (
                 <li key={`${a.date}-${a.absorbedCert}`} className="flex gap-3">
