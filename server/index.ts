@@ -1,4 +1,5 @@
 import express, { type Request, Response, NextFunction } from "express";
+import compression from "compression";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { registerAuthRoutes, checkAuth } from "./auth";
@@ -16,6 +17,28 @@ const httpServer = createServer(app);
 app.set("trust proxy", "loopback");
 // Don't advertise the framework in every response.
 app.disable("x-powered-by");
+
+// gzip every compressible response over 1 KB (JSON, HTML, JS, CSS). The big
+// API payloads — the National bank-stress ranking (4.5 MB) and the Market
+// Intelligence national screening (1.5 MB) — shrink 5–8× on the wire; nginx on
+// the droplet only gzips HTML (gzip_types is not set and gzip_proxied is off),
+// so without this they crossed the network uncompressed. The 7-day response
+// cache holds the parsed object, not bytes, so every hit is compressed too.
+//
+// Streamed responses are skipped: compression buffers output until the stream
+// ends, which would hold back the chat's server-sent events until the answer
+// was complete. The path check covers the route; the content-type check
+// covers any future stream.
+app.use(
+  compression({
+    filter: (req, res) => {
+      if (req.path.startsWith("/api/chat")) return false;
+      const type = String(res.getHeader("Content-Type") ?? "");
+      if (type.includes("text/event-stream")) return false;
+      return compression.filter(req, res);
+    },
+  }),
+);
 
 declare module "http" {
   interface IncomingMessage {
