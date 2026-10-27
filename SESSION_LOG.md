@@ -4,6 +4,89 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-10-27 (later) — Bank Stress Ranking STAGE 1 BUILT, verified locally, committed; NOT deployed
+
+Owner decisions before building: **exclude owner-occupied CRE** (interagency definition), **Tier 1 capital as
+the concentration denominator** (CBLR filers report total RBC as 0), CERT 17281 confirmed, four peer bands,
+build here, and — new — **drop the Market Intelligence dependency entirely over three stages**: 1 this
+ranking on its own FDIC pull (done); 2 re-point FDIC Data Analytics to our raw tables; 3 rebuild the
+balance-sheet behaviour signals here; then remove the MI client, proxy and env vars. Stage 1 only.
+
+- **Commits (one per phase, on `main`, not pushed at the time of writing):** `0885853` pull, `62b4abf`
+  metrics, `36c3dac` scoring/flags, `45e67fc` backtest + CLI + tests, `09273f6` API, `19b2a92` UI.
+- **Pipeline** `collector/bank_stress/` (README.md there documents every formula and field): `pull.py` one
+  request per REPDTE at `limit=10000` (universe 4,313 for Q2 2026, ~4 s each, 20 quarters ≈ 80 s),
+  `assert_fields_present` on every row (caught a real case: `/institutions` omits descriptor keys on 5
+  rows — those fields are optional there, financials stay strict); `metrics.py` YTD de-cumulation
+  asserted against the FDIC `*Q` twins (mismatches only on merger quarters), floors → null, trend
+  features nulled across merger quarters; `scoring.py` within-band percentiles, 40/40/20, re-weighted
+  composite, completeness, de novo unranked, flags f1–f8 + watch flags, tiers, CRE seller signal
+  (f5+f6+f8), top-3 drivers; `backtest.py`; `cli.py all`; cron wrapper `run_bank_stress.sh` Sunday 03:00
+  UTC. Own file **`bank_stress.db`** (≈60 MB raw for 20 quarters); never opens `miami_dade_amo.db`
+  except `link` read-only. Stdlib only (droplet venv has no numpy/pandas).
+- **Gotchas found while building:** `ACTEVT` is sticky (306 of 344 banks carried the same code two
+  quarters running) → only a *new* code marks a merger; `EQCMRG` is YTD → de-cumulate; naïve rule
+  flagged 382 merger quarters in Q2 2026, fixed rule 92. SQLite keeps an index name across
+  `ALTER TABLE RENAME` → create the index after the swap.
+- **Results, Q2 2026:** 4,286 ranked (27 de novo excluded); tiers normal 4,089 / watchlist 193 / pressure
+  4; CRE seller signal 4 (Banc of California, Pinnacle Bank CA, Seacoast National, Zions). Florida +
+  Southeast default view 649 banks, 273 in the deal-sourcing view. Backtest over 16 scored quarters:
+  4 quarters before failure 4 of 9 in the top decile; 8 quarters before 2 of 7 (4 of 7 top quintile).
+  Directional only. 61 unit checks pass (`tests/check_bank_stress.py`).
+- **API** `server/bank-stress.ts` (`/api/bank-stress/meta|ranking|bank/:cert`, read-only handle, 503
+  when the file is absent, cache keyed on `computed_at`) registered beside the MI routes; startup
+  warning if the file is missing. **UI** `pages/BankStress.tsx` + `BankStressDrawer.tsx`, sidebar entry
+  "Bank Stress Ranking" (New). Verified on the local dev server (port 5050) against real data: page, every
+  filter (curl: all 200, bad quarter 400, bad cert 400, no cookie 401, cache HIT header), drawer charts
+  and tables. **Known:** the National ranking response is 4.5 MB uncompressed (no gzip middleware in the
+  app — same miss as the MI national screening); the default regional view is 680 KB.
+- **Deploy (owner to approve):** `git pull`, `npm run build`, `pm2 restart amo-dashboard` (no `npm
+  install`, no new env vars), then on the droplet `collector/run_bank_stress.sh` once by hand (~2 min)
+  and add the crontab line from the wrapper header. Also add `bank_stress.db` to `run_backup.sh`.
+- `.claude/launch.json` (local dev config, outside the repo) now passes dev `AMO_PASSWORD`/`AMO_SECRET`,
+  because the hardened auth exits without them; `.claude/launch.json` was also gitignored in the repo.
+
+---
+
+## 2026-10-27 — Bank Stress Ranking: Phase 0 exploration only (NOTHING BUILT, nothing deployed)
+
+Owner pasted a brief for a bank stress ranking (condition composite + explainable flags, aimed at
+banks likely to sell distressed CRE loans) with "Phase 0: explore, report, wait". Full report with the
+field-by-field verification table and the plan: **`docs/BANK_STRESS_PHASE0.md`**. No code, data, cron
+or deploy change; the only repo edits are that doc, this entry and one Confluence line.
+
+- **Brief premises corrected:** this repo has no FDIC `/financials` client any more (removed 7 Oct, page
+  reads Market Intelligence); the "county clerk collector not built yet" is this dashboard. **Market
+  Intelligence shipped a Seller Likelihood score to production 26 Oct** (behaviour side, 13-failure
+  backtest) — complementary, not the same thing; where the new ranking lives is decision 1.
+- **FDIC verified live (27 Oct):** old host 301 → `api.fdic.gov/banks`; one request per `REPDTE` at
+  `limit=10000` returns the whole universe (Q2 2026: 4,313 banks, 3.6 MB, 4 s); unknown fields are
+  silently dropped (105 asked → 89 returned); `RSSDHCR`/`NAMEHCR`/`ESTYMD` are on `/financials` (no
+  `/institutions` join needed). Code fixes vs the brief: `NTLNLSCO`→`NTLNLS`; `PTAXNETINC` already
+  excludes securities gains (don't subtract `IGLSEC` twice); `EINTEXP = EDEP + EFREPP + EOTHINT` exactly;
+  unrealized securities = `SCAF−SCAA` (AFS) and `SCHF−SCHA` (HTM), `IGLSCA/IGLSCH` are realized;
+  CRE should use `LNRENROT` (non-owner-occupied) not `LNRENRES`; **CBLR filers (42 %) report `RBC`,
+  `RBCT2`, `RBCRWAJ` = 0** → Tier 1 `RBCT1J` as the concentration denominator. FDIC publishes `*Q`
+  quarterly twins (`NETINCQ`, `NIMQ`, `ELNATQ`, `NTLNLSQ`, `NTRECONQ`…) and the brief's YTD
+  de-cumulation matched all eight tested exactly on CERT 17281 — plan asserts equality on every pull.
+- **Sanity bank reproduced:** CERT 17281 = City National Bank, **Los Angeles, RBC-owned** (not City
+  National Bank of Florida, 20234); all ten ratios within 0.02 pp of the brief, efficiency 65.9 %,
+  funding cost 33.5 %, HC-owned so payout correctly excluded.
+- **Shape of the data:** bands <$1B 3,246 / $1–10B 902 / $10–100B 133 / >$100B 32; 59 % of banks under
+  the $50K NCO floor at mid-year; 27 de novo; `ACTEVT`/`EQCMRG` flag merger quarters; failures with
+  dates 2023–26 = 13 → backtest directional only.
+- **Plan (awaiting approval):** `collector/bank_stress/` (pull / metrics / scoring / backtest / config
+  / README / cron Sun 03:00 UTC) writing its **own `bank_stress.db`**, `server/bank-stress.ts`
+  registered beside the MI routes (read-only handle, cache keyed by `computed_at` → no restart),
+  `pages/BankStress.tsx` + sidebar entry, `tests/check_bank_stress.py`. Main DB, normalize, backups,
+  guardrails, MI proxy and the FDIC page untouched. Stack stays Python + Express + SQLite (brief's
+  FastAPI/Postgres preference declined per its own "follow the repo" rule). Droplet venv has no
+  numpy/pandas — stdlib only; confirm droplet Python ≥ 3.10 for `statistics.linear_regression`.
+- **Decisions put to the owner:** (1) build here vs inside Market Intelligence; (2) Tier 1 denominator
+  for CBLR filers; (3) CRE excludes owner-occupied; (4) confirm CERT 17281; (5) four bands vs three.
+
+---
+
 ## 2026-10-26 — Node 20.20.2 → 22.23.4 on the droplet (CVE-2026-111497 Brotli fix, APPLIED 17:45–17:50 UTC, ~3 min outage)
 
 - **Owner-approved** ("go ahead with the node upgrade if this will not impact user experience"). Pre-checks: official `CHANGELOG_V22.md` lists `(CVE-2026-111497) deps: brotli: cherry-pick 0ed4268…` under 22.23.4; NodeSource `node_22.x` serves 22.23.4; `better-sqlite3` 11.10.0 ships a prebuilt for ABI 127 (Node 22) but **not** ABI 137 (Node 24) — that is why 22, not 24; `make`/`g++`/`python3` present anyway; PM2 dump 17:31 held the app with `AMO_PASSWORD`/`AMO_SECRET`.

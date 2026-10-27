@@ -2,7 +2,7 @@
 
 > **Renamed 19 Oct 2026 at the owner's request: the product is "AOM Tracker" (Assignment of Mortgage), formerly "AMO Tracker."** The rename covers everything users see — the sidebar, the sign-in page, the Entity Activity Report heading, the Excel export, the chat assistant, and the weekly email (subject and header "AOM Market Monitor", sender name "AOM Dashboard" — from the 19 Oct 2026 send onward if deployed before 07:00 ET, else from 26 Oct). Code identifiers, the repository name and the county's own document code (`ASSIGNMENT OF MORTGAGE - AMO`) are unchanged.
 
-> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 26 Oct 2026
+> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 27 Oct 2026
 > **Production URL:** `http://165.22.35.75/` (port 80, through nginx; single shared password). **The old `http://165.22.35.75:5000` address stopped working on 26 Oct 2026 17:31 UTC** — Node now listens on loopback only and the host firewall closes everything but 22/80/443 (`docs/ops/close-port-5000.md`)
 > **Repository:** `amo-dashboard` (`origin/main`)
 
@@ -544,6 +544,51 @@ FDIC's 10,000-row response cap; the Opportunity/Earnings/Vulnerability columns w
 and hidden; there were no signals, trend, acquisition or balance-sheet sections in the drawer; and
 the figures refreshed whenever FDIC's API did.
 
+#### Bank Stress Ranking (`/bank-stress`) — built 27 Oct 2026, NOT YET DEPLOYED
+
+Which banks are under enough earnings, credit and commercial-real-estate pressure that they are
+likely to sell distressed CRE loans. Unlike FDIC Data Analytics, this page reads **our own copy of the
+FDIC Call Reports**: the weekly job `collector/run_bank_stress.sh` pulls the full universe (≈4,300
+banks, 20 quarters) straight from the FDIC BankFind API into `bank_stress.db`, computes the metrics
+and scores, and the page shows the newest eight quarters. Nothing on it comes from Market Intelligence.
+
+**Reading the table.** Each bank gets three sub-scores and a composite, all **percentile ranks within
+its asset-size peer band** (< $1B, $1–10B, $10–100B, > $100B), **higher = more stress**:
+*Condition* (40%) — level of ROA, core ROA, efficiency, noncurrent loans, reserve coverage, Tier 1
+leverage, loans/deposits; *Deterioration* (40%) — year-over-year change and four-quarter trend of
+net interest income/assets, funding cost, provision, CRE charge-offs, noncurrent loans; *CRE exposure*
+(20%) — CRE/Tier 1 capital, CRE share of charge-offs, gains or losses on loan and OREO sales. A
+sub-score with no computable components is left out and the composite re-weights; the drawer shows
+the **completeness %**. Beside the score, eight **rule flags** (one point each — weak or falling
+earnings, NII compressing, funding cost rising, inefficient, provisioning behind losses, CRE
+charge-offs rising, dividend strain for standalone banks, selling at a loss) set the **tier**: 0–2
+normal, 3–4 watchlist, 5+ likely pressure. Flags 5 + 6 + 8 together light the red **CRE seller**
+badge. "Top drivers" are the three components with the highest percentiles — why the bank ranks
+where it does. Banks established in the last three years are shown but not ranked; quarters that span
+a merger have their trend measures suppressed. The full rule set is under "How the ranking is built"
+at the foot of the page, and every formula is in `collector/bank_stress/README.md`.
+
+**Filters.** Quarter; region (default **Florida + Southeast** — FL, GA, AL, SC, NC, TN, MS, LA —
+or Florida, National, or your own list of state codes); peer band; tier; minimum composite; the
+**deal-sourcing view** (banks with CRE ≥ 200% of Tier 1 capital or ≥ $250M of CRE loans); and **CRE
+seller signal only**. Every column sorts. Click a bank for the drawer: latest scores, flags, drivers,
+eight-quarter charts (scores, earnings, credit, CRE concentration against the 300%/100% interagency
+lines, funding, capital), flags by quarter, component percentiles and the quarterly dollar figures
+behind them. CRE here is construction + multifamily + **non-owner-occupied** nonfarm nonresidential,
+over **Tier 1 capital** — the only capital figure every bank reports (community-bank-leverage filers,
+42% of banks, report no total risk-based capital).
+
+**When do the numbers change?** Each Sunday the job re-pulls and recomputes; a new FDIC quarter
+appears as soon as the FDIC publishes it (about two months after quarter-end). No restart or cache
+bust is needed — the server keys its cache on the compute time. If the page says the ranking "has not
+been computed yet", the weekly job has not produced `bank_stress.db` on that machine.
+
+**Why it exists alongside FDIC Data Analytics, and what comes next.** The owner decided on 27 Oct
+2026 to stop depending on the Market Intelligence API altogether: stage 1 (this page, on our own
+pull) is built; stage 2 re-points FDIC Data Analytics to the same raw tables; stage 3 rebuilds the
+balance-sheet behaviour signals here; then the Market Intelligence client, proxy and keys are removed.
+Until stage 2 lands, FDIC Data Analytics still reads Market Intelligence (previous section).
+
 #### Clean Transactions (`/clean-events`)
 The verified `LOAN_TRANSFER` dataset, one row per confirmed transfer, with document-derived names,
 parent companies, loan amount and consideration. Filter by assignor, assignee, type and date. Each
@@ -1014,6 +1059,7 @@ All installed via `crontab -e` on the droplet.
 | `30 15,19,23 * * *` | `run_broward_daily.sh` (`BROWARD_INGEST_INDEX=1`) | Broward index → images → extraction → retention report + heartbeat. **Time-critical.** Runs three times a day on purpose — see "Broward's publication time moves" below. Holds a `flock` so runs cannot overlap; a skipped run exits 0. |
 | `0 6 * * 5` | `run_weekly.sh` | Miami-Dade: collect last 10 days → extract PDFs → normalize → enrich. Sources `/opt/amo-dashboard/.env` itself and **aborts loudly up front if `OPENAI_API_KEY` is missing** (fix `2441222`, 23 Aug 2026 — cron provides no environment; before the fix the run half-succeeded: collection worked, extraction silently died, see §7.4). **No longer sends the email** — that moved out on 2 Oct 2026. |
 | `0 11,12 * * 1` | `send_weekly_email.sh` | The "AMO Market Monitor" email (§4.1a). **Two firings, one send:** the box is Etc/UTC with no DST, so no single UTC hour is 07:00 Eastern all year — 11:00 UTC is 07:00 EDT, 12:00 UTC is 07:00 EST. The script checks the Eastern hour and lets exactly one through. `CRON_TZ` would be tidier but this cron build's support for it is unverified, and a scheduling feature that silently fails would shift the send an hour unnoticed. Waits for any running `normalize.py`, and sends nothing unless `REPORT_EMAIL_ENABLED=1`. |
+| `0 3 * * 0` *(NOT YET INSTALLED — built 27 Oct 2026)* | `run_bank_stress.sh` | Bank Stress Ranking: pull 20 quarters of the full bank universe from the FDIC BankFind API (one request per quarter), compute metrics, scores, flags and the failure backtest into **`bank_stress.db`** (its own file; the main database is only read, for the cert ↔ name link). About two minutes. No restart needed afterwards. `flock`-guarded; exit 2 = a step failed and wrote nothing. Sunday 03:00 UTC: nothing else runs then |
 | `15 3 * * *` | `run_backup.sh` | Verified snapshot of the database + Broward images → local rotation (7 kept) → DigitalOcean Spaces. Records every run in `backup_runs`; the Overview banner reads it. **Waits out a running `normalize.py` before snapshotting** (7 Oct 2026) — the derived tables are empty for ~90 minutes of a rebuild, and a snapshot taken then restores a dashboard of zeros. |
 
 **One-off, 18–21 Sep 2026 (remove after):** `5 6 18 9 *` `collector/weekend/run_weekend.sh` (re-read →
@@ -1084,6 +1130,7 @@ AMO_DB_PATH=./prod_snapshot.db collector/.venv/bin/python3 collector/tests/check
 | `check_alias_scope.py` | Alias scoping rules behave — note aliases are applied **after** suffix stripping |
 | `check_broward_heartbeat.py` | The Broward daily job's heartbeat separates "ran and found nothing new" (normal every weekend) from "stopped running". Stubs the SFTP layer — no network needed |
 | `check_facility_type.py` | The rules deciding whether a credit facility is a warehouse line, a syndicated deal or a business line of credit. **Offline — no API key, no network, instant**, unlike the integration gate. Includes a negative control. Exists because the model used to put 623 of 625 documents in one bucket and no test was watching that field |
+| `check_bank_stress.py` | The Bank Stress Ranking arithmetic, offline, 61 checks (27 Oct 2026): YTD → quarterly de-cumulation (and that a disagreement with the FDIC's own quarterly field is counted), small-denominator floors give null not zero, percentile orientation (low ROA and high efficiency both read as stress; a falling NII/assets reads as stress), holding-company-owned banks never get the dividend flag, merger detection (a sticky `ACTEVT` code is not a merger, a new one is; `EQCMRG` is de-cumulated; a > 25% asset jump counts) and the trend nulling across it, de novo exclusion, composite re-weighting and completeness, every rule flag and tier, and the missing-field assertion (an absent key fails, a null does not; `/institutions` descriptors may be absent per row but never everywhere). When a local `bank_stress.db` exists it also re-checks CERT 17281 against the brief's figures and that it carries no flag 7 |
 | `check_doc_category.py` | The rule that overturns an unsupported COLLATERAL verdict on an Assignment of Mortgage. Offline, no API key. Asserts both that it corrects the 9,604-document error AND that it never touches UCC filings or the generic-assignment rent problem, and that it can never *invent* a collateral verdict |
 | `check_doc_type_scope.py` | Non-assignment doc types (`FST`) never reach `aom_events_clean` or the entity signal sweep, while `AMO`/`ASG`/legacy `NULL` rows still do. Runs on an in-memory fixture **plus a negative control** — production had zero FST rows when it was written, so a live-only check would have passed while asserting nothing |
 | `check_leading_numbers.py` | A leading number is part of a company name, not junk to strip. Offline. Exists because stripping every leading non-letter turned `7190 HOLDINGS LLC` into `HOLDINGS` and collapsed **47 unrelated firms into one fictional "INVESTMENTS" entity** — 1,752 filings across 1,113 companies (14 Sep 2026). Only a leading *zero* is removed, and the test pins why magnitude was rejected as the discriminator |
@@ -1772,6 +1819,7 @@ endpoints healthy across all three county scopes.
 | Repo hygiene — WAL files untracked | 🟢 Resolved 11 Aug 2026 — droplet `git status` clean |
 | Entity normalization / duplicate manager | 🟢 Deployed 6 Aug 2026 |
 | FDIC analytics | 🟢 **Re-sourced to Market Intelligence — deployed 7 Oct 2026 16:56 UTC** (`dfd42f8`); **trend charts added to the bank drawer 17:33 UTC** (`4e0f5f4`), owner-confirmed. The page reads the Market Intelligence tool's Market Analytics API via `/api/mi/*` instead of querying FDIC itself: real Opportunity/Earnings/Vulnerability percentile scores (previously hardcoded `0` and hidden), balance-sheet signal chips, and trend / acquisition / roll-forward sections in the drawer; `server/fdic.ts`, the FDIC window and its guardrail are removed. Verified locally: Florida top-3 by Opportunity matches the API in order (35430, 24156, 59278); CERT 35541 chips equal `behavior.latest.fired`; a wrong key shows "Market Intelligence unavailable" and no figures; National loads signals in seven sub-1 MB band calls. Verified live after restart: `/api/mi/meta` `ok:true`, quarter 20260630, same Florida top-3. **Miss:** national screening is one 1.47 MB uncompressed response (no band parameter upstream, no gzip here) — §7.4 item −9. Figures now move only when Market Intelligence's daily job refreshes (+ up to 7 days of local cache) |
+| Bank Stress Ranking (`/bank-stress`) | 🟡 **BUILT 27 Oct 2026, verified locally, committed on `main` (`0885853` → `19b2a92`), NOT DEPLOYED.** Own FDIC pull (`collector/bank_stress/`, 20 quarters, 92,924 bank-quarters, field assertion on every row), percentile scoring within asset bands, eight rule flags, tiers, CRE seller signal, failure backtest, 61 offline checks; read-only API `server/bank-stress.ts`; page + drawer. Verified on the local dev server against real data: Q2 2026 4,286 banks ranked, Florida + Southeast 649, deal-sourcing view 273, pressure tier 4, CRE seller signal 4 (Banc of California, Pinnacle Bank CA, Seacoast National, Zions); backtest 4 of 9 failures in the top decile four quarters out. **To deploy:** build + PM2 restart, run `run_bank_stress.sh` once by hand, add its crontab line, add `bank_stress.db` to the backup script. **Known:** the National ranking response is 4.5 MB uncompressed (no gzip middleware — same miss as item −9); the default regional view is 680 KB |
 | Deal Intelligence page | ⚫ **Retired 11 Aug 2026** — page and its 8 endpoints removed together |
 | Automated backups | 🟢 **Live off-box 17 Aug 2026** — nightly verified snapshot → DigitalOcean Spaces (`amo-dashboard-backups-ec`, NYC3). Re-verified 7 Oct 2026: eight consecutive `status=ok` runs, ~148MB per archive. **Hardened 7 Oct 2026** — waits out a running `normalize.py`, asserts the derived tables separately, and records a `degraded` status that cannot count as good or rotate a complete archive away (§7.5). Only one restore has ever been performed (17 Aug); another drill is the open item, not a credential |
 | Entity naming / name variants | 🟡 **Legal-suffix class closed 7 Oct 2026** — bare `COMPANY`, `LIMITED` and spaced `L P` now strip, merging 119 canonical names that no amount of suffix stripping could previously reunite (Bank of New York Mellon Trust had broken 179/178). Pinned by `check_company_suffix.py`. **Still split:** geographic qualifiers (correctly — see §7.6 item 9), state abbreviations, OCR digit-for-letter, and a bare trailing `&` |
@@ -2379,6 +2427,19 @@ healthy (640 rows, 57% carrying loan amounts).
    ceiling — within twenty cents of the estimate. 84% carry a property address. Note for any future
    bulk run: `extract_pdfs.py` defaults to a **$5 budget cap**, so a large job must pass `--budget`
    explicitly or it stops a quarter of the way through.
+
+4c. 🟡 **Bank Stress Ranking — stage 1 BUILT 27 Oct 2026, awaiting the owner's deploy approval.**
+   A bank-condition composite (condition / deterioration / CRE exposure, 40/40/20) with explainable
+   flags, aimed at banks likely to sell distressed CRE loans, on **our own FDIC pull** (§4.3,
+   §7.3). Phase 0 exploration: `docs/BANK_STRESS_PHASE0.md`; formulas: `collector/bank_stress/README.md`.
+   The owner's decisions: build here; CRE excludes owner-occupied; Tier 1 capital is the
+   denominator; CERT 17281; four bands; and **stop using the Market Intelligence API altogether** —
+   stage 2 re-points FDIC Data Analytics to the new raw tables, stage 3 rebuilds the behaviour
+   signals here, then the MI client, `/api/mi/*` proxy and the two `MI_*` variables go. **Deploy
+   steps for stage 1:** `git pull && npm run build && pm2 restart amo-dashboard` (no `npm install`,
+   no new variables), then `collector/run_bank_stress.sh` once by hand (~2 min, writes
+   `/opt/amo-dashboard/bank_stress.db`), the crontab line from its header, and `bank_stress.db`
+   added to `run_backup.sh`. Keep Market Intelligence live until stage 2 is verified.
 
 5. **Real cron-failure alerting.** The dashboard now warns when Broward collection stalls *and* when
    backups stop succeeding, but both only help someone who opens it. There is still no `MAILTO` and
