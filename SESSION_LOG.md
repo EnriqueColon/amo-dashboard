@@ -4,6 +4,52 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-10-27 (late) — STAGE 3 BUILT: balance-sheet behaviour signals from our own tables (`920b552`, pushed, NOT deployed)
+
+Owner: "lets go to stage 3." A faithful port of Market Intelligence's `lib/analytics/bank-behavior*.ts`
+(read from the sibling repo, read-only) onto our pull, so a bank fires exactly as it did on the page before
+stage 2.
+
+- **Spec sources:** `docs/market-intelligence-meta.json` (signal definitions + thresholds as the page
+  received them) and the MI source (measures, `judgeSignals`, roll-forward, `buildReading`). 45 behaviour
+  field codes verified live on CERT 35541 before use (`NALNSALE P3/P9LNSALE DR*/CR* × 4 CRE categories
+  ORE* × 5 P3/P9/NA × 4 CRE categories RS* × 7 P3/P9/NARSLNLT`); 38 added to the pull (7 were already
+  there). `db.init_schema` appended the columns; local re-pull 80 s.
+- **`behavior.py`:** per bank-quarter `quarter_record` (CRE = cons + mult + non-owner nonfarm, falling
+  back to the whole nonfarm line when the split is unreported; `cre_broad` incl. owner-occupied is the
+  charge-off-rate denominator because the quarter nets cover the whole nonfarm line; gross charge-offs
+  YTD-differenced, null across a gap; every derived sum null if any part is null), `measures_at` (18
+  measures), `judge_signals` (7 rules, thresholds from `config.json → behavior`), `rollforward_step` per
+  category, national percentiles of 6 measures (minCohort 10). Table `bank_behavior`, newest 12 quarters,
+  staged swap like the others. Runs in `cli all` between metrics and score (9 s). Definitions and
+  thresholds published via `bank_stress_meta.definitions_json` → `meta.signals` on the API.
+- **Server:** `/api/fdic/behavior-signals?scope&band` (summaries in the MI `BankBehaviorSummary` shape,
+  scope-wide counts in every band response as the client expects), `meta.signals/signalThresholds/
+  creCategoryLabels`, institution `behavior` {points, rollForward, latestByCategory, signalsByQuarter,
+  latest, reading} with `buildReading` ported to TS. **Client:** Signals column + fetch restored (now
+  `/api/fdic`), Balance-Sheet Actions card lights up, narrative button and its state removed, glossary.
+- **Results, Q2 2026 national:** 4,308 judged, 5 unjudged (single quarter), **1,352 fired ≥ 1 signal**:
+  hfsTransfer 66, realizedSale 118, chargeOffSpike 125, unexplainedExit 352, foreclosureRoute 131,
+  modificationBuild 338, creRunoff 515. **BCB Community Bank 35541 → HFS transfer + Realized sale, the
+  two chips the page showed from MI on 7 Oct** (HFS $10.8M = 0.41% of loans vs a $488K prior high;
+  $2.6M loan-sale loss); its history shows the Q2 2024 HFS + loss the MI doc describes and
+  chargeOffSpike/foreclosureRoute in Q3 2025. Ocean Bank 24156 → Modification build (CRE mods $53.5M,
+  +1.21% of CRE). Florida: 25 of 83 fired. National signals response 365 KB gzipped (one call; the
+  client still fetches per band — 4 calls — which works too).
+- **Verified locally:** 76 offline checks (15 new: YTD differencing, null-propagating sums, each of the
+  seven rules firing and the routine-pipeline / routine-seller non-firing cases, unjudged on a missing
+  input, roll-forward arithmetic, definitions carry thresholds); `tsc` clean; page shows the chips and the
+  "25 of 83" line, drawer shows the card, reading, roll-forward and chart; no console errors.
+- **Not ported:** Seller Likelihood (four states + score). The ranking's CRE seller signal (f5+f6+f8)
+  covers the business question; MI's own backtest flagged the 2023 deposit-run failures as false
+  positives. Can be added later from `lib/analytics/seller-likelihood.ts` if wanted.
+- **Deploy order when approved:** `git pull` → `run_bank_stress.sh` by hand (~4 min; fills 38 new raw
+  columns and builds `bank_behavior`) → `npm run build && pm2 restart amo-dashboard`. No `npm install`,
+  no env change. Rollback: `git revert 920b552`, build, restart (the page then shows no signals, as in
+  stage 2).
+
+---
+
 ## 2026-10-27 (night) — STAGE 2 BUILT and DEPLOYED: FDIC Data Analytics on our own FDIC tables (`967bec9`; deployed 14:37–14:42 UTC)
 
 **Deployed on the owner's "deploy it", in the documented order:** `git pull` 546b4e0 → 4f180ab;
