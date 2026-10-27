@@ -9,8 +9,10 @@
  * change, which is why the names in this file still say "Mi". The file is
  * renamed when the Market Intelligence proxy is removed (stage 4).
  *
- * Balance-sheet behaviour signals (`behavior`, `signals`) are not computed
- * here yet — stage 3 — so `meta.signals` is empty and `behavior` is null.
+ * Balance-sheet behaviour signals (`meta.signals`, `/behavior-signals`, the
+ * drawer's `behavior`) are computed by collector/bank_stress/behavior.py since
+ * stage 3 — a port of the Market Intelligence rules — and served from the same
+ * tables. `behavior` is null only for a bank with a single quarter on file.
  *
  * Units, because they are easy to get wrong:
  *   nplRatio, noncurrent_to_*_ratio, pastDue*, loanLossReserve   fractions (0.0053)
@@ -260,8 +262,8 @@ export type MiSignalsResult = {
 export async function loadBehaviorSignals(scope: string, meta: MiMeta): Promise<MiSignalsResult> {
   const isNational = scope === meta.scopes.national
   const urls = isNational
-    ? meta.assetBands.map((b) => `/api/mi/behavior-signals?scope=${encodeURIComponent(scope)}&band=${encodeURIComponent(b.key)}`)
-    : [`/api/mi/behavior-signals?scope=${encodeURIComponent(scope)}`]
+    ? meta.assetBands.map((b) => `${API_PREFIX}/behavior-signals?scope=${encodeURIComponent(scope)}&band=${encodeURIComponent(b.key)}`)
+    : [`${API_PREFIX}/behavior-signals?scope=${encodeURIComponent(scope)}`]
 
   const parts = await Promise.all(urls.map(async (url) => {
     const res = await fetch(url, { headers: { Accept: 'application/json' } })
@@ -344,7 +346,7 @@ export type MiInstitution = {
     /** Set when the live FDIC history lookup failed; the list is then empty, not "none on record". */
     error?: string
   }
-  /** Null until stage 3 computes behaviour signals from our own tables. */
+  /** Null only when the bank has a single quarter on file (nothing to judge). */
   behavior: null | {
     cert: string
     name: string

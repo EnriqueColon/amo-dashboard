@@ -2,6 +2,7 @@
 
     .venv/bin/python3 -m bank_stress.cli pull [--quarters N] [--latest YYYYMMDD]
     .venv/bin/python3 -m bank_stress.cli metrics
+    .venv/bin/python3 -m bank_stress.cli behavior   # balance-sheet behaviour signals (stage 3)
     .venv/bin/python3 -m bank_stress.cli score
     .venv/bin/python3 -m bank_stress.cli backtest
     .venv/bin/python3 -m bank_stress.cli link       # seed cert ↔ AOM canonical name from the main DB
@@ -17,7 +18,7 @@ import os
 import sqlite3
 import sys
 
-from . import backtest, db as store, metrics, pull, scoring
+from . import backtest, behavior, db as store, metrics, pull, scoring
 
 
 def link() -> int:
@@ -63,6 +64,8 @@ def main(argv: list[str] | None = None) -> int:
         return pull.main(rest)
     if cmd == "metrics":
         return metrics.run()
+    if cmd == "behavior":
+        return behavior.run()
     if cmd == "score":
         return scoring.run()
     if cmd == "backtest":
@@ -73,7 +76,7 @@ def main(argv: list[str] | None = None) -> int:
         rc = pull.main(rest)
         if rc:
             return rc
-        for step in (metrics.run, scoring.run, backtest.run, link):
+        for step in (metrics.run, behavior.run, scoring.run, backtest.run, link):
             rc = step()
             if rc:
                 return rc

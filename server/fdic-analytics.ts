@@ -366,17 +366,187 @@ async function buildInstitution(db: Database.Database, meta: Meta, cert: string)
   const score = db.prepare('SELECT * FROM bank_scores WHERE cert = ? ORDER BY repdte DESC LIMIT 1').get(Number(cert)) as Row | undefined
   const defs = parse<any>(meta.definitions_json, {})
   const history = await fetchAcquisitions(cert)
+  const stateName = titleCase(latest.STNAME) ?? latest.STALP ?? ''
   return {
     cert,
-    trend: { cert, name: latest.NAME, city: titleCase(latest.CITY) ?? '', state: titleCase(latest.STNAME) ?? latest.STALP ?? '', points, verdict: verdictFor(score, defs), leverageOnly },
+    trend: { cert, name: latest.NAME, city: titleCase(latest.CITY) ?? '', state: stateName, points, verdict: verdictFor(score, defs), leverageOnly },
     history: { cert, acquisitions: history.acquisitions, error: history.error },
-    behavior: null,
+    behavior: buildBehavior(db, meta, Number(cert), latest.NAME, stateName, defs),
+  }
+}
+
+// ── balance-sheet behaviour (stage 3) ───────────────────────────────────────
+//
+// collector/bank_stress/behavior.py computes the measures, the seven signals,
+// the per-category roll-forward and the balances per bank-quarter. This side
+// only reshapes them into the objects the page and the drawer already render
+// (the Market Intelligence contract) and writes the plain-language reading —
+// a port of that tool's buildReading, quoting only numbers on the panel.
+
+const SIGNAL_KEYS = ['hfsTransfer', 'realizedSale', 'chargeOffSpike', 'unexplainedExit', 'foreclosureRoute', 'modificationBuild', 'creRunoff'] as const
+type SignalKey = typeof SIGNAL_KEYS[number]
+
+type BehaviorRow = Row & { measures: Record<string, number | null> | null; fired: SignalKey[]; unjudged: SignalKey[]; rollforward: Record<string, Row> | null; percentiles: Record<string, number | null> }
+
+function behaviorRows(db: Database.Database, cert: number, limit: number): BehaviorRow[] {
+  const rows = db.prepare('SELECT * FROM bank_behavior WHERE cert = ? ORDER BY repdte DESC LIMIT ?').all(cert, limit) as Row[]
+  return rows.reverse().map((r) => ({
+    ...r,
+    measures: parse<Record<string, number | null> | null>(r.measures_json, null),
+    fired: parse<SignalKey[]>(r.fired_json, []),
+    unjudged: parse<SignalKey[]>(r.unjudged_json, []),
+    rollforward: parse<Record<string, Row> | null>(r.rollforward_json, null),
+    percentiles: parse<Record<string, number | null>>(r.percentiles_json, {}),
+  }))
+}
+
+function behaviorSummary(r: BehaviorRow, extra: { name: string; state: string | null; asOf: string }) {
+  return {
+    cert: String(r.cert), name: extra.name, state: extra.state, quarter: r.repdte, current: r.repdte === extra.asOf,
+    quartersAvailable: r.quarters_available, totalAssets: r.assets_k, grossLoans: r.gross_loans, creLoans: r.cre_loans, band: r.band,
+    measures: r.measures ?? {}, percentiles: r.percentiles, fired: r.fired, unjudged: r.unjudged,
+    actionCount: r.action_count, pressureCount: r.pressure_count,
+  }
+}
+
+function money(thousands: number): string {
+  const dollars = thousands * 1000
+  const abs = Math.abs(dollars)
+  const sign = dollars < 0 ? '−' : ''
+  if (abs >= 1e9) return `${sign}$${(abs / 1e9).toFixed(1)}B`
+  if (abs >= 1e6) return `${sign}$${(abs / 1e6).toFixed(1)}M`
+  if (abs >= 1e3) return `${sign}$${(abs / 1e3).toFixed(0)}K`
+  return `${sign}$${abs.toFixed(0)}`
+}
+const pctText = (v: number, dp = 2) => `${v.toFixed(dp)}%`
+
+function buildReading(latest: BehaviorRow | null, steps: Row[], byQuarter: Array<{ label: string; fired: SignalKey[] }>, signalLabel: (k: SignalKey) => string, thresholds: Row): { text: string; signals: SignalKey[] } {
+  if (!latest || !latest.measures) {
+    return { text: 'Only one quarter of behaviour fields is on file for this institution, so nothing can be judged: every signal compares a quarter with the one before it.', signals: [] }
+  }
+  const m = latest.measures
+  const label = quarterLabel(latest.repdte)
+  const fired = new Set(latest.fired)
+  const s: string[] = []
+  if (fired.has('hfsTransfer') && m.hfsBalance != null && m.hfsPct != null) {
+    s.push(`In ${label} it moved loans to held-for-sale: the balance is ${money(m.hfsBalance)}, ${pctText(m.hfsPct)} of gross loans${m.hfsTrailingMax != null ? `, against a high of ${money(m.hfsTrailingMax)} over the previous four quarters` : ''}.`)
+  }
+  if (fired.has('realizedSale') && m.loanSaleGainQ != null) {
+    const loss = m.loanSaleGainQ < 0
+    s.push(`It booked a ${loss ? 'loss' : 'gain'} of ${money(Math.abs(m.loanSaleGainQ))} on loan sales in the quarter${loss ? ', which points to a discount trade' : ''}${m.priorQuartersWithSales != null && m.priorQuartersWithSales <= 1 ? '; it had sold in at most one of the previous four quarters, so this is not a routine pipeline' : ''}.`)
+  }
+  if (fired.has('chargeOffSpike') && m.creNcoRateQ != null) {
+    s.push(`CRE net charge-offs ran ${pctText(m.creNcoRateQ, 3)} of CRE loans for the quarter${m.creNcoRateTrailingMean != null ? `, against its own average of ${pctText(m.creNcoRateTrailingMean, 3)}` : ''}.`)
+  }
+  if (fired.has('foreclosureRoute') && m.oreoCreChangePct != null && m.oreoCrePct != null) {
+    s.push(`It took collateral: CRE OREO rose by ${pctText(m.oreoCreChangePct, 3)} of CRE loans to ${pctText(m.oreoCrePct, 2)} while CRE nonaccrual fell, so REO rather than a note sale is the route.`)
+  }
+  if (fired.has('unexplainedExit') && m.unexplainedExit != null && m.unexplainedExitPctOfCre != null) {
+    s.push(`${money(m.unexplainedExit)} of CRE nonaccrual (${pctText(m.unexplainedExitPctOfCre)} of CRE loans) left the books without a charge-off or a transfer to OREO to account for it — consistent with a note sale, though cures and payoffs land in the same residual.`)
+  }
+  if (fired.has('modificationBuild') && m.modificationsCrePct != null && m.modificationsCreChangePct != null) {
+    s.push(`Modifications to CRE borrowers in difficulty rose by ${pctText(m.modificationsCreChangePct)} of CRE loans to ${pctText(m.modificationsCrePct)} while past-dues were flat or falling: extending rather than resolving.`)
+  }
+  if (fired.has('creRunoff') && m.creRunoffPct != null && m.creRunoff4qPct != null) {
+    s.push(`The CRE book shrank ${pctText(Math.abs(m.creRunoffPct), 1)} in the quarter and ${pctText(Math.abs(m.creRunoff4qPct), 1)} over four, beyond what charge-offs explain.`)
+  }
+  if (s.length === 0) {
+    const judgedCount = SIGNAL_KEYS.length - latest.unjudged.length
+    const earlier = byQuarter.slice(0, -1).filter((q) => q.fired.length > 0)
+    s.push(judgedCount === 0
+      ? `None of the seven behaviour signals could be judged for ${label}; the inputs they need are not reported for this institution.`
+      : `No behaviour signal fired in ${label}${judgedCount < SIGNAL_KEYS.length ? ` (${judgedCount} of ${SIGNAL_KEYS.length} could be judged)` : ''}: held-for-sale${m.hfsPct != null ? ` is ${pctText(m.hfsPct)} of loans` : ' is not reported'}, and charge-offs, OREO and modifications moved within the bank's own range.`)
+    if (earlier.length) {
+      const last = earlier[earlier.length - 1]
+      s.push(`The last quarter with a signal was ${last.label} (${last.fired.map((k) => signalLabel(k).replace(/^([A-Z])(?![A-Z])/, (c) => c.toLowerCase())).join(', ')}).`)
+    }
+  }
+  const roll: string[] = []
+  const step = steps[steps.length - 1]
+  if (step && step.priorNonaccrual != null && step.currentNonaccrual != null) {
+    const dir = step.currentNonaccrual > step.priorNonaccrual ? 'rose' : step.currentNonaccrual < step.priorNonaccrual ? 'fell' : 'was unchanged'
+    roll.push(`CRE nonaccrual ${dir}${dir === 'was unchanged' ? '' : ` from ${money(step.priorNonaccrual)} to ${money(step.currentNonaccrual)}`} in ${label}.`)
+    if (step.unexplainedExit != null) {
+      const parts: string[] = []
+      if (step.chargeOffs) parts.push(`${money(step.chargeOffs)} charged off`)
+      if (step.oreoTransferProxy) parts.push(`${money(step.oreoTransferProxy)} of OREO added`)
+      if (step.newNonaccrualProxy) parts.push(`${money(step.newNonaccrualProxy)} of 90-day past-dues that were due to migrate in`)
+      const share = step.unexplainedExitShareOfPrior as number | null
+      const exitShare = Number(thresholds.exitShareOfPriorNonaccrual ?? 0.25) * 100
+      const verdict = step.unexplainedExit > 0
+        ? `${money(step.unexplainedExit)} is unexplained by charge-offs or foreclosure${fired.has('unexplainedExit') ? '' : share != null ? ` — ${pctText(share * 100, 0)} of the prior balance, under the ${exitShare}% at which the exit signal fires` : ''}`
+        : step.unexplainedExit < 0 ? `nonaccruals grew by ${money(-step.unexplainedExit)} more than the prior past-dues predicted` : 'the movement is fully explained'
+      roll.push(parts.length ? `Allowing for ${parts.join(', ')}, ${verdict}.` : `${verdict[0].toUpperCase()}${verdict.slice(1)}.`)
+    } else {
+      roll.push('The roll-forward cannot be completed for this quarter because one of its inputs is not reported.')
+    }
+  }
+  return { text: [s.join(' '), roll.join(' ')].filter((p) => p.length > 0).join('\n\n'), signals: latest.fired }
+}
+
+function buildBehavior(db: Database.Database, meta: Meta, cert: number, name: string, state: string | null, defs: any) {
+  const cfg = parse<any>(meta.config_json, {})
+  const limit = Number(cfg.behavior?.quarters ?? 9)
+  const rows = behaviorRows(db, cert, limit)
+  if (!rows.length) return null
+  const sigDefs: Array<{ key: SignalKey; label: string }> = defs?.behavior_signals ?? []
+  const signalLabel = (k: SignalKey) => sigDefs.find((d) => d.key === k)?.label ?? k
+  const labels: Record<string, string> = defs?.cre_category_labels ?? {}
+  const points = rows.map((r) => ({
+    quarter: r.repdte, label: quarterLabel(r.repdte), grossLoans: r.gross_loans, creLoans: r.cre_loans,
+    heldForSale: r.hfs, heldForSalePctOfLoans: r.hfs_pct, oreoCre: r.oreo_cre, oreoTotal: r.oreo_total,
+    nonaccrualCre: r.na_cre, modificationsCre: r.mods_cre, chargeOffsCreQ: r.co_cre_q, netChargeOffsCreQ: r.nco_cre_q, loanSaleGainQ: r.loan_sale_q,
+  }))
+  const judged = rows.filter((r) => r.judged === 1 && r.rollforward)
+  const steps = judged.map((r) => r.rollforward!.cre)
+  const byQuarter = judged.map((r) => ({ quarter: r.repdte, label: quarterLabel(r.repdte), fired: r.fired, unjudged: r.unjudged }))
+  const last = rows[rows.length - 1]
+  const latestJudged = last.judged === 1 ? last : null
+  const latestByCategory = (['construction', 'multifamily', 'nonfarmNonres'] as const).map((category) => ({
+    category, label: labels[category] ?? category, step: latestJudged?.rollforward?.[category] ?? null,
+  }))
+  return {
+    cert: String(cert), name, state, asOfQuarter: meta.latest_quarter,
+    points, rollForward: steps, latestByCategory, signalsByQuarter: byQuarter,
+    latest: latestJudged ? behaviorSummary(latestJudged, { name, state, asOf: meta.latest_quarter }) : null,
+    reading: buildReading(latestJudged, steps, byQuarter, signalLabel, defs?.behavior_thresholds ?? {}),
   }
 }
 
 // ── routes ──────────────────────────────────────────────────────────────────
 
 export function registerFdicAnalyticsRoutes(app: Express) {
+  app.get('/api/fdic/behavior-signals', (req: Request, res: Response) => {
+    const db = openBankStressDb()
+    const meta = db && latestMeta(db)
+    if (!db || !meta) return fail(res, 503, BANK_STRESS_MISSING_MESSAGE)
+    const scope = typeof req.query.scope === 'string' && req.query.scope ? req.query.scope : NATIONAL
+    const band = typeof req.query.band === 'string' && req.query.band ? req.query.band : null
+    const resolved = resolveScope(stateScopes(db, meta.latest_quarter), scope)
+    if (!resolved) return fail(res, 400, `Unknown scope "${scope}"`)
+    const key = makeCacheKey('fdic:behavior', { scope: resolved.stalp ?? NATIONAL, band: band ?? '', v: meta.computed_at })
+    const hit = getCached(key)
+    if (hit) { res.setHeader('X-FDIC-Cache', 'HIT'); return res.json(hit) }
+    const latest = meta.latest_quarter
+    const where = ['b.repdte = @q']
+    const params: Row = { q: latest }
+    if (resolved.stalp) { where.push('r.STALP = @st'); params.st = resolved.stalp }
+    // counts are scope-wide in every band response (the client reads them once, from the first part)
+    const counts = db.prepare(`SELECT SUM(b.judged = 1) AS judged, SUM(b.judged = 0) AS unjudged FROM bank_behavior b JOIN fdic_financials_raw r ON r.CERT = b.cert AND r.REPDTE = b.repdte WHERE ${where.join(' AND ')}`).get(params) as { judged: number; unjudged: number }
+    if (band) { where.push('b.band = @band'); params.band = band }
+    const rows = db.prepare(`SELECT b.*, r.NAME, r.STNAME FROM bank_behavior b JOIN fdic_financials_raw r ON r.CERT = b.cert AND r.REPDTE = b.repdte WHERE ${where.join(' AND ')} AND b.judged = 1 ORDER BY b.cert`).all(params) as Row[]
+    const summaries = rows.map((r) => behaviorSummary({
+      ...r, measures: parse(r.measures_json, {}), fired: parse(r.fired_json, []), unjudged: parse(r.unjudged_json, []), rollforward: null, percentiles: parse(r.percentiles_json, {}),
+    } as BehaviorRow, { name: r.NAME, state: titleCase(r.STNAME) ?? null, asOf: latest }))
+    const body = {
+      ok: true, meta: stamp(meta, latest, resolved.display),
+      cohort: { scope: resolved.display, asOfQuarter: latest, institutionCount: counts.judged ?? 0, currentCount: counts.judged ?? 0, unjudgedCount: counts.unjudged ?? 0, summaries },
+    }
+    setCached(key, body, DEFAULT_TTL_MS)
+    res.setHeader('X-FDIC-Cache', 'MISS')
+    res.json(body)
+  })
+
   app.get('/api/fdic/meta', (_req: Request, res: Response) => {
     const db = openBankStressDb()
     const meta = db && latestMeta(db)
@@ -385,15 +555,16 @@ export function registerFdicAnalyticsRoutes(app: Express) {
     const hit = getCached(key)
     if (hit) return res.json(hit)
     const cfg = parse<any>(meta.config_json, {})
+    const defs = parse<any>(meta.definitions_json, {})
     const body = {
       ok: true,
       meta: { ...stamp(meta, meta.latest_quarter, NATIONAL), apiVersion: '1', source: SOURCE },
       scopes: { national: NATIONAL, states: stateScopes(db, meta.latest_quarter) },
       assetBands: (cfg.peer_bands ?? []).map((b: any) => ({ key: b.key, label: b.label, maxAssets: b.max_assets_k == null ? null : b.max_assets_k * 1000 })),
-      signals: [],
-      signalThresholds: {},
-      creCategoryLabels: {},
-      endpoints: { screening: '/api/fdic/screening', institution: '/api/fdic/institution/:cert' },
+      signals: defs.behavior_signals ?? [],
+      signalThresholds: defs.behavior_thresholds ?? {},
+      creCategoryLabels: defs.cre_category_labels ?? {},
+      endpoints: { screening: '/api/fdic/screening', institution: '/api/fdic/institution/:cert', behaviorSignals: '/api/fdic/behavior-signals' },
       cache: { note: 'Recomputed by the weekly collector job; served from bank_stress.db, cache keyed on the compute time.' },
     }
     setCached(key, body, DEFAULT_TTL_MS)

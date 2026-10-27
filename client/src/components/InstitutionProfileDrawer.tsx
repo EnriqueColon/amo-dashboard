@@ -837,13 +837,11 @@ export function InstitutionDetailSections({ cert }: { cert: string }) {
   const [meta, setMeta] = useState<MiMeta | null>(null)
   const [detail, setDetail] = useState<MiInstitution | null>(null)
   const [error, setError] = useState<{ title: string; detail: string } | null>(null)
-  const [narrativeState, setNarrativeState] = useState<"idle" | "loading" | "error">("idle")
 
   useEffect(() => {
     let mounted = true
     setDetail(null)
     setError(null)
-    setNarrativeState("idle")
     loadMiMeta().then((m) => { if (mounted) setMeta(m) }).catch(() => {})
     loadInstitution(cert)
       .then((d) => { if (mounted) setDetail(d) })
@@ -856,17 +854,6 @@ export function InstitutionDetailSections({ cert }: { cert: string }) {
   }, [cert])
 
   const signalDefs = useMemo(() => signalsByKey(meta), [meta])
-
-  const loadNarrative = useCallback(async () => {
-    setNarrativeState("loading")
-    try {
-      const d = await loadInstitution(cert, { narrative: true })
-      setDetail(d)
-      setNarrativeState("idle")
-    } catch {
-      setNarrativeState("error")
-    }
-  }, [cert])
 
   if (error) {
     return (
@@ -886,7 +873,7 @@ export function InstitutionDetailSections({ cert }: { cert: string }) {
     )
   }
 
-  const { trend, history, behavior, narrative } = detail
+  const { trend, history, behavior } = detail
   const fired = behavior?.latest?.fired ?? []
   const verdictTone = VERDICT_TONE[trend?.verdict?.tone ?? ""] ?? "border-slate-200 bg-slate-50 text-slate-800"
 
@@ -1036,25 +1023,6 @@ export function InstitutionDetailSections({ cert }: { cert: string }) {
               </div>
             )}
 
-            <div className="pt-1">
-              {narrative?.text ? (
-                <div>
-                  <p className="text-[11px] font-medium text-slate-500 mb-1.5">Narrative</p>
-                  <div className="space-y-2 text-sm text-slate-700 leading-relaxed">
-                    {narrative.text.split(/\n{2,}/).map((para, i) => <p key={i}>{para}</p>)}
-                  </div>
-                </div>
-              ) : (
-                <div className="flex items-center gap-3">
-                  <Button variant="outline" size="sm" onClick={loadNarrative} disabled={narrativeState === "loading"}>
-                    {narrativeState === "loading" ? "Writing narrative…" : "Generate narrative"}
-                  </Button>
-                  <span className="text-[11px] text-slate-500">
-                    {narrativeState === "error" ? "Narrative unavailable right now." : "Asks Market Intelligence to write an eight-quarter summary (uses an LLM call)."}
-                  </span>
-                </div>
-              )}
-            </div>
           </CardContent>
         </Card>
       )}

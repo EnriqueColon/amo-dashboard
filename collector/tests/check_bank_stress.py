@@ -173,6 +173,74 @@ try:
 except MissingFieldError:
     check("empty response raises", True)
 
+# ── 9b. behaviour signals (stage 3) ──────────────────────────────────────────
+from bank_stress import behavior  # noqa: E402
+
+T = CFG["behavior"]
+
+
+def braw(repdte, **kw):
+    base = dict(CERT=9, REPDTE=repdte, ASSET=1_000_000, LNLSGR=700_000, LNRECONS=50_000, LNREMULT=50_000, LNRENRES=200_000, LNRENROW=80_000, LNRENROT=120_000,
+                LNLSSALE=0, NTGLLNQ=0, NTRECONQ=0, NTREMULQ=0, NTRENRSQ=0, ORE=0, ORECONS=0, OREMULT=0, ORENRES=0,
+                P3RECONS=0, P9RECONS=0, NARECONS=0, P3REMULT=0, P9REMULT=0, NAREMULT=0, P3RENRES=0, P9RENRES=0, NARENRES=0,
+                RSCONS=0, RSMULT=0, RSNRES=0, RSLNLTOT=0, DRRECONS=0, DRREMULT=0, DRRENRES=0)
+    base.update(kw)
+    return base
+
+
+q1 = behavior.quarter_record(braw("20260331", DRRENRES=100), None)
+q2 = behavior.quarter_record(braw("20260630", DRRENRES=250), braw("20260331", DRRENRES=100))
+check("behaviour: Q1 gross charge-offs = YTD, Q2 = YTD difference", q1["co_nres_q"] == 100 and q2["co_nres_q"] == 150)
+check("behaviour: CRE balance uses non-owner-occupied nonfarm", q2["cre_loans"] == 50_000 + 50_000 + 120_000 and q2["cre_broad"] == 300_000)
+check("behaviour: missing category makes the CRE sum null, not zero", behavior.quarter_record(braw("20260630", NARENRES=None), None)["na_cre"] is None)
+
+def series(*rows):
+    out, prev = [], None
+    for r in rows:
+        out.append(behavior.quarter_record(r, prev)); prev = r
+    return out
+
+base_rows = [braw(q) for q in ["20250331", "20250630", "20250930", "20251231", "20260331"]]
+# HFS transfer: rises 0.5% of loans from a zero base
+s = series(*base_rows, braw("20260630", LNLSSALE=3_500))
+m = behavior.measures_at(s, len(s) - 1); j = behavior.judge_signals(m, T)
+check("behaviour: HFS transfer fires on a rise ≥ 0.25% of loans from zero", j["hfsTransfer"] == (True, True), str(m["hfsChangePct"]))
+# a bank that always runs a pipeline does not fire
+s = series(*[braw(q, LNLSSALE=10_000) for q in ["20250331", "20250630", "20250930", "20251231", "20260331"]], braw("20260630", LNLSSALE=12_000))
+check("behaviour: routine HFS pipeline does not fire", behavior.judge_signals(behavior.measures_at(s, len(s) - 1), T)["hfsTransfer"][0] is False)
+# realized sale: a loss fires; a gain with routine prior sales does not
+s = series(*base_rows, braw("20260630", NTGLLNQ=-500))
+check("behaviour: loan-sale loss fires realizedSale", behavior.judge_signals(behavior.measures_at(s, len(s) - 1), T)["realizedSale"][0])
+s = series(*[braw(q, NTGLLNQ=100) for q in ["20250331", "20250630", "20250930", "20251231", "20260331"]], braw("20260630", NTGLLNQ=100))
+check("behaviour: routine mortgage seller's gain does not fire", behavior.judge_signals(behavior.measures_at(s, len(s) - 1), T)["realizedSale"][0] is False)
+# charge-off spike: 0.5% of CRE in a quarter (1,500 on 300,000)
+s = series(*base_rows, braw("20260630", NTRENRSQ=1_500))
+check("behaviour: CRE net charge-offs at 0.5% of CRE fire chargeOffSpike", behavior.judge_signals(behavior.measures_at(s, len(s) - 1), T)["chargeOffSpike"][0])
+# unexplained exit: nonaccrual 20,000 → 5,000 with no charge-offs and no OREO
+s = series(*[braw(q, NARENRES=20_000) for q in ["20250331", "20250630", "20250930", "20251231", "20260331"]], braw("20260630", NARENRES=5_000))
+m = behavior.measures_at(s, len(s) - 1)
+check("behaviour: unexplained exit fires when nonaccrual leaves without charge-off or OREO", behavior.judge_signals(m, T)["unexplainedExit"][0] and m["unexplainedExit"] == 15_000)
+# foreclosure route: OREO up 0.1% of CRE while nonaccrual falls
+s = series(*[braw(q, NARENRES=2_000) for q in ["20250331", "20250630", "20250930", "20251231", "20260331"]], braw("20260630", NARENRES=1_000, ORENRES=300, ORE=300))
+check("behaviour: OREO rising while nonaccrual falls fires foreclosureRoute", behavior.judge_signals(behavior.measures_at(s, len(s) - 1), T)["foreclosureRoute"][0])
+# modification build: mods up 0.2% of CRE with past-dues flat
+s = series(*base_rows, braw("20260630", RSNRES=500, RSLNLTOT=500))
+check("behaviour: modifications rising with flat past-dues fires modificationBuild", behavior.judge_signals(behavior.measures_at(s, len(s) - 1), T)["modificationBuild"][0])
+# CRE runoff: CRE down 3% in the quarter and 6% over four
+rows_r = [braw("20250331"), braw("20250630", LNRENROT=119_000), braw("20250930", LNRENROT=117_000), braw("20251231", LNRENROT=114_000), braw("20260331", LNRENROT=112_000), braw("20260630", LNRENROT=105_000)]
+s = series(*rows_r)
+m = behavior.measures_at(s, len(s) - 1)
+check("behaviour: sustained CRE shrink fires creRunoff", behavior.judge_signals(m, T)["creRunoff"] == (True, True), f"{m['creRunoffPct']:.2f} / {m['creRunoff4qPct']:.2f}")
+# unjudged when inputs are missing
+s = series(*base_rows, braw("20260630", LNLSSALE=None))
+check("behaviour: missing held-for-sale leaves hfsTransfer unjudged", behavior.judge_signals(behavior.measures_at(s, len(s) - 1), T)["hfsTransfer"] == (False, False))
+# roll-forward arithmetic
+p = behavior.quarter_record(braw("20260331", NARENRES=10_000, P9RENRES=2_000, ORENRES=1_000, ORE=1_000), None)
+q = behavior.quarter_record(braw("20260630", NARENRES=7_000, DRRENRES=1_500, ORENRES=1_800, ORE=1_800), braw("20260331", DRRENRES=0))
+step = behavior.rollforward_step(p, q, "nonfarmNonres")
+check("behaviour: roll-forward residual = prior + 90-day − current − charge-offs − OREO added", step["unexplainedExit"] == 10_000 + 2_000 - 7_000 - 1_500 - 800, str(step))
+check("behaviour: signal definitions carry the configured thresholds", "0.25%" in behavior.signal_definitions(CFG)[0]["rule"] and "25%" in behavior.signal_definitions(CFG)[3]["rule"])
+
 # ── 10. CERT 17281 sanity (needs a local pull) ────────────────────────────────
 db_path = os.environ.get("AMO_BANK_STRESS_DB_PATH") or str(HERE.parent.parent / "bank_stress.db")
 if os.path.exists(db_path):

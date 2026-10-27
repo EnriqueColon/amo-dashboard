@@ -14,9 +14,9 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { FilterHint } from '@/components/FilterHint'
 import { FDIC_SCOPE_DEF } from '@/lib/filterDefinitions'
 import {
-  loadMiMeta, loadScreening, stateCodeFor,
+  loadMiMeta, loadScreening, loadBehaviorSignals, signalsByKey, stateCodeFor,
   formatQuarterLabel, MiError, MI_SOURCE_LABEL, MI_UNAVAILABLE_TITLE,
-  type MiMeta, type MiScreeningPayload, type MiScreeningRow,
+  type MiMeta, type MiScreeningPayload, type MiScreeningRow, type MiSignalsResult,
 } from '@/lib/market-intelligence'
 import { TIER_LABEL, TIER_TONE } from '@/lib/bank-stress'
 
@@ -90,6 +90,8 @@ export default function MarketAnalytics() {
   // downstream can pair a new region with the previous region's rows.
   const [screening, setScreening] = useState<{ scope: string; payload: MiScreeningPayload } | null>(null)
   const [asOf, setAsOf] = useState<string | null>(null)
+  const [signals, setSignals] = useState<MiSignalsResult | null>(null)
+  const [signalsError, setSignalsError] = useState<string | undefined>()
   const [error, setError] = useState<{ title: string; detail: string } | undefined>()
 
   // /meta once: scope list, signal vocabulary, state-code lookup.
@@ -107,6 +109,8 @@ export default function MarketAnalytics() {
       setLoading(true)
       setError(undefined)
       setScreening(null)
+      setSignals(null) // the old scope's signal counts must not sit under the new heading
+      setSignalsError(undefined)
       setAsOf(null)
       setSelectedInstitution(null)
       setCompareRows([])
@@ -130,8 +134,22 @@ export default function MarketAnalytics() {
     return () => { mounted = false }
   }, [region])
 
-  // Balance-sheet behaviour signals come back in stage 3, computed from our
-  // own Call Report tables; until then the page shows condition and stress only.
+  // Balance-sheet signals are an overlay on the table: if they fail, the
+  // Signals column says so, but the screening still renders.
+  useEffect(() => {
+    // Wait for the screening of *this* region, not the one still on screen
+    // from the previous region — otherwise the band calls fire twice.
+    if (!meta || !screening || screening.scope !== region) return
+    let mounted = true
+    setSignals(null)
+    setSignalsError(undefined)
+    loadBehaviorSignals(region, meta)
+      .then((s) => { if (mounted) setSignals(s) })
+      .catch((err) => { if (mounted) setSignalsError(err instanceof Error ? err.message : String(err)) })
+    return () => { mounted = false }
+  }, [meta, screening, region])
+
+  const signalDefs = useMemo(() => signalsByKey(meta), [meta])
 
   const scopeOptions = useMemo(() => {
     if (meta) {
@@ -190,8 +208,15 @@ export default function MarketAnalytics() {
     const watch = rows.filter((r) => r.tier === 'watchlist').length
     const pressure = rows.filter((r) => r.tier === 'pressure').length
     const sellers = rows.filter((r) => r.creSellerSignal).length
-    return `${pressure.toLocaleString('en-US')} in likely pressure (5+ flags), ${watch.toLocaleString('en-US')} on the watchlist (3–4 flags), ${sellers.toLocaleString('en-US')} with the CRE seller signal in ${asOfQuarter}. Balance-sheet behaviour signals return in a later stage.`
+    return `${pressure.toLocaleString('en-US')} in likely pressure (5+ flags), ${watch.toLocaleString('en-US')} on the watchlist (3–4 flags), ${sellers.toLocaleString('en-US')} with the CRE seller signal in ${asOfQuarter}.`
   }, [payload, rows, asOfQuarter])
+
+  const signalsNote = useMemo(() => {
+    if (!payload) return null // payload is scope-gated; nothing from the previous scope may show
+    if (signalsError) return `Balance-sheet signals unavailable: ${signalsError}`
+    if (!signals) return null
+    return `${signals.firedCount.toLocaleString('en-US')} of ${signals.currentCount.toLocaleString('en-US')} institutions fired at least one balance-sheet signal in ${asOfQuarter}.`
+  }, [payload, signals, signalsError, asOfQuarter])
 
   const sortButton = (col: { label: string; term: string; sortKey?: SortKey }) => col.sortKey ? (
     <button type="button" className="cursor-pointer border-b border-dashed border-muted-foreground/50 hover:opacity-80 text-left font-normal flex items-center gap-1 text-xs"
@@ -333,6 +358,9 @@ export default function MarketAnalytics() {
             {tierNote && !loading && (
               <p className="mt-1 text-xs text-muted-foreground">{tierNote}</p>
             )}
+            {signalsNote && !loading && (
+              <p className="mt-1 text-xs text-muted-foreground">{signalsNote}</p>
+            )}
           </div>
           {!loading && rows.length > 0 && (
             <select
@@ -369,6 +397,7 @@ export default function MarketAnalytics() {
                   { label: 'Deter.', term: 'Deterioration Score', sortKey: 'deterioration' as const },
                   { label: 'CRE Exp.', term: 'CRE Exposure Score', sortKey: 'cre_exposure' as const },
                   { label: 'Flags', term: 'Flags', sortKey: 'flags' as const },
+                  { label: 'Signals', term: 'Balance-Sheet Signals' },
                   { label: 'Total Assets', term: 'Total Assets' },
                   { label: 'Total Loans', term: 'Total Loans' }, { label: 'CRE Loans', term: 'CRE Loans' },
                   { label: 'CRE Conc.', term: 'CRE Concentration', sortKey: 'cre' as const },
@@ -402,10 +431,11 @@ export default function MarketAnalytics() {
               {loading ? (
                 Array(10).fill(0).map((_, i) => (
                   <tr key={i} className="border-b border-border/30">
-                    {Array(22).fill(0).map((_, j) => <td key={j} className="py-2 px-2"><Skeleton className="h-3 w-16" /></td>)}
+                    {Array(23).fill(0).map((_, j) => <td key={j} className="py-2 px-2"><Skeleton className="h-3 w-16" /></td>)}
                   </tr>
                 ))
               ) : sortedScreeningTable.map((item, index) => {
+                const fired = signals?.byCert.get(item.id)?.fired ?? []
                 return (
                 <tr key={`${item.id}-${item.reportDate || 'na'}-${index}`} className="border-b border-border/30 cursor-pointer hover:bg-muted/50 transition-colors"
                   onClick={() => {
@@ -427,6 +457,25 @@ export default function MarketAnalytics() {
                       </span>
                     ) : <span className="text-muted-foreground">—</span>}
                     {item.creSellerSignal && <span className="ml-1 inline-block rounded bg-red-600 text-white px-1.5 py-0.5 text-[10px] leading-none" title="Flags 5, 6 and 8 together">CRE seller</span>}
+                  </td>
+                  <td className="py-1.5 px-2">
+                    {signals == null && !signalsError ? (
+                      <Skeleton className="h-3 w-12" />
+                    ) : fired.length === 0 ? (
+                      <span className="text-muted-foreground">—</span>
+                    ) : (
+                      <div className="flex flex-wrap gap-1 max-w-[180px]">
+                        {fired.map((key) => {
+                          const def = signalDefs.get(key)
+                          return (
+                            <span key={key} title={def ? `${def.meaning}\n\n${def.rule}` : key}
+                              className={`inline-block rounded border px-1.5 py-0.5 text-[10px] leading-none whitespace-nowrap ${def?.side === 'pressure' ? 'border-amber-300 bg-amber-50 text-amber-900' : 'border-sky-300 bg-sky-50 text-sky-900'}`}>
+                              {def?.label ?? key}
+                            </span>
+                          )
+                        })}
+                      </div>
+                    )}
                   </td>
                   <td className="py-1.5 px-2 tabular-nums">{formatCurrency(item.totalAssets)}</td>
                   <td className="py-1.5 px-2 tabular-nums">{formatCurrency(item.totalLoans)}</td>

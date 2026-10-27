@@ -153,6 +153,42 @@ Tiers: 0–2 normal, 3–4 watchlist, 5+ likely pressure. **CRE seller signal** 
 Watch flags (shown, not counted): CRE > 300% of Tier 1, construction > 100%, Tier 1 leverage < 8%
 (watch) / < 5%, noncurrent > 2%, loans > 100% of deposits.
 
+## 3b. Balance-sheet behaviour signals (`behavior.py`, stage 3)
+
+What a bank is *doing* about its CRE book, as distinct from its condition. A faithful port of the
+Market Intelligence tool's `lib/analytics/bank-behavior*.ts` (27 Oct 2026); thresholds in
+`config.json → behavior`, same names and values as its `SIGNAL_THRESHOLDS`. One row per bank-quarter
+in `bank_behavior` for the newest 12 quarters: the balances the drawer charts, 18 measures, the seven
+signals (fired / unjudged), the CRE nonaccrual roll-forward per category, and national percentiles
+of six measures (context only — a signal never depends on the cohort).
+
+| Signal | Side | Fires when |
+| --- | --- | --- |
+| hfsTransfer | action | HFS up ≥ 0.25% of gross loans QoQ and ≥ 1.5× the bank's own prior-four-quarter high |
+| realizedSale | action | quarterly loan-sale gain/loss ≠ 0 and (a loss, or gains in ≤ 1 of the previous four quarters) |
+| chargeOffSpike | action | quarterly CRE net charge-offs ≥ 0.5% of CRE (incl. owner-occupied), or ≥ 0.1% and ≥ 3× the bank's trailing mean |
+| unexplainedExit | action | CRE nonaccrual fell and the roll-forward residual ≥ 25% of prior nonaccrual and ≥ 0.1% of CRE |
+| foreclosureRoute | action | CRE OREO up ≥ 0.05% of CRE while CRE nonaccrual fell |
+| modificationBuild | pressure | CRE modifications up ≥ 0.1% of CRE while CRE past-dues (30–89 + 90+) flat or falling |
+| creRunoff | action | CRE down > 2% QoQ and > 5% over four quarters, both after adding back net charge-offs |
+
+Roll-forward per category and for all CRE: `prior nonaccrual + prior 90+ past due (proxy for new) −
+current nonaccrual − quarterly gross charge-offs − max(0, OREO increase) = unexplained exit`. Gross
+charge-offs (`DR*`, RI-B) are YTD → quarter = YTD in Q1, YTD difference otherwise, null across a gap.
+A missing input leaves a measure null and the signal *unjudged*, never fired-clear.
+
+Fields added for this: `NALNSALE P3LNSALE P9LNSALE DRRECONS CRRECONS DRREMULT CRREMULT DRRENRES
+CRRENRES DRRENROT CRRENROT ORECONS OREMULT ORENRES ORERES OREAG P3RECONS P9RECONS NARECONS P3REMULT
+P9REMULT NAREMULT P3RENRES P9RENRES NARENRES P3RENROT P9RENROT NARENROT RSLNLTOT RSCONS RSMULT RSNRES
+RSCI RSLNREFM RSOTHER P3RSLNLT P9RSLNLT NARSLNLT` (all verified live 27 Oct 2026).
+
+Served by `server/fdic-analytics.ts`: `/api/fdic/behavior-signals?scope&band` (cohort summaries) and
+the `behavior` object of `/api/fdic/institution/:cert` (points, roll-forward, signals by quarter,
+latest summary, plain-language reading — a port of the tool's `buildReading`, quoting only numbers on
+the panel). Reproduces the known cases: BCB Community Bank (35541) Q2 2026 → HFS transfer +
+Realized sale; Ocean Bank (24156) Q2 2026 → Modification build. **Not ported:** the Seller
+Likelihood four-state score — the ranking's CRE seller signal covers the business question.
+
 ## 4. Backtest (`backtest.py`)
 
 For each failure in `fdic_failures`, the bank's composite 4 and 8 quarters before its last report,

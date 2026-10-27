@@ -89,6 +89,23 @@
 
   "cre_seller_signal_flags": ["f5", "f6", "f8"],
 
+  "behavior": {
+    "_comment": "Balance-sheet behaviour signal thresholds (stage 3). Same names and starting values as the Market Intelligence tool's SIGNAL_THRESHOLDS, which its failure backtest left unchanged. Measures are in percent of a balance the bank reports.",
+    "quarters": 9,
+    "hfsRisePctOfLoans": 0.25,
+    "hfsNewLevelMultiple": 1.5,
+    "ncoRateAbsolute": 0.5,
+    "ncoRateFloor": 0.1,
+    "ncoOwnHistoryMultiple": 3,
+    "exitShareOfPriorNonaccrual": 0.25,
+    "exitPctOfCre": 0.1,
+    "oreoRisePctOfCre": 0.05,
+    "modificationRisePctOfCre": 0.1,
+    "runoffPct": -2,
+    "runoff4qPct": -5,
+    "minCohort": 10
+  },
+
   "deal_view": {
     "cre_concentration_min_pct": 200,
     "cre_loans_min_k": 250000,

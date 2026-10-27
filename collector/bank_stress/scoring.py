@@ -267,7 +267,11 @@ def score_quarter(rows: list[dict], cfg: dict, by_cert_q: dict) -> list[dict]:
 
 
 def definitions(cfg: dict) -> dict:
+    from .behavior import CRE_CATEGORY_LABEL, signal_definitions  # local import: behavior imports band_for from here
     return {
+        "behavior_signals": signal_definitions(cfg),
+        "behavior_thresholds": cfg.get("behavior", {}),
+        "cre_category_labels": CRE_CATEGORY_LABEL,
         "metrics": [{k: m[k] for k in ("key", "label", "unit", "stress_when", "group", "formula")} for m in METRICS],
         "components": {sub: [{"id": component_id(c), "label": component_label(c), "metric": c["metric"], "feature": c["feature"]} for c in cs]
                        for sub, cs in cfg["components"].items()},
