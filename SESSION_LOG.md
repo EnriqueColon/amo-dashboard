@@ -4,9 +4,22 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
-## 2026-10-27 (last) — STAGE 4 BUILT: Market Intelligence dependency removed from the code (NOT deployed; production env step pending)
+## 2026-10-27 (last) — STAGE 4 BUILT; production step SCHEDULED for 28 Oct 06:00 UTC (02:00 ET) — check the log first thing
 
-Owner: "lets go to stage 4."
+Owner: "lets go to stage 4", then "do that overnight … without impacting today's usage."
+
+**Scheduled, not run:** one-shot cron line `0 6 28 10 * …/collector/stage4_overnight.sh >> …/collector/stage4_overnight.log`
+(crontab backup `collector/crontab.before_stage4.<ts>`). The script (`ec79275`) pulls, drops `MI_*` from
+`.env` (backup `.env.before_stage4.<ts>`), builds, `pm2 delete` + fresh `pm2 start` with **the environment PM2
+holds today minus the two keys** (read by process name from `pm2 jlist` — PM2 alone holds `AMO_DB_PATH`,
+`PORT`, `NODE_ENV`; `.env` has the rest incl. `export OPENAI_API_KEY`), `pm2 save`, then verifies online +
+all 7 keys present + no `MI_*` + `/login` 200 + real sign-in 302 + `/api/fdic/meta`, `/api/bank-stress/meta`,
+`/api/chat/config` (must say `configured:true`), `/api/entity-nodes` 200; **any failure rolls back** code,
+bundle (`/root/index.cjs.before_stage4.<ts>`), `.env` and PM2 env (with the MI keys) and re-verifies. Removes its
+own cron line at the end. `--check` mode passed on the droplet at 17:26 UTC. Droplet code is already at
+`ec79275` but `dist` is still the 16:31 build, so today's users see no change. **Tomorrow:** `tail -40
+/opt/amo-dashboard/collector/stage4_overnight.log` should end `=== stage 4 overnight DONE — exit 0`;
+`crontab -l | grep -c stage4` should be 0; `git_state` should show dist newer than the commit.
 
 - **Deleted:** `server/market-intelligence.ts` (client + `/api/mi/*` routes), its registration in
   `routes.ts`, the startup warning in `index.ts`, `docs/market-intelligence-meta.json` (the saved
