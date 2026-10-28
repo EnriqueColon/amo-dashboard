@@ -1,6 +1,6 @@
 # Market Intelligence → AMO Dashboard merge — running session doc
 
-> **Status:** STEPS 1–3 DONE — droplet copy live at `http://165.22.35.75/intel` with no Vercel service left in use (not announced; Vercel still production) · **Owner:** Enrique C. · **Started:** 28 Oct 2026 · **Last updated:** 28 Oct 2026
+> **Status:** REBUILD STARTED — dashboard renamed **SHCP Intelligence Platform**, Intelligence section live with **Peers ported and deployed** (28 Oct 2026); bridge copy still at `/intel`; Vercel still production for the other three tabs · **Owner:** Enrique C. · **Started:** 28 Oct 2026 · **Last updated:** 28 Oct 2026
 >
 > Read this before doing anything on the merge. The state header above and the log at the bottom are the
 > source of truth; update both at the end of every session that touches this work. The plain-English
@@ -142,8 +142,8 @@ tool's own unit tests for that tab's logic carried over. **All four tabs are por
 | Phase | Work | Effort |
 |---|---|---|
 | **A. Clear the ground** | step 4 (hide Market Analytics, close the analytics API) after the 29 Oct stage 4 check; copy watchlist / reports / bill history from Neon (owner supplies the connection string); decide The Real Deal | ~2 days |
-| **B. Foundation in the dashboard** | OpenAI Responses-API client in Express + cache tables; "Intelligence" sidebar section, page scaffolding, shared article/card components, glossary; **rename to SHCP Intelligence Platform** (title, login, sidebar, email header, Confluence) | ~3 days |
-| **C. Rebuild the tabs** | Peers 1–2 d → News 4–6 d → Legal Landscape 4–6 d → Market Research 5–7 d; each switched off in the bridge app as it lands | 3–4 weeks |
+| **B. Foundation in the dashboard** | ✅ **Rename done 28 Oct** (title, login, sidebar, email subject/header, activity report, workbook, chat prompt); ✅ **Intelligence sidebar section done**; still to do when News lands: OpenAI Responses-API client in Express + cache tables, shared article/card components, glossary entries | ~3 days → ~1.5 left |
+| **C. Rebuild the tabs** | ✅ **Peers DONE and deployed 28 Oct** (see §7) → News 4–6 d → Legal Landscape 4–6 d → Market Research 5–7 d; each switched off in the bridge app as it lands | 3–4 weeks |
 | **D. Cut over and retire** | DNS + TLS, users get the new name; remove the bridge app, its nginx route, PM2 entry, Postgres and backup job; close the Vercel project | ~2 days |
 
 Total ≈ 5–6 weeks of build. **Design call pending with the owner:** the ported data lives in the
@@ -204,6 +204,60 @@ Steps 1–4: about a week, leaving a usable merged tool. Step 5 is optional per 
 ---
 
 ## 7. Log (most recent first)
+
+### 2026-10-28 (night) — REBUILD STARTED: renamed SHCP Intelligence Platform; Peers ported, tested, deployed (`3041116`)
+
+Owner: "Start now" — rename, Intelligence section, then Peers, SQLite for ported data. Deployed to
+production 17:44 UTC; login page already reads "SHCP Intelligence Platform — Sign In".
+
+**The estimate was wrong, in the owner's favour on cost but not on size.** The code-read notes
+called Peers "two committed JSON files and deterministic readings". The tab is actually 23 logic
+modules (~11,000 lines, `lib/peer-intel/`), a 1,000-line SEC EDGAR service, 13 panels (3,400 lines)
+and 19 test suites, and it reads Form D, XBRL company facts and full-text search **live from SEC** —
+140–340 requests per layer at SEC's ten-a-second cap. What made it portable in one evening: the
+logic library has **no dependencies at all** (only `node:test` in tests), the panels import only
+shadcn `Card`/`Skeleton`/`Dialog`/`Button`, recharts and lucide — all of which the dashboard already
+has — and the service's only Next-isms were `import "server-only"` and `unstable_cache`.
+
+**What landed (amo-dashboard `3041116`):**
+- `shared/peer-intel/` — the tool's library verbatim plus `adv-extract.json` (899 KB),
+  `adv-history.json` (744 KB), the IAPD fixture and all tests; one fixture path changed from
+  `__dirname` to `import.meta.url` (this repo is ESM). `npm run test:peer-intel`: **257 pass**.
+  `adv-pdf.mts` (the laptop-side IAPD PDF parser behind `refresh:peer-adv`) deliberately not copied —
+  refreshing the ADV extract stays a job on the MI repo for now.
+- `server/intel/peer-intel-service.ts` — the EDGAR fetchers; `server/intel/routes.ts` —
+  `GET /api/intel/peers?layer=miami-dade|florida|national` (session-gated like everything), in-memory
+  cache 7 days keyed `intel:peers:v5:<layer>`, one build per layer at a time, failures never cached;
+  `POST /api/intel/peers/warm`; `schedulePeerIntelWarmup()` 15 s after listen builds all three
+  layers sequentially (smallest first). **Not SQLite:** the payload is a derived weekly snapshot,
+  rebuilt in ~90 s; a restart rebuilds it. Owner's SQLite decision applies to data that must persist
+  (News caches, Legal bill history, Research reports) — those come with their tabs.
+- `client/src/components/intel/peer-intel/*` (13 panels) + `client/src/pages/Peers.tsx` — import
+  paths rewritten to `@shared/peer-intel/*`; the tool's `#006D95` teal → the dashboard's `primary`
+  token, `bg-white` → `bg-card`; `.surface-primary` added to `index.css` on theme tokens;
+  `lib/chart-theme.tsx` copied with its first series on `--primary`. Data via
+  `lib/intel/peer-intel-api.ts` (fetch) instead of a server action; `lib/intel/peer-intel-types.ts`
+  is a type-only bridge to the server's payload type (erased at build).
+- Sidebar: new **Intelligence** group between Analysis and Data, entry **Peers** (badge New), route
+  `/peers`. Rename on every user-facing string: `index.html` title (there was none), login page,
+  sidebar brand + footer, `SHCP Market Monitor` email subject/header, activity report H1, Excel
+  workbook creator/title, chat system prompt, weekly-email sender name.
+- `tsconfig.json`: `resolveJsonModule` (ADV extract is a JSON import) and `target: ES2022` (the
+  ported code iterates Maps/Sets; without a target tsc applied ES5 iteration rules). **Gotcha:** a
+  stale `node_modules/typescript/tsbuildinfo` kept reporting the errors after the fix — delete it.
+- Verified locally in the browser (dev server on 5050): sidebar + brand, Peers builds Miami-Dade
+  from SEC in ~20 s, Raise Environment / Vintage Pacing / Active Raises / roster render, manager
+  drawer opens, console clean. `npm run check` (tsc + both guardrails) passes; `npm run build` passes.
+- Production: deployed 17:44 UTC (`git pull`, `npm install`, build, `pm2 restart`); `/login` title
+  confirmed; `/api/intel/peers?layer=miami-dade` → 200, 271 KB in 24 ms (cache warm): 10 managers,
+  25 vehicles, 12 active raises in the Miami-Dade layer.
+
+**Known gaps from this slice:** (1) the Peers "Developments" panel reads Google News RSS — works
+from the Mac, not yet confirmed from the droplet; (2) ~~no re-warm~~ — fixed the same night: the server re-warms all three layers every six
+days in-process (`schedulePeerIntelWarmup`), one day inside the cache's week, so the expiry never
+lands on a visitor; no cron needed; (3) no glossary entries for the Peers columns yet; (4) the Confluence page is
+still titled "AMO Dashboard" — rename it with the next doc pass; (5) the bridge app at `/intel`
+still shows its own Peers tab — switch it off in `ENABLED_TABS` there with step 4.
 
 ### 2026-10-28 (latest) — STEP 2 DONE: no Vercel service in use on the droplet; `droplet-cohost` merged into `dev`
 

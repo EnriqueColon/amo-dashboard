@@ -17,7 +17,7 @@
  * still carries the cohort it is linked against.
  */
 import type { Express, Request, Response } from "express"
-import { getCached, setCached } from "../cache"
+import { clearCacheByPrefix, getCached, setCached } from "../cache"
 import { buildLayerAdv, buildPeerIntelPayload, type PeerIntelPayload } from "./peer-intel-service"
 import type { PeerLayer } from "@shared/peer-intel/edgar-contract"
 
@@ -102,15 +102,24 @@ export async function warmPeerIntel(): Promise<Array<{ layer: PeerLayer; ok: boo
   return out
 }
 
-/** Called once after the server is listening; never blocks startup. */
-export function schedulePeerIntelWarmup(delayMs = 15_000): void {
-  setTimeout(() => {
-    warmPeerIntel()
-      .then((results) => {
-        for (const r of results) {
-          console.log(`[intel] peers ${r.layer}: ${r.ok ? "warm" : "FAILED"} in ${(r.ms / 1000).toFixed(1)}s${r.error ? ` — ${r.error}` : ""}`)
-        }
-      })
-      .catch((err) => console.warn("[intel] peers warm-up failed:", err))
-  }, delayMs).unref()
+function logWarm(results: Awaited<ReturnType<typeof warmPeerIntel>>): void {
+  for (const r of results) {
+    console.log(`[intel] peers ${r.layer}: ${r.ok ? "warm" : "FAILED"} in ${(r.ms / 1000).toFixed(1)}s${r.error ? ` — ${r.error}` : ""}`)
+  }
+}
+
+/**
+ * Called once after the server is listening; never blocks startup. Builds
+ * every layer shortly after start, then again every six days — one day
+ * inside the cache's week — so the expiry never lands on a visitor. Entries
+ * are replaced in place (setCached overwrites), so the old payload serves
+ * until the new one is ready.
+ */
+export function schedulePeerIntelWarmup(delayMs = 15_000, everyMs = 6 * 24 * 60 * 60 * 1000): void {
+  const run = () => warmPeerIntel().then(logWarm).catch((err) => console.warn("[intel] peers warm-up failed:", err))
+  setTimeout(run, delayMs).unref()
+  setInterval(() => {
+    clearCacheByPrefix(`intel:peers:${PAYLOAD_VERSION}:`)
+    void run()
+  }, everyMs).unref()
 }

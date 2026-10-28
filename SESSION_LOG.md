@@ -4,7 +4,17 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
-## 2026-10-28 (latest) — Market Intelligence merge STEP 2 DONE: no Vercel service used by the droplet copy; MI backups; droplet tracks MI `dev`
+## 2026-10-28 (night) — RENAMED "SHCP Intelligence Platform"; Intelligence section; PEERS PORTED + DEPLOYED (`3041116`, prod 17:44 UTC)
+
+Owner: full integration of Market Intelligence into this dashboard, renamed SHCP Intelligence Platform; "Start now". Full record in `docs/MARKET_INTEL_MERGE_SESSION.md` §7.
+
+- **Rename:** `index.html` title, login page (`server/auth.ts`), sidebar brand/footer, email subject+header now `SHCP Market Monitor`, activity-report H1, workbook metadata, chat prompt, weekly-email sender. Confluence page title NOT yet renamed.
+- **Peers:** `shared/peer-intel/` (tool's 23 dependency-free modules + 2 data JSONs + 19 test suites; `npm run test:peer-intel` = 257 pass), `server/intel/peer-intel-service.ts` + `server/intel/routes.ts` (`GET /api/intel/peers?layer=`, in-memory 7-day cache, warm-up 15 s after listen), `client/src/components/intel/peer-intel/*` + `pages/Peers.tsx` (teal → `primary` token). Sidebar group **Intelligence** → `/peers`. Not SQLite: the payload is a derived weekly snapshot rebuilt from SEC in ~90 s.
+- **Gotchas:** Peers is ~15k lines, not "two JSON files"; tsconfig needed `resolveJsonModule` + `target: ES2022`, and a stale `node_modules/typescript/tsbuildinfo` hid the fix until deleted; this repo is ESM so `__dirname` in a copied test became `import.meta.url`.
+- **Verified:** local browser (build from SEC ~20 s, panels, drawer, console clean), `npm run check`, `npm run build`; prod `/api/intel/peers?layer=miami-dade` 200 in 24 ms after warm-up.
+- **Open:** weekly re-warm cron; Peers glossary; Developments panel (Google News RSS) from the droplet unconfirmed; bridge app still shows its Peers tab (step 4); Confluence title rename.
+
+## 2026-10-28 (earlier) — Market Intelligence merge STEP 2 DONE: no Vercel service used by the droplet copy; MI backups; droplet tracks MI `dev`
 
 Owner logged in at `/intel`, tabs work ("Works, continue"). Details in `docs/MARKET_INTEL_MERGE_SESSION.md` §7.
 
