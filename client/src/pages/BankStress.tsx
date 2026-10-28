@@ -9,10 +9,22 @@ import {
 } from '@/lib/bank-stress'
 
 type Region = 'southeast' | 'florida' | 'national' | 'custom'
-type SortKey = 'rank' | 'composite' | 'condition' | 'deterioration' | 'cre_exposure' | 'flag_count' | 'cre_concentration' | 'assets_k' | 'name' | 'noncurrent_ratio' | 'tier1_leverage'
+type SortKey = 'rank' | 'composite' | 'condition' | 'deterioration' | 'cre_exposure' | 'flag_count' | 'cre_concentration' | 'assets_k' | 'name' | 'noncurrent_ratio' | 'tier1_leverage' | 'hfs' | 'hfs_change'
+
+/** Latest-quarter held-for-sale as % of loans, and its change over the four quarters shown ($K). */
+function hfsLatest(r: BsRankingRow): number | null {
+  return r.hfs_history?.[0]?.hfs_pct ?? null
+}
+function hfsChange(r: BsRankingRow): number | null {
+  const h = r.hfs_history ?? []
+  const newest = h[0]?.hfs_k, oldest = h[h.length - 1]?.hfs_k
+  return newest != null && oldest != null && h.length > 1 ? newest - oldest : null
+}
 
 const SORT_VALUE: Record<SortKey, (r: BsRankingRow) => number | string> = {
   rank: (r) => r.rank ?? 1e9,
+  hfs: (r) => hfsLatest(r) ?? -1,
+  hfs_change: (r) => hfsChange(r) ?? -1e15,
   composite: (r) => r.composite ?? -1,
   condition: (r) => r.condition ?? -1,
   deterioration: (r) => r.deterioration ?? -1,
@@ -26,6 +38,35 @@ const SORT_VALUE: Record<SortKey, (r: BsRankingRow) => number | string> = {
 }
 
 const PAGE = 150
+
+/**
+ * Loans held for sale over the latest four quarters: four small bars (oldest →
+ * newest, scaled to the bank's own high), the latest balance with its share of
+ * loans, the direction over the four quarters, and the troubled part in red.
+ */
+function HfsCell({ row }: { row: BsRankingRow }) {
+  const pts = [...(row.hfs_history ?? [])].reverse() // oldest → newest
+  if (!pts.length || pts.every((p) => p.hfs_k == null)) return <span className="text-slate-400">—</span>
+  const max = Math.max(...pts.map((p) => p.hfs_k ?? 0), 1)
+  const latest = pts[pts.length - 1]
+  const change = hfsChange(row)
+  const arrow = change == null || Math.abs(change) < 1 ? '→' : change > 0 ? '▲' : '▼'
+  const tone = change == null || Math.abs(change) < 1 ? 'text-slate-500' : change > 0 ? 'text-red-700' : 'text-emerald-700'
+  const title = pts.map((p) => `${formatQuarter(p.quarter)}: ${formatThousands(p.hfs_k)}${p.hfs_pct != null ? ` (${p.hfs_pct.toFixed(2)}% of loans)` : ''}${(p.troubled_k ?? 0) > 0 ? `, ${formatThousands(p.troubled_k)} troubled` : ''}`).join('\n')
+  return (
+    <div className="flex items-center gap-2 whitespace-nowrap" title={title}>
+      <span className="flex items-end gap-px h-4" aria-hidden>
+        {pts.map((p) => (
+          <span key={p.quarter} className={`inline-block w-1.5 rounded-sm ${p === latest ? 'bg-slate-700' : 'bg-slate-300'}`} style={{ height: `${Math.max(2, Math.round(((p.hfs_k ?? 0) / max) * 16))}px` }} />
+        ))}
+      </span>
+      <span className="tabular-nums text-slate-800">{formatThousands(latest.hfs_k)}</span>
+      {latest.hfs_pct != null && <span className="text-[10px] text-slate-500 tabular-nums">{latest.hfs_pct.toFixed(2)}%</span>}
+      <span className={`text-[10px] ${tone}`}>{arrow}</span>
+      {(latest.troubled_k ?? 0) > 0 && <span className="text-[10px] text-red-700 tabular-nums" title="90+ days past due or nonaccrual within held for sale">{formatThousands(latest.troubled_k)} troubled</span>}
+    </div>
+  )
+}
 
 export default function BankStress() {
   const [meta, setMeta] = useState<BsMeta | null>(null)
@@ -228,6 +269,7 @@ export default function BankStress() {
                   <Th k="flag_count">Flags</Th>
                   <th className="py-2 px-2 text-left font-medium text-slate-600"><DefTerm term="bank-stress:Top drivers">Top drivers</DefTerm></th>
                   <th className="py-2 px-2 text-left font-medium text-slate-600"><DefTerm term="bank-stress:Signal">Signal</DefTerm></th>
+                  <Th k="hfs" align="left">Held for sale (4Q)</Th>
                   <Th k="cre_concentration">CRE / T1</Th>
                   <Th k="noncurrent_ratio">Noncurr.</Th>
                   <Th k="tier1_leverage">T1 lev.</Th>
@@ -266,6 +308,7 @@ export default function BankStress() {
                     <td className="py-1.5 px-2">
                       {r.cre_seller_signal ? <span className="inline-block rounded bg-red-600 text-white px-1.5 py-0.5 text-[10px] font-medium whitespace-nowrap" title="Flags 5, 6 and 8 together">CRE seller</span> : null}
                     </td>
+                    <td className="py-1.5 px-2"><HfsCell row={r} /></td>
                     <td className="py-1.5 px-2 text-right tabular-nums">{formatPct(r.cre_concentration, 0)}</td>
                     <td className="py-1.5 px-2 text-right tabular-nums">{formatPct(r.noncurrent_ratio, 2)}</td>
                     <td className="py-1.5 px-2 text-right tabular-nums">{formatPct(r.tier1_leverage, 1)}</td>

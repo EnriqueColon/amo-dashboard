@@ -204,7 +204,7 @@ export function BankStressDrawer({ cert, name, onClose, definitions }: { cert: n
             <div>
               <p className="text-xs font-semibold text-slate-700 mb-1">Quarterly figures ($ thousands)</p>
               <table className="text-[11px] w-full">
-                <thead><tr className="text-slate-500"><th className="text-left font-medium py-1">Quarter</th><th className="text-right font-medium">Net income</th><th className="text-right font-medium">Provision</th><th className="text-right font-medium">Net charge-offs</th><th className="text-right font-medium">CRE NCO</th><th className="text-right font-medium">Loan-sale G/L</th><th className="text-right font-medium">OREO G/L</th><th className="text-right font-medium">Dividends</th><th className="text-right font-medium">Prov. coverage</th></tr></thead>
+                <thead><tr className="text-slate-500"><th className="text-left font-medium py-1">Quarter</th><th className="text-right font-medium">Net income</th><th className="text-right font-medium">Provision</th><th className="text-right font-medium">Net charge-offs</th><th className="text-right font-medium">CRE NCO</th><th className="text-right font-medium">Loan-sale G/L</th><th className="text-right font-medium">OREO G/L</th><th className="text-right font-medium">Dividends</th><th className="text-right font-medium">Prov. coverage</th><th className="text-right font-medium" title="Loans held for sale at quarter-end (balance, and the part 90+ days late or nonaccrual)">Held for sale</th></tr></thead>
                 <tbody>
                   {[...detail.history].reverse().map((h) => {
                     const creNco = [h.q_NTRECONS, h.q_NTREMULT, h.q_NTRENROT].map(num)
@@ -220,6 +220,11 @@ export function BankStressDrawer({ cert, name, onClose, definitions }: { cert: n
                         <td className={`text-right ${(num(h.q_NETGNSRE) ?? 0) < 0 ? 'text-red-700' : ''}`}>{formatThousands(num(h.q_NETGNSRE))}</td>
                         <td className="text-right">{formatThousands(num(h.q_EQCDIV))}</td>
                         <td className="text-right">{num(h.provision_coverage) == null ? '—' : `${(num(h.provision_coverage) as number).toFixed(2)}×`}</td>
+                        <td className="text-right whitespace-nowrap">
+                          {formatThousands(num(h.hfs_k))}
+                          {num(h.hfs_pct) != null && <span className="text-slate-500"> · {(num(h.hfs_pct) as number).toFixed(2)}% of loans</span>}
+                          {(num(h.hfs_troubled_k) ?? 0) > 0 && <span className="text-red-700"> · {formatThousands(num(h.hfs_troubled_k))} troubled</span>}
+                        </td>
                       </tr>
                     )
                   })}

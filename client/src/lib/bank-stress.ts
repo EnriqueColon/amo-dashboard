@@ -46,6 +46,9 @@ export type BsMeta = {
 
 export type BsDriver = { id: string; label: string; percentile: number; value: number | null }
 
+/** One quarter of loans held for sale (Call Report RC 4.a), $ thousands; troubled = 90+ days late + nonaccrual within it. */
+export type BsHfsPoint = { quarter: string; hfs_k: number | null; hfs_pct: number | null; troubled_k: number | null }
+
 export type BsRankingRow = {
   rank: number | null
   rank_in_band: number | null
@@ -79,11 +82,16 @@ export type BsRankingRow = {
   loan_to_deposit: number | null
   reserve_coverage: number | null
   merger_quarter: 0 | 1 | null
+  /** Newest first, the latest four quarters. */
+  hfs_history: BsHfsPoint[]
 }
 
-export type BsHistoryRow = Omit<BsRankingRow, 'cert' | 'name' | 'state' | 'hc_owned'> & {
+export type BsHistoryRow = Omit<BsRankingRow, 'cert' | 'name' | 'state' | 'hc_owned' | 'hfs_history'> & {
   repdte: string
   components: Record<string, number | null>
+  hfs_k: number | null
+  hfs_pct: number | null
+  hfs_troubled_k: number | null
   [metric: string]: unknown
 }
 

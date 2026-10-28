@@ -104,6 +104,59 @@ const METRIC_COLUMNS_SQL = `
   m.cre_nco_ratio__slope, m.noncurrent_ratio__yoy, m.noncurrent_ratio__slope, m.cre_concentration__yoy,
   m.efficiency_ratio__yoy, m.tier1_leverage__yoy, m.loan_to_deposit__yoy`
 
+function previousQuarter(repdte: string): string {
+  const y = Number(repdte.slice(0, 4)), m = Number(repdte.slice(4, 6))
+  const q = Math.floor((m - 1) / 3) + 1
+  const ends: Record<number, string> = { 1: '0331', 2: '0630', 3: '0930', 4: '1231' }
+  return q === 1 ? `${y - 1}1231` : `${y}${ends[q - 1]}`
+}
+
+function quartersBack(latest: string, n: number): string[] {
+  const out = [latest]
+  while (out.length < n) out.push(previousQuarter(out[out.length - 1]))
+  return out
+}
+
+type HfsPoint = { quarter: string; hfs_k: number | null; hfs_pct: number | null; troubled_k: number | null }
+
+/**
+ * Loans held for sale (Call Report RC 4.a, FDIC LNLSSALE) for the newest four
+ * quarters, straight from the raw rows: the balance, its share of gross loans,
+ * and the troubled part (90+ days past due + nonaccrual within it). The FDIC
+ * publishes no breakdown of held-for-sale by loan type, so this is the whole
+ * balance; the delinquency lines are the closest proxy for problem loans
+ * being readied for sale. Keyed by cert, newest quarter first.
+ */
+function hfsHistoryByCert(db: Database.Database, latest: string, certs: Set<number>): Map<number, HfsPoint[]> {
+  const quarters = quartersBack(latest, 4)
+  const rows = db.prepare(`SELECT CERT, REPDTE, LNLSSALE, NALNSALE, P9LNSALE, LNLSGR FROM fdic_financials_raw WHERE REPDTE IN (${quarters.map(() => '?').join(',')})`).all(...quarters) as Array<Record<string, unknown>>
+  const byCert = new Map<number, Map<string, Record<string, unknown>>>()
+  for (const r of rows) {
+    const cert = Number(r.CERT)
+    if (!certs.has(cert)) continue
+    if (!byCert.has(cert)) byCert.set(cert, new Map())
+    byCert.get(cert)!.set(String(r.REPDTE), r)
+  }
+  const out = new Map<number, HfsPoint[]>()
+  for (const cert of Array.from(certs)) {
+    const q = byCert.get(cert)
+    out.set(cert, quarters.map((repdte) => {
+      const r = q?.get(repdte)
+      const hfs = typeof r?.LNLSSALE === 'number' ? (r.LNLSSALE as number) : null
+      const gross = typeof r?.LNLSGR === 'number' ? (r.LNLSGR as number) : null
+      const na = typeof r?.NALNSALE === 'number' ? (r.NALNSALE as number) : null
+      const p9 = typeof r?.P9LNSALE === 'number' ? (r.P9LNSALE as number) : null
+      return {
+        quarter: repdte,
+        hfs_k: hfs,
+        hfs_pct: hfs != null && gross != null && gross > 0 ? (hfs / gross) * 100 : null,
+        troubled_k: na != null && p9 != null ? na + p9 : (na ?? p9),
+      }
+    }))
+  }
+  return out
+}
+
 function rowToScore(r: Record<string, unknown>) {
   const { flags_json, watch_flags_json, top_drivers_json, components_json, ...rest } = r
   return {
@@ -202,7 +255,8 @@ export function registerBankStressRoutes(app: Express) {
       WHERE ${where.join(' AND ')}
       ORDER BY (s.rank IS NULL), s.rank, s.composite DESC
     `).all(params) as Array<Record<string, unknown>>
-    const body = { ok: true, quarter, computed_at: meta.computed_at, total: rows.length, rows: rows.map(rowToScore) }
+    const hfs = hfsHistoryByCert(db, quarter, new Set(rows.map((r) => Number(r.cert))))
+    const body = { ok: true, quarter, computed_at: meta.computed_at, total: rows.length, rows: rows.map((r) => ({ ...rowToScore(r), hfs_history: hfs.get(Number(r.cert)) ?? [] })) }
     setCached(key, body, DEFAULT_TTL_MS)
     res.setHeader('X-BS-Cache', 'MISS')
     res.json(body)
@@ -235,13 +289,24 @@ export function registerBankStressRoutes(app: Express) {
     const inst = db.prepare('SELECT CITY AS city, BKCLASS AS bkclass, ACTIVE AS active FROM fdic_institutions WHERE CERT = ?').get(Number(cert)) as Record<string, unknown> | undefined
     const failure = db.prepare('SELECT FAILDATE AS faildate, RESTYPE AS restype FROM fdic_failures WHERE CERT = ? ORDER BY FAILDATE DESC LIMIT 1').get(Number(cert)) as Record<string, unknown> | undefined
     const links = (db.prepare('SELECT canonical_name FROM bank_entity_link WHERE cert = ?').all(Number(cert)) as Array<{ canonical_name: string }>).map((r) => r.canonical_name)
+    // Loans held for sale per quarter (balance, % of gross loans, troubled part) from the raw rows.
+    const hfsRaw = new Map<string, Record<string, unknown>>()
+    for (const r of db.prepare('SELECT REPDTE, LNLSSALE, NALNSALE, P9LNSALE, LNLSGR FROM fdic_financials_raw WHERE CERT = ?').all(Number(cert)) as Array<Record<string, unknown>>) hfsRaw.set(String(r.REPDTE), r)
+    const withHfs = (h: Record<string, unknown>) => {
+      const r = hfsRaw.get(String(h.repdte))
+      const hfs = typeof r?.LNLSSALE === 'number' ? (r.LNLSSALE as number) : null
+      const gross = typeof r?.LNLSGR === 'number' ? (r.LNLSGR as number) : null
+      const na = typeof r?.NALNSALE === 'number' ? (r.NALNSALE as number) : null
+      const p9 = typeof r?.P9LNSALE === 'number' ? (r.P9LNSALE as number) : null
+      return { ...h, hfs_k: hfs, hfs_pct: hfs != null && gross != null && gross > 0 ? (hfs / gross) * 100 : null, hfs_troubled_k: na != null && p9 != null ? na + p9 : (na ?? p9) }
+    }
     const body = {
       ok: true,
       computed_at: meta.computed_at,
       bank: { ...latest, ...(inst ?? {}) },
       failure: failure ?? null,
       aom_canonical_names: links,
-      history: history.map(rowToScore).reverse(), // oldest → newest for charts
+      history: history.map(rowToScore).map(withHfs).reverse(), // oldest → newest for charts
     }
     setCached(key, body, DEFAULT_TTL_MS)
     res.setHeader('X-BS-Cache', 'MISS')

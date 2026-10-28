@@ -51,6 +51,11 @@ export const GLOSSARY: Record<string, MetricDef> = {
     howCalculated: 'Flag 5 (provision coverage under 1x two quarters running or a provision spike) AND flag 6 (CRE net charge-offs up two consecutive quarters) AND flag 8 (loss on loan or OREO sales this quarter).',
     whyValuable: 'The strongest single indicator on the page that a bank is actively disposing of distressed CRE, not just carrying it. These are the first calls to make.',
   },
+  'bank-stress:Held for sale (4Q)': {
+    definition: 'Loans the bank has marked for sale rather than holding to maturity, at the end of each of the latest four quarters: four bars oldest to newest, the latest balance, its share of gross loans, the direction over the four quarters, and the part that is 90+ days late or on nonaccrual.',
+    howCalculated: 'Balance from the Call Report (FDIC field LNLSSALE, Schedule RC 4.a), share = balance / gross loans. "Troubled" = 90+ days past due plus nonaccrual within held for sale (P9LNSALE + NALNSALE). The FDIC publishes no breakdown of held-for-sale by loan type, so this is the whole balance; CRE nonaccruals falling in the same quarter is the way to infer that CRE is what is moving. Sort by this column for the latest share of loans.',
+    whyValuable: 'A jump in held for sale is the earliest public sign that a bank has decided to sell loans: accounting rules require the move once the intent to sell exists, before any pool is marketed. A jump together with a loss on loan sales is a discount trade. Banks that always run a mortgage pipeline carry a steady balance, so look for the change, not the level.',
+  },
   'bank-stress:CRE / T1': {
     definition: 'Commercial real estate loans as a percentage of Tier 1 capital.',
     howCalculated: '(Construction and land development + multifamily + non-owner-occupied nonfarm nonresidential loans) / Tier 1 capital. Owner-occupied commercial property is excluded under the interagency definition, because it repays from the occupant\'s business rather than rents or a sale.',
