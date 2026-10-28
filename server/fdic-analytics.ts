@@ -515,6 +515,21 @@ function buildBehavior(db: Database.Database, meta: Meta, cert: number, name: st
 
 // ── routes ──────────────────────────────────────────────────────────────────
 
+/**
+ * The screening rows for a scope, for server-side joins (the Legal Landscape's
+ * "who does this rule hit" count). Same rows the /api/fdic/screening route
+ * serves, without the HTTP round trip or the response cache.
+ */
+export function screeningUniverse(scope: string): { rows: ReturnType<typeof screeningRow>[]; rawRowCount: number; quarter: string } | null {
+  const db = openBankStressDb()
+  const meta = db && latestMeta(db)
+  if (!db || !meta) return null
+  const resolved = resolveScope(stateScopes(db, meta.latest_quarter), scope)
+  if (!resolved) return null
+  const payload = buildScreening(db, meta, resolved.stalp)
+  return { rows: payload.rows, rawRowCount: payload.rawRowCount, quarter: meta.latest_quarter }
+}
+
 export function registerFdicAnalyticsRoutes(app: Express) {
   app.get('/api/fdic/behavior-signals', (req: Request, res: Response) => {
     const db = openBankStressDb()
