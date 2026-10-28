@@ -181,7 +181,7 @@ Steps 1–4: about a week, leaving a usable merged tool. Step 5 is optional per 
 | 2 | Node: relax MI's `engines` pin, or upgrade droplet to Node 24 | Relax (recommended) / upgrade | **open** |
 | 3 | Postgres: local on the droplet, or free Neon | Local (one less account) / Neon (zero ops) | **open** |
 | 4 | Invite `enriquec012@outlook.com`'s GitHub identity to `market-intelligence-tool` | — | **open** |
-| 5 | Confirm the order: steps 1–4 first, step 5 per tab afterwards | yes / change | **open** |
+| 5 | Confirm the order: steps 1–4 first, step 5 per tab afterwards | yes / change | ✅ **confirmed by the owner, 28 Oct 2026** |
 | 6 | Which of News / Legal / Market Research are worth porting at all, vs leaving in the co-hosted app | per tab | **open — decide after step 4** |
 
 ---
@@ -196,5 +196,6 @@ Steps 1–4: about a week, leaving a usable merged tool. Step 5 is optional per 
 - Decided co-host-first (section 2), wrote the five steps (section 3), effort (4), risks (5), and the
   six open decisions (6). Saved the plan to Claude's memory so future sessions start here.
 - No code, no production change, no Vercel change.
-- **Next:** owner answers decisions 1–5; then step 1 on the droplet (needs the repo invite and a deploy
+- **Owner confirmed decision 5 (the order) the same day.** Decisions 1–4 and 6 remain open.
+- **Next:** owner answers decisions 1–4; then step 1 on the droplet (needs the repo invite and a deploy
   key for the private repo).
