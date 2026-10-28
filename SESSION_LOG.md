@@ -4,6 +4,48 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-10-28 — Overnight stage 4 ROLLED ITSELF BACK (verify bug, production fine); CFN lookup on every document table; hover definitions on every column header
+
+**Overnight result (log `collector/stage4_overnight.log`, 06:00:01–06:00:54 UTC):** pulled 6dadd98, removed the
+`MI_*` lines, built (1,058,456 B), started PM2 fresh — then `verify: sign-in 200` → `ROLLING BACK` → restored
+`.env`, the 16:31 bundle and `ec79275`, started PM2 with the MI keys → `verify: sign-in 200` again →
+`ROLLBACK VERIFY FAILED`. **Root cause: the check, not the deploy.** `verify()` read `AMO_PASSWORD` with
+`grep | cut`, but `.env` stores values shell-quoted (`AMO_PASSWORD='…'`, the 26 Oct `shlex.quote` copy), so the
+test sign-in posted a quoted string and got the login page (200) instead of 302. Everything else had worked.
+**Production at 12:40 UTC, checked with a sourced `.env`:** sign-in 302, `/api/fdic/meta`, `/api/bank-stress/meta`,
+`/api/chat/config`, `/api/entity-nodes` all 200, PM2 online (restart #1 = the 08:30 nightly's), running the
+restored 1,060,857-byte bundle with the MI keys still in the env and in `.env` — i.e. exactly yesterday's state.
+The one-shot cron line was still installed (a rollback exit skipped the removal and `0 6 28 10 *` would fire
+again next year) → removed by hand 12:41 UTC. Also hit the Mac ssh-agent trap again (`ssh-add --apple-load-keychain`).
+
+- **Script fixed (`stage4_overnight.sh`):** `env_password()` sources `.env` in a subshell; `--check` now RUNS
+  `verify()` against the current server and refuses to pass unless sign-in is 302 and every API family is 200,
+  so the schedule can no longer be armed with a broken check; the rollback path removes the cron line too;
+  the "(CHECK MODE)" label bug fixed. Re-armed for **29 Oct 06:00 UTC (02:00 EDT)** after `--check` passed on
+  the droplet. Tonight's run also carries today's CFN/tooltip changes (same pull), so there is no daytime restart.
+- **CFN lookup on every table that brings in documents** (owner's ask): server `cfn` substring filter (case-
+  insensitive) on `/api/assignments`, `/api/clean-events`, `/api/credit-facility-events` (+ `/filings` and the
+  grouped `/facilities` via `queryGroupedFacilities`), `/api/private-credit` (two new prepared statements,
+  `privateCreditTotalCfn` / `privateCreditRowsCfn`); client CFN inputs on Raw Assignments, Clean Transactions,
+  Lending Relationships (also narrows the expanded filing history and the CSV export) and Private Credit (new
+  filter row); Collection Log's "not in the tool" table gets a client-side instrument filter; Reporting and
+  UCC already searched CFN (verified to the LIKE clause). Verified: Raw Assignments `2024R1` → 1,581 of 52,906
+  on the page and the API; `/facilities?cfn=2024R` 2 → 1 relationship.
+- **Hover definitions on every column header** (owner's ask): `client/src/lib/glossary/<page>.ts`, one file per
+  page, keys `"<page>:<Label>"`, merged by `glossary/index.ts`; `DefTerm` falls back to it after the FDIC glossary.
+  119 entries, each with Definition / How calculated / Why it matters, written against the Confluence page
+  descriptions and the server handlers: assignments 7, clean-events 10, reporting 12, ucc 11 (incl. the four
+  summary tiles), credit-facilities 14, private-credit 8, collection-log 19, entities 6, targets 7, bank-stress 14.
+  BankStress's `title=` attributes replaced by DefTerm; Entities' info-icon tooltips folded into the glossary.
+  Built by four parallel sub-agents, one group of pages each; `tsc` clean; verified in the browser on Raw
+  Assignments (dashed-underline headers, tooltip renders the three parts).
+- **User guide written** (owner's ask, for a colleague): Claude Doc "Bank Stress Ranking — User Guide"
+  (https://claude.ai/artifact/UK5DbaSU9U5KdCRQks9SaX): purpose, data source, how to use, the 14 calculation
+  steps with the year-to-date worked example, the measures per sub-score, flags/tiers/badge, capital types,
+  why we rank this way, safeguards and limits, the companion tab's seven signals, glossary.
+
+---
+
 ## 2026-10-27 (last) — STAGE 4 BUILT; production step SCHEDULED for 28 Oct 06:00 UTC (02:00 ET) — check the log first thing
 
 Owner: "lets go to stage 4", then "do that overnight … without impacting today's usage."
