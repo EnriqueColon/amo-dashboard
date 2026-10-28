@@ -53,25 +53,10 @@ git fetch -q origin main || die "git fetch failed"
 TARGET=$(git rev-parse origin/main)
 log "origin/main = ${TARGET:0:7}; local = $(git rev-parse --short HEAD)"
 git merge-base --is-ancestor HEAD "$TARGET" || die "local HEAD is not an ancestor of origin/main — someone committed on the droplet"
-if [ "$CHECK" = 1 ]; then
-    # Prove the verification itself against the running server: the 28 Oct 06:00 run
-    # failed only because verify() read a shell-quoted password with `cut`.
-    if verify; then
-        log "CHECK OK: verify() passes against the current server (sign-in 302, all API families 200); PM2 holds $KEEP_KEYS; would pull to ${TARGET:0:7}, drop MI_* from .env and PM2, build, restart fresh, verify."
-        exit 0
-    else
-        die "CHECK FAILED: verify() does not pass against the CURRENT server — fix that before scheduling"
-    fi
-fi
+# (the --check exit is below, after the functions it needs are defined)
 
 # ── capture current state for rollback ───────────────────────────────────────
-cp .env ".env.before_stage4.$TS" && chmod 600 ".env.before_stage4.$TS"
-cp dist/index.cjs "/root/index.cjs.before_stage4.$TS"
-PREV_HEAD=$(git rev-parse HEAD)
 declare -A KEEP
-for k in $KEEP_KEYS; do KEEP[$k]=$(pm2_env_value "$k"); done
-OLD_MI_BASE=$(pm2_env_value MI_BASE_URL); OLD_MI_KEY=$(pm2_env_value MI_ANALYTICS_API_KEY)
-log "captured .env, dist and PM2 env (backups: .env.before_stage4.$TS, /root/index.cjs.before_stage4.$TS)"
 
 start_pm2() {  # $1 = "with-mi" | "without-mi"
     pm2 delete amo-dashboard >/dev/null 2>&1 || true
@@ -121,6 +106,25 @@ rollback() {
     remove_cron_line
     exit 1
 }
+
+if [ "$CHECK" = 1 ]; then
+    # Prove the verification itself against the running server: the 28 Oct 06:00 run
+    # failed only because verify() read a shell-quoted password with `cut`.
+    if verify; then
+        log "CHECK OK: verify() passes against the current server (sign-in 302, all API families 200); PM2 holds $KEEP_KEYS; would pull to ${TARGET:0:7}, drop MI_* from .env and PM2, build, restart fresh, verify."
+        exit 0
+    else
+        die "CHECK FAILED: verify() does not pass against the CURRENT server — fix that before scheduling"
+    fi
+fi
+
+# ── capture current state for rollback ───────────────────────────────────────
+cp .env ".env.before_stage4.$TS" && chmod 600 ".env.before_stage4.$TS"
+cp dist/index.cjs "/root/index.cjs.before_stage4.$TS"
+PREV_HEAD=$(git rev-parse HEAD)
+for k in $KEEP_KEYS; do KEEP[$k]=$(pm2_env_value "$k"); done
+OLD_MI_BASE=$(pm2_env_value MI_BASE_URL); OLD_MI_KEY=$(pm2_env_value MI_ANALYTICS_API_KEY)
+log "captured .env, dist and PM2 env (backups: .env.before_stage4.$TS, /root/index.cjs.before_stage4.$TS)"
 
 # ── the change ───────────────────────────────────────────────────────────────
 git checkout -- package-lock.json 2>/dev/null || true
