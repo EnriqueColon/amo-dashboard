@@ -8,6 +8,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { FilterHint } from '@/components/FilterHint';
+import { DefTerm } from '@/components/DefTerm';
 import { FACILITY_TYPE_DEFS } from '@/lib/filterDefinitions';
 
 const FACILITY_TYPE_META: Record<string, { label: string; color: string }> = {
@@ -154,11 +155,14 @@ function FamilyMembers({ row, renderRow }: { row: any; renderRow: (r: any, neste
 }
 
 // Filing history panel shown when a facility relationship row is expanded.
-function FilingHistory({ row }: { row: any }) {
+// `cfn` is the page's applied CFN filter: when set, the history is narrowed
+// to filings whose clerk file number contains it.
+function FilingHistory({ row, cfn = '' }: { row: any; cfn?: string }) {
   const [quoteCfn, setQuoteCfn] = useState<string | null>(null);
-  const qs = `?lender=${encodeURIComponent(row.lender_key || '')}&borrower=${encodeURIComponent(row.borrower_key || '')}`;
+  const qs = `?lender=${encodeURIComponent(row.lender_key || '')}&borrower=${encodeURIComponent(row.borrower_key || '')}` +
+    (cfn ? `&cfn=${encodeURIComponent(cfn)}` : '');
   const { data, isLoading } = useQuery({
-    queryKey: ['/api/credit-facility-events/filings', row.lender_key, row.borrower_key],
+    queryKey: ['/api/credit-facility-events/filings', row.lender_key, row.borrower_key, cfn],
     queryFn: () => apiRequest('GET', `/api/credit-facility-events/filings${qs}`).then(r => r.json()),
   });
   const filings = (data as any[]) || [];
@@ -215,13 +219,13 @@ function FilingHistory({ row }: { row: any }) {
         <table className="w-full text-[11px]">
           <thead>
             <tr className="text-muted-foreground border-b border-border/50">
-              <th className="py-1.5 pr-3 text-left font-medium">Recorded</th>
-              <th className="py-1.5 pr-3 text-left font-medium">CFN</th>
-              <th className="py-1.5 pr-3 text-left font-medium">Document</th>
-              <th className="py-1.5 pr-3 text-left font-medium">Direction</th>
-              <th className="py-1.5 pr-3 text-left font-medium">Assignor → Assignee</th>
-              <th className="py-1.5 pr-3 text-left font-medium">Property</th>
-              <th className="py-1.5 pr-3 text-right font-medium">Mortgage</th>
+              <th className="py-1.5 pr-3 text-left font-medium"><DefTerm term="credit-facilities:Recorded">Recorded</DefTerm></th>
+              <th className="py-1.5 pr-3 text-left font-medium"><DefTerm term="credit-facilities:CFN">CFN</DefTerm></th>
+              <th className="py-1.5 pr-3 text-left font-medium"><DefTerm term="credit-facilities:Document">Document</DefTerm></th>
+              <th className="py-1.5 pr-3 text-left font-medium"><DefTerm term="credit-facilities:Direction">Direction</DefTerm></th>
+              <th className="py-1.5 pr-3 text-left font-medium"><DefTerm term="credit-facilities:Assignor → Assignee">Assignor → Assignee</DefTerm></th>
+              <th className="py-1.5 pr-3 text-left font-medium"><DefTerm term="credit-facilities:Property">Property</DefTerm></th>
+              <th className="py-1.5 pr-3 text-right font-medium"><DefTerm term="credit-facilities:Mortgage">Mortgage</DefTerm></th>
               <th className="py-1.5 w-6"></th>
             </tr>
           </thead>
@@ -332,11 +336,12 @@ function StatCard({ label, value, sub, info }: { label: string; value: string; s
 interface Filters {
   lender: string;
   borrower: string;
+  cfn: string;
   facility_type: string;
   start_date: string;
   end_date: string;
 }
-const EMPTY: Filters = { lender: '', borrower: '', facility_type: '', start_date: '', end_date: '' };
+const EMPTY: Filters = { lender: '', borrower: '', cfn: '', facility_type: '', start_date: '', end_date: '' };
 
 export default function CreditFacilities() {
   const [draft, setDraft] = useState<Filters>(EMPTY);
@@ -383,7 +388,7 @@ export default function CreditFacilities() {
         {expandedKey === k && (
           <tr className="border-b border-border/50 bg-muted/10">
             <td colSpan={7} className="px-4 py-3">
-              <FilingHistory row={r} />
+              <FilingHistory row={r} cfn={applied.cfn} />
             </td>
           </tr>
         )}
@@ -408,6 +413,7 @@ export default function CreditFacilities() {
   };
 
   const filterQs = `?lender=${encodeURIComponent(applied.lender)}&borrower=${encodeURIComponent(applied.borrower)}` +
+    `&cfn=${encodeURIComponent(applied.cfn)}` +
     `&facility_type=${encodeURIComponent(applied.facility_type)}&start_date=${applied.start_date}&end_date=${applied.end_date}`;
   const sortQs = sort ? `&sort=${sort.key}&dir=${sort.dir}` : '';
   const qs = `${filterQs}&page=${page}&limit=50${sortQs}`;
@@ -531,7 +537,7 @@ export default function CreditFacilities() {
         </div>
 
         <div className="bg-card border border-border rounded-lg p-4">
-          <h2 className="text-sm font-semibold text-foreground mb-1">Top Lenders</h2>
+          <h2 className="text-sm font-semibold text-foreground mb-1"><DefTerm term="credit-facilities:Top Lenders">Top Lenders</DefTerm></h2>
           <p className="text-[10px] text-muted-foreground mb-3">Ranked by number of filings — click to filter the table</p>
           <div className="space-y-2">
             {(topLenders as any[] || []).slice(0, 8).map((row, i) => (
@@ -559,7 +565,7 @@ export default function CreditFacilities() {
 
       {/* Filters — a real <form> so Enter in any field applies, like every search box */}
       <div className="bg-card border border-border rounded-lg p-4 space-y-3">
-        <form onSubmit={e => { e.preventDefault(); apply(); }} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+        <form onSubmit={e => { e.preventDefault(); apply(); }} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
           <div>
             <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Lender</label>
             <Input placeholder="e.g. City National Bank" value={draft.lender}
@@ -569,6 +575,12 @@ export default function CreditFacilities() {
             <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Borrower</label>
             <Input placeholder="e.g. Vaster Loans" value={draft.borrower}
               onChange={e => setDraft(d => ({ ...d, borrower: e.target.value }))} className="h-8 text-xs mt-1" />
+          </div>
+          <div>
+            <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">CFN</label>
+            <Input placeholder="e.g. 2026R521735" value={draft.cfn}
+              onChange={e => setDraft(d => ({ ...d, cfn: e.target.value }))} className="h-8 text-xs mt-1 font-mono"
+              title="Clerk file number — matches any part of the number" />
           </div>
           <div>
             <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">From</label>
@@ -639,7 +651,7 @@ export default function CreditFacilities() {
                   >
                     <span className="inline-flex items-center gap-0.5">
                       {align === 'right' && sort?.key === key && (sort.dir === 'desc' ? <ChevronDown size={11} /> : <ChevronUp size={11} />)}
-                      {label}
+                      <DefTerm term={`credit-facilities:${label}`}>{label}</DefTerm>
                       {align !== 'right' && sort?.key === key && (sort.dir === 'desc' ? <ChevronDown size={11} /> : <ChevronUp size={11} />)}
                     </span>
                   </th>

@@ -301,6 +301,31 @@ export async function registerRoutes(httpServer: Server, app: Express) {
         AND ${countyPredicate('c.')}
       ORDER BY c.rec_date DESC LIMIT :limit OFFSET :offset
     `),
+    // Same two queries with a CFN substring filter (the page's CFN lookup, 28 Oct 2026).
+    privateCreditTotalCfn: db.prepare(`
+      SELECT COUNT(*) as n FROM aom_events_clean
+      WHERE (assignor_type='PRIVATE_CREDIT' OR assignee_type='PRIVATE_CREDIT')
+        AND txn_type != 'SELF_ASSIGN'
+        AND UPPER(cfn) LIKE UPPER(:cfn)
+        AND ${countyPredicate()}
+    `),
+    privateCreditRowsCfn: db.prepare(`
+      SELECT c.cfn, c.rec_date,
+             c.assignor  AS grantor, c.assignee  AS grantee,
+             c.assignor_canon, c.assignee_canon,
+             c.assignor_type AS grantor_category,
+             c.assignee_type AS grantee_category,
+             c.txn_type,
+             c.county,
+             a.address
+      FROM aom_events_clean c
+      LEFT JOIN assignments a ON c.cfn = a.cfn
+      WHERE (c.assignor_type='PRIVATE_CREDIT' OR c.assignee_type='PRIVATE_CREDIT')
+        AND c.txn_type != 'SELF_ASSIGN'
+        AND UPPER(c.cfn) LIKE UPPER(:cfn)
+        AND ${countyPredicate('c.')}
+      ORDER BY c.rec_date DESC LIMIT :limit OFFSET :offset
+    `),
     privateCreditTopGrantees: db.prepare(`
       SELECT assignee_canon AS name, COUNT(*) AS count
       FROM aom_events_clean
@@ -601,6 +626,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   // no more UNCLASSIFIED for known entities.
   app.get('/api/assignments', (req, res) => {
     const { grantor, grantee, start_date, end_date, page = '1', limit = '50' } = req.query as Record<string, string>;
+    const cfn = typeof req.query.cfn === 'string' ? req.query.cfn.trim() : '';
     const category = req.query['category'] as string | string[] | undefined;
     const pageNum = Math.max(1, parseInt(page));
     const limitNum = Math.min(parseInt(limit) || 50, 500);
@@ -611,7 +637,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       : (req.query['category[]'] ? (Array.isArray(req.query['category[]']) ? req.query['category[]'] : [req.query['category[]']]) : []);
 
     const county = countyScope(req as any);
-    const cacheKey = makeCacheKey('/api/assignments', { grantor, grantee, start_date, end_date, categories, page, limit, county: county ?? 'ALL' });
+    const cacheKey = makeCacheKey('/api/assignments', { grantor, grantee, cfn, start_date, end_date, categories, page, limit, county: county ?? 'ALL' });
     const cached = getCached(cacheKey);
     if (cached) return res.json(cached);
 
@@ -624,6 +650,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     if (county) { where.push(`COALESCE(a.county, '${DEFAULT_COUNTY}') = ?`); params.push(county); }
     if (grantor)    { where.push("UPPER(a.grantor) LIKE UPPER(?)"); params.push(`%${grantor}%`); }
     if (grantee)    { where.push("UPPER(a.grantee) LIKE UPPER(?)"); params.push(`%${grantee}%`); }
+    if (cfn)        { where.push("UPPER(a.cfn) LIKE UPPER(?)"); params.push(`%${cfn}%`); }
     if (start_date) { where.push("a.rec_date >= ?"); params.push(start_date); }
     if (end_date)   { where.push("a.rec_date <= ?"); params.push(end_date); }
     if (categories.length > 0) {
@@ -915,15 +942,20 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   // ─── GET /api/private-credit ──────────────────────────────────────────────
   app.get('/api/private-credit', (req, res) => {
     const { page = '1', limit = '50' } = req.query as Record<string, string>;
+    const cfn = typeof req.query.cfn === 'string' ? req.query.cfn.trim() : '';
     const pageNum  = Math.max(1, parseInt(page));
     const limitNum = Math.min(parseInt(limit) || 50, 500);
     const offset   = (pageNum - 1) * limitNum;
     const county   = countyScope(req as any);
-    const cacheKey = makeCacheKey('/api/private-credit', { page, limit, county: county ?? 'ALL' });
+    const cacheKey = makeCacheKey('/api/private-credit', { page, limit, cfn, county: county ?? 'ALL' });
     const cached = getCached(cacheKey);
     if (cached) return res.json(cached);
-    const total = (stmts.privateCreditTotal.get({ county }) as any).n;
-    const rows  = stmts.privateCreditRows.all({ county, limit: limitNum, offset });
+    const total = cfn
+      ? (stmts.privateCreditTotalCfn.get({ county, cfn: `%${cfn}%` }) as any).n
+      : (stmts.privateCreditTotal.get({ county }) as any).n;
+    const rows  = cfn
+      ? stmts.privateCreditRowsCfn.all({ county, cfn: `%${cfn}%`, limit: limitNum, offset })
+      : stmts.privateCreditRows.all({ county, limit: limitNum, offset });
     const payload = { total, page: pageNum, limit: limitNum, pages: Math.ceil(total / limitNum), rows };
     setCached(cacheKey, payload);
     res.json(payload);
@@ -1035,12 +1067,13 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   // Supports: assignor, assignee, start_date, end_date, txn_type, page, limit
   app.get('/api/clean-events', (req, res) => {
     const { assignor, assignee, start_date, end_date, txn_type, page = '1', limit = '50' } = req.query as Record<string, string>;
+    const cfn = typeof req.query.cfn === 'string' ? req.query.cfn.trim() : '';
     const pageNum = Math.max(1, parseInt(page));
     const limitNum = Math.min(parseInt(limit) || 50, 500);
     const offset = (pageNum - 1) * limitNum;
 
     const county = countyScope(req as any);
-    const cacheKey = makeCacheKey('/api/clean-events', { assignor, assignee, start_date, end_date, txn_type, page, limit, county: county ?? 'ALL' });
+    const cacheKey = makeCacheKey('/api/clean-events', { assignor, assignee, cfn, start_date, end_date, txn_type, page, limit, county: county ?? 'ALL' });
     const cached = getCached(cacheKey);
     if (cached) return res.json(cached);
 
@@ -1049,6 +1082,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     if (county)      { where.push(`COALESCE(county, '${DEFAULT_COUNTY}') = ?`); params.push(county); }
     if (assignor)    { where.push("UPPER(assignor_canon) LIKE UPPER(?)"); params.push(`%${assignor}%`); }
     if (assignee)    { where.push("UPPER(assignee_canon) LIKE UPPER(?)"); params.push(`%${assignee}%`); }
+    if (cfn)         { where.push("UPPER(cfn) LIKE UPPER(?)"); params.push(`%${cfn}%`); }
     if (start_date)  { where.push("rec_date >= ?"); params.push(start_date); }
     if (end_date)    { where.push("rec_date <= ?"); params.push(end_date); }
     if (txn_type)    { where.push("txn_type = ?"); params.push(txn_type.toUpperCase()); }
@@ -1076,12 +1110,13 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   // and collector/normalize.py, which builds this table).
   app.get('/api/credit-facility-events', (req, res) => {
     const { lender, borrower, facility_type, start_date, end_date, page = '1', limit = '50' } = req.query as Record<string, string>;
+    const cfn = typeof req.query.cfn === 'string' ? req.query.cfn.trim() : '';
     const pageNum = Math.max(1, parseInt(page));
     const limitNum = Math.min(parseInt(limit) || 50, 500);
     const offset = (pageNum - 1) * limitNum;
 
     const county = countyScope(req as any);
-    const cacheKey = makeCacheKey('/api/credit-facility-events', { lender, borrower, facility_type, start_date, end_date, page, limit, county: county ?? 'ALL' });
+    const cacheKey = makeCacheKey('/api/credit-facility-events', { lender, borrower, cfn, facility_type, start_date, end_date, page, limit, county: county ?? 'ALL' });
     const cached = getCached(cacheKey);
     if (cached) return res.json(cached);
 
@@ -1090,6 +1125,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     if (county)        { where.push(`COALESCE(county, '${DEFAULT_COUNTY}') = ?`); params.push(county); }
     if (lender)        { where.push("UPPER(facility_lender_name) LIKE UPPER(?)"); params.push(`%${lender}%`); }
     if (borrower)      { where.push("UPPER(facility_borrower_name) LIKE UPPER(?)"); params.push(`%${borrower}%`); }
+    if (cfn)           { where.push("UPPER(cfn) LIKE UPPER(?)"); params.push(`%${cfn}%`); }
     if (facility_type) { where.push("facility_type = ?"); params.push(facility_type); }
     if (start_date)    { where.push("rec_date >= ?"); params.push(start_date); }
     if (end_date)      { where.push("rec_date <= ?"); params.push(end_date); }
@@ -1118,6 +1154,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   // from it, so the pair — not the filing — is the real unit of interest.
   app.get('/api/credit-facility-events/facilities', (req, res) => {
     const { lender, borrower, facility_type, start_date, end_date, page = '1', limit = '50', sort = '', dir = '' } = req.query as Record<string, string>;
+    const cfn = typeof req.query.cfn === 'string' ? req.query.cfn.trim() : '';
     const pageNum = Math.max(1, parseInt(page));
     // Cap is generous (5000) because the client's CSV export pulls the whole
     // filtered set in one request; the grouped query is cheap.
@@ -1125,14 +1162,14 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const offset = (pageNum - 1) * limitNum;
 
     const county = countyScope(req as any);
-    const cacheKey = makeCacheKey('/api/credit-facility-events/facilities', { lender, borrower, facility_type, start_date, end_date, page, limit, sort, dir, county: county ?? 'ALL' });
+    const cacheKey = makeCacheKey('/api/credit-facility-events/facilities', { lender, borrower, cfn, facility_type, start_date, end_date, page, limit, sort, dir, county: county ?? 'ALL' });
     const cached = getCached(cacheKey);
     if (cached) return res.json(cached);
 
     // Grouping query (relationship pairs, corporate-family aware) lives in
     // server/lending/facilities.ts — shared with the weekly emailed report.
     const { total, totalFilings, rows } = queryGroupedFacilities(db, {
-      county, lender, borrower, facilityType: facility_type,
+      county, lender, borrower, cfn, facilityType: facility_type,
       startDate: start_date, endDate: end_date, sort, dir,
       limit: limitNum, offset,
     });
@@ -1164,9 +1201,10 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   // UPPER()'d keys returned by /facilities (empty string = extracted as null).
   app.get('/api/credit-facility-events/filings', (req, res) => {
     const { lender = '', borrower = '' } = req.query as Record<string, string>;
+    const cfn = typeof req.query.cfn === 'string' ? req.query.cfn.trim() : '';
     const county = countyScope(req as any);
     const cf = countyFilter(county, 'e.');
-    const cacheKey = makeCacheKey('/api/credit-facility-events/filings', { lender, borrower, county: county ?? 'ALL' });
+    const cacheKey = makeCacheKey('/api/credit-facility-events/filings', { lender, borrower, cfn, county: county ?? 'ALL' });
     const cached = getCached(cacheKey);
     if (cached) return res.json(cached);
 
@@ -1194,9 +1232,10 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       LEFT JOIN pdf_extractions px ON px.cfn = e.cfn
       WHERE COALESCE(e.lender_key, UPPER(COALESCE(e.facility_lender_name, '')))     = ?
         AND COALESCE(e.borrower_key, UPPER(COALESCE(e.facility_borrower_name, ''))) = ?
+        AND (? = '' OR UPPER(e.cfn) LIKE UPPER(?))
         ${cf.sql}
       ORDER BY e.rec_date DESC
-    `).all(lender.toUpperCase(), borrower.toUpperCase(), ...cf.params) as any[];
+    `).all(lender.toUpperCase(), borrower.toUpperCase(), cfn, `%${cfn}%`, ...cf.params) as any[];
 
     const enriched = rows.map(r => {
       if (r.loan_amount != null) return { ...r, loan_amount_source: 'structured' };

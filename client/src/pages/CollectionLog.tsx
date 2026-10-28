@@ -1,6 +1,8 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import { Skeleton } from '@/components/ui/skeleton';
+import { DefTerm } from '@/components/DefTerm';
 import { documentUrl } from '@/lib/doc-url';
 import {
   CheckCircle, AlertTriangle, XCircle, MinusCircle, ClipboardList, ShieldCheck, ShieldAlert,
@@ -109,19 +111,19 @@ function CountyProof({ row, all, lastCollected }: {
       </div>
 
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
-        <dt className="text-muted-foreground">Verified through</dt>
+        <dt className="text-muted-foreground"><DefTerm term="collection-log:Verified through">Verified through</DefTerm></dt>
         <dd className="font-mono">{fmtDay(row?.verified_through ?? all?.last_day)}</dd>
-        <dt className="text-muted-foreground">Last checked</dt>
+        <dt className="text-muted-foreground"><DefTerm term="collection-log:Last checked">Last checked</DefTerm></dt>
         <dd>{fmtWhen(row?.last_checked)}{row?.hours_since_check != null && <span className="text-muted-foreground"> ({row.hours_since_check}h ago)</span>}</dd>
-        <dt className="text-muted-foreground">Last collected</dt>
+        <dt className="text-muted-foreground"><DefTerm term="collection-log:Last collected">Last collected</DefTerm></dt>
         <dd>{fmtWhen(lastCollected)}</dd>
-        <dt className="text-muted-foreground">Last 30 days</dt>
+        <dt className="text-muted-foreground"><DefTerm term="collection-log:Last 30 days">Last 30 days</DefTerm></dt>
         <dd className="tabular-nums">
           {verified30} of {checked30} day-checks verified
           {(row?.short ?? 0) > 0 && <span className="text-red-600"> · {row!.short} short</span>}
           {(row?.unknown ?? 0) > 0 && <span className="text-amber-600"> · {row!.unknown} unverifiable</span>}
         </dd>
-        <dt className="text-muted-foreground">Since {fmtDay(all?.first_day)}</dt>
+        <dt className="text-muted-foreground"><DefTerm term="collection-log:Since">Since {fmtDay(all?.first_day)}</DefTerm></dt>
         <dd className="tabular-nums">
           {allVerified.toLocaleString()} of {(all?.checks ?? 0).toLocaleString()} day-checks verified
           {(all?.short ?? 0) > 0 && <span className="text-red-600"> · {all!.short} short</span>}
@@ -144,6 +146,9 @@ function MissingLink({ county, cfn }: { county: string; cfn: string }) {
 }
 
 function CompletenessProof() {
+  // Client-side filter over the "not in the tool" table: an analyst checking one
+  // instrument against the county should not have to scan every row for it.
+  const [cfnFilter, setCfnFilter] = useState('');
   const { data, isLoading } = useQuery<Coverage>({
     queryKey: ['/api/qc/coverage'],
     queryFn: () => apiRequest('GET', '/api/qc/coverage').then(r => r.json()),
@@ -163,6 +168,15 @@ function CompletenessProof() {
   const exceptions = data.exceptions ?? [];
   const shortRows = exceptions.filter(e => e.status === 'SHORT');
   const otherRows = exceptions.filter(e => e.status !== 'SHORT');
+  const cfnQuery = cfnFilter.trim().toUpperCase();
+  const matchesCfn = (cfn: string) => cfn.toUpperCase().includes(cfnQuery);
+  // When a filter is typed, keep only the rows holding a matching instrument and
+  // show just the matching instruments in them (the row normally caps at 12).
+  const shortShown = cfnQuery
+    ? shortRows
+        .filter(e => e.missing_cfns.some(matchesCfn))
+        .map(e => ({ ...e, missing_cfns: e.missing_cfns.filter(matchesCfn) }))
+    : shortRows;
 
   return (
     <div className="space-y-3" data-testid="completeness-proof">
@@ -184,23 +198,40 @@ function CompletenessProof() {
 
       {shortRows.length > 0 && (
         <div className="rounded-lg border border-red-500/40 bg-red-500/5 overflow-hidden">
-          <div className="px-3 py-2 text-xs font-semibold text-red-600">
-            Documents the county lists that are not in the tool — {shortRows.length} day{shortRows.length === 1 ? '' : 's'}
+          <div className="flex items-center justify-between gap-3 flex-wrap px-3 py-2">
+            <div className="text-xs font-semibold text-red-600">
+              Documents the county lists that are not in the tool — {shortRows.length} day{shortRows.length === 1 ? '' : 's'}
+              {cfnQuery && <span className="font-normal text-muted-foreground"> · {shortShown.length} matching</span>}
+            </div>
+            <input
+              type="text"
+              value={cfnFilter}
+              onChange={e => setCfnFilter(e.target.value)}
+              placeholder="Filter by instrument / CFN…"
+              aria-label="Filter missing instruments by instrument or CFN"
+              data-testid="missing-cfn-filter"
+              className="h-7 w-56 rounded border border-border bg-background px-2 font-mono text-xs placeholder:font-sans placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+            />
           </div>
           <table className="w-full text-xs">
             <thead className="border-y border-border bg-muted/20 text-muted-foreground">
               <tr>
-                <th className="px-3 py-1.5 text-left font-medium">County</th>
-                <th className="px-3 py-1.5 text-left font-medium">Recording day</th>
-                <th className="px-3 py-1.5 text-left font-medium">Type</th>
-                <th className="px-3 py-1.5 text-right font-medium">County</th>
-                <th className="px-3 py-1.5 text-right font-medium">Ours</th>
-                <th className="px-3 py-1.5 text-left font-medium">Missing instruments</th>
-                <th className="px-3 py-1.5 text-left font-medium">Checked</th>
+                <th className="px-3 py-1.5 text-left font-medium"><DefTerm term="collection-log:County">County</DefTerm></th>
+                <th className="px-3 py-1.5 text-left font-medium"><DefTerm term="collection-log:Recording day">Recording day</DefTerm></th>
+                <th className="px-3 py-1.5 text-left font-medium"><DefTerm term="collection-log:Type">Type</DefTerm></th>
+                <th className="px-3 py-1.5 text-right font-medium"><DefTerm term="collection-log:County listed">County</DefTerm></th>
+                <th className="px-3 py-1.5 text-right font-medium"><DefTerm term="collection-log:Ours">Ours</DefTerm></th>
+                <th className="px-3 py-1.5 text-left font-medium"><DefTerm term="collection-log:Missing instruments">Missing instruments</DefTerm></th>
+                <th className="px-3 py-1.5 text-left font-medium"><DefTerm term="collection-log:Checked">Checked</DefTerm></th>
               </tr>
             </thead>
             <tbody>
-              {shortRows.map(e => (
+              {cfnQuery && shortShown.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="px-3 py-4 text-center text-muted-foreground">No missing instrument contains “{cfnFilter.trim()}”</td>
+                </tr>
+              )}
+              {shortShown.map(e => (
                 <tr key={`${e.county}|${e.rec_date}|${e.doc_type}`} className="border-b border-border/50">
                   <td className="px-3 py-1.5">{LABEL[e.county] ?? e.county}</td>
                   <td className="px-3 py-1.5 font-mono">{e.rec_date}</td>
@@ -226,6 +257,16 @@ function CompletenessProof() {
             {otherRows.length} day-check{otherRows.length === 1 ? '' : 's'} in the last 30 days that could not be verified or where we hold more than the county lists
           </summary>
           <table className="w-full text-xs">
+            <thead className="border-t border-border bg-muted/20 text-muted-foreground">
+              <tr>
+                <th className="px-3 py-1.5 text-left font-medium"><DefTerm term="collection-log:County">County</DefTerm></th>
+                <th className="px-3 py-1.5 text-left font-medium"><DefTerm term="collection-log:Recording day">Recording day</DefTerm></th>
+                <th className="px-3 py-1.5 text-left font-medium"><DefTerm term="collection-log:Type">Type</DefTerm></th>
+                <th className="px-3 py-1.5 text-left font-medium"><DefTerm term="collection-log:County / Ours">County / Ours</DefTerm></th>
+                <th className="px-3 py-1.5 text-left font-medium"><DefTerm term="collection-log:Check status">Status</DefTerm></th>
+                <th className="px-3 py-1.5 text-left font-medium"><DefTerm term="collection-log:Note">Note</DefTerm></th>
+              </tr>
+            </thead>
             <tbody>
               {otherRows.map(e => (
                 <tr key={`${e.county}|${e.rec_date}|${e.doc_type}`} className="border-t border-border/50">
@@ -301,10 +342,10 @@ export default function CollectionLog() {
           <table className="w-full text-xs">
             <thead className="border-b border-border bg-muted/20">
               <tr className="text-muted-foreground">
-                <th className="px-3 py-2.5 text-left font-medium">Status</th>
-                <th className="px-3 py-2.5 text-left font-medium">Date From</th>
-                <th className="px-3 py-2.5 text-left font-medium">Date To</th>
-                <th className="px-3 py-2.5 text-right font-medium">Records Found</th>
+                <th className="px-3 py-2.5 text-left font-medium"><DefTerm term="collection-log:Status">Status</DefTerm></th>
+                <th className="px-3 py-2.5 text-left font-medium"><DefTerm term="collection-log:Date From">Date From</DefTerm></th>
+                <th className="px-3 py-2.5 text-left font-medium"><DefTerm term="collection-log:Date To">Date To</DefTerm></th>
+                <th className="px-3 py-2.5 text-right font-medium"><DefTerm term="collection-log:Records Found">Records Found</DefTerm></th>
               </tr>
             </thead>
             <tbody>

@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import CategoryBadge from '@/components/CategoryBadge';
 import ColHeader from '@/components/ColHeader';
+import { DefTerm } from '@/components/DefTerm';
 import { ChevronLeft, ChevronRight, Search, X } from 'lucide-react';
 import { FilterHint } from '@/components/FilterHint';
 import { ENTITY_TYPE_DEFS } from '@/lib/filterDefinitions';
@@ -24,17 +25,19 @@ const CATEGORIES = [
 interface Filters {
   grantor: string;
   grantee: string;
+  cfn: string;
   start_date: string;
   end_date: string;
   categories: string[]; // multi-select
 }
 
-const EMPTY_FILTERS: Filters = { grantor: '', grantee: '', start_date: '', end_date: '', categories: [] };
+const EMPTY_FILTERS: Filters = { grantor: '', grantee: '', cfn: '', start_date: '', end_date: '', categories: [] };
 
 function buildQS(filters: Filters, page: number, limit = 50) {
   const q = new URLSearchParams();
   if (filters.grantor)    q.set('grantor', filters.grantor);
   if (filters.grantee)    q.set('grantee', filters.grantee);
+  if (filters.cfn)        q.set('cfn', filters.cfn);
   if (filters.start_date) q.set('start_date', filters.start_date);
   if (filters.end_date)   q.set('end_date', filters.end_date);
   // Send each selected category — backend will handle OR logic
@@ -79,7 +82,7 @@ export default function Assignments() {
     }));
   }
 
-  const hasApplied = applied.grantor || applied.grantee || applied.start_date || applied.end_date || applied.categories.length > 0;
+  const hasApplied = applied.grantor || applied.grantee || applied.cfn || applied.start_date || applied.end_date || applied.categories.length > 0;
 
   return (
     <div className="p-6 space-y-4 max-w-screen-xl mx-auto">
@@ -100,7 +103,7 @@ export default function Assignments() {
       {/* Filter panel */}
       <div className="bg-card border border-border rounded-lg p-4 space-y-4">
         {/* Text + date inputs */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
           <div className="flex flex-col gap-1">
             <label className="text-xs text-muted-foreground font-medium">Grantor (Assignor)</label>
             <Input
@@ -119,6 +122,17 @@ export default function Assignments() {
               placeholder="e.g. NEWREZ LLC"
               value={draft.grantee}
               onChange={e => setDraft(p => ({ ...p, grantee: e.target.value }))}
+              onKeyDown={e => e.key === 'Enter' && applyFilters()}
+              className="h-8 text-sm"
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-muted-foreground font-medium">CFN</label>
+            <Input
+              data-testid="filter-cfn"
+              placeholder="e.g. 2026R521735"
+              value={draft.cfn}
+              onChange={e => setDraft(p => ({ ...p, cfn: e.target.value }))}
               onKeyDown={e => e.key === 'Enter' && applyFilters()}
               className="h-8 text-sm"
             />
@@ -211,25 +225,25 @@ export default function Assignments() {
             <thead className="border-b border-border bg-muted/20">
               <tr className="text-muted-foreground">
                 <th className="px-3 py-2.5 text-left font-medium">
-                  <ColHeader label="CFN" tooltip="County Filing Number — the unique ID assigned by the county Clerk when the document was officially recorded. Click the CFN link to view the original document in the county portal." />
+                  <ColHeader label={<DefTerm term="assignments:CFN">CFN</DefTerm>} tooltip="County Filing Number — the unique ID assigned by the county Clerk when the document was officially recorded. Click the CFN link to view the original document in the county portal." />
                 </th>
                 <th className="px-3 py-2.5 text-left font-medium">
-                  <ColHeader label="Date" tooltip="Recording date — when the assignment was stamped by the county Clerk. This is slightly later than the execution/signing date on the document itself." />
+                  <ColHeader label={<DefTerm term="assignments:Date">Date</DefTerm>} tooltip="Recording date — when the assignment was stamped by the county Clerk. This is slightly later than the execution/signing date on the document itself." />
                 </th>
                 <th className="px-3 py-2.5 text-left font-medium">
-                  <ColHeader label="County" tooltip="Which county's Official Records the document was recorded in. Matters most under the All Counties scope, where every county's document numbers sit side by side. The counties are not equally deep: Broward's pre-Aug-2026 history is index-only, and Hillsborough's documents are still being read." />
+                  <ColHeader label={<DefTerm term="assignments:County">County</DefTerm>} tooltip="Which county's Official Records the document was recorded in. Matters most under the All Counties scope, where every county's document numbers sit side by side. The counties are not equally deep: Broward's pre-Aug-2026 history is index-only, and Hillsborough's documents are still being read." />
                 </th>
                 <th className="px-3 py-2.5 text-left font-medium">
-                  <ColHeader label="Grantor (Assignor)" tooltip="The party transferring/selling the mortgage. This entity is giving up the right to collect or enforce the debt. Often a bank, servicer, or fund offloading a loan from its portfolio." />
+                  <ColHeader label={<DefTerm term="assignments:Grantor (Assignor)">Grantor (Assignor)</DefTerm>} tooltip="The party transferring/selling the mortgage. This entity is giving up the right to collect or enforce the debt. Often a bank, servicer, or fund offloading a loan from its portfolio." />
                 </th>
                 <th className="px-3 py-2.5 text-left font-medium">
-                  <ColHeader label="Grantee (Assignee)" tooltip="The party receiving/buying the mortgage. This entity now holds the right to collect payments or foreclose. The identity of the grantee reveals who is acquiring distressed or performing debt." />
+                  <ColHeader label={<DefTerm term="assignments:Grantee (Assignee)">Grantee (Assignee)</DefTerm>} tooltip="The party receiving/buying the mortgage. This entity now holds the right to collect payments or foreclose. The identity of the grantee reveals who is acquiring distressed or performing debt." />
                 </th>
                 <th className="px-3 py-2.5 text-left font-medium">
-                  <ColHeader label="Address" tooltip="Property address of the collateral securing the mortgage being assigned. County records; full address may not always be captured on the filing." />
+                  <ColHeader label={<DefTerm term="assignments:Address">Address</DefTerm>} tooltip="Property address of the collateral securing the mortgage being assigned. County records; full address may not always be captured on the filing." />
                 </th>
                 <th className="px-3 py-2.5 text-left font-medium">
-                  <ColHeader label="Book / Page" tooltip="county Official Records locator — the book and page number of the recorded instrument. Used internally by the Clerk's office as an alternate document reference." />
+                  <ColHeader label={<DefTerm term="assignments:Book / Page">Book / Page</DefTerm>} tooltip="county Official Records locator — the book and page number of the recorded instrument. Used internally by the Clerk's office as an alternate document reference." />
                 </th>
               </tr>
             </thead>

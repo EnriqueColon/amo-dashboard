@@ -6,7 +6,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import CategoryBadge from '@/components/CategoryBadge';
 import EntityDetailPanel from '@/components/EntityDetailPanel';
 import DuplicateManager from '@/components/DuplicateManager';
-import ColHeader from '@/components/ColHeader';
+import { DefTerm } from '@/components/DefTerm';
 import { Search, ChevronRight, Info, Network } from 'lucide-react';
 import CrossCountyNote from '@/components/CrossCountyNote';
 import { FilterHint } from '@/components/FilterHint';
@@ -97,22 +97,22 @@ export default function Entities() {
               <thead className="border-b border-border bg-muted/20">
                 <tr className="text-muted-foreground">
                   <th className="px-3 py-2.5 text-left font-medium">
-                    <ColHeader label="Entity (Canonical)" tooltip="The normalized, de-duplicated entity name. Multiple raw filing variants (e.g. 'BANK OF AMERICA N.A.', 'BK OF AMERICA') are merged into one canonical identity for analysis." />
+                    <DefTerm term="entities:Entity (Canonical)">Entity (Canonical)</DefTerm>
                   </th>
                   <th className="px-3 py-2.5 text-left font-medium">
-                    <ColHeader label="Type" tooltip="Entity classification: Bank, Private Credit, Securitization Trust, GSE (government-sponsored), Servicer, MERS (registry), or Other. Used to derive transaction types and market-flow metrics." />
+                    <DefTerm term="entities:Type">Type</DefTerm>
                   </th>
                   <th className="px-3 py-2.5 text-right font-medium">
-                    <ColHeader label={<span className="text-orange-600">Received</span>} tooltip="Total inbound assignments — times this entity appeared as the Grantee (buyer/receiver) on a county filing. Includes originations, secondary-market purchases, and MERS releases." />
+                    <DefTerm term="entities:Received"><span className="text-orange-600">Received</span></DefTerm>
                   </th>
                   <th className="px-3 py-2.5 text-right font-medium">
-                    <ColHeader label={<span className="text-blue-600">Assigned</span>} tooltip="Total outbound assignments — times this entity appeared as the Grantor (seller/transferor) on a filing. High outbound counts relative to inbound suggest net selling or portfolio wind-down." />
+                    <DefTerm term="entities:Assigned"><span className="text-blue-600">Assigned</span></DefTerm>
                   </th>
                   <th className="px-3 py-2.5 text-right font-medium">
-                    <ColHeader label={<span className="text-purple-600">Counterparties</span>} tooltip="Distinct canonical entities this entity has transacted with (either as buyer or seller). A higher number signals broader market participation or active dealer/intermediary behavior." />
+                    <DefTerm term="entities:Counterparties"><span className="text-purple-600">Counterparties</span></DefTerm>
                   </th>
                   <th className="px-3 py-2.5 text-left font-medium pl-4">
-                    <ColHeader label="Active Period" tooltip="Date span from this entity's first recorded first AMO filing to its most recent one." />
+                    <DefTerm term="entities:Active Period">Active Period</DefTerm>
                   </th>
                   <th className="px-3 py-2.5 text-right font-medium pr-4"></th>
                 </tr>

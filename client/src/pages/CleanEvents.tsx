@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import CategoryBadge from '@/components/CategoryBadge';
 import ColHeader from '@/components/ColHeader';
+import { DefTerm } from '@/components/DefTerm';
 import {
   ChevronLeft, ChevronRight, Search, X, CheckCircle,
   ArrowRight, Info, TrendingUp, TrendingDown, Users, Filter, ChevronDown, ChevronUp,
@@ -16,8 +17,8 @@ import {
 import { FilterHint } from '@/components/FilterHint';
 import { TXN_TYPE_DEFS } from '@/lib/filterDefinitions';
 
-interface Filters { assignor: string; assignee: string; start_date: string; end_date: string; txn_type: string; }
-const EMPTY: Filters = { assignor: '', assignee: '', start_date: '', end_date: '', txn_type: '' };
+interface Filters { assignor: string; assignee: string; cfn: string; start_date: string; end_date: string; txn_type: string; }
+const EMPTY: Filters = { assignor: '', assignee: '', cfn: '', start_date: '', end_date: '', txn_type: '' };
 
 // ── Transaction type metadata ─────────────────────────────────────────────────
 const TXN_TYPES: Record<string, { label: string; color: string; desc: string }> = {
@@ -305,7 +306,7 @@ export default function CleanEvents() {
   const [showGlossary, setShowGlossary] = useState(false);
   const [expandedCfn, setExpandedCfn] = useState<string | null>(null);
 
-  const qs = `?assignor=${encodeURIComponent(applied.assignor)}&assignee=${encodeURIComponent(applied.assignee)}&start_date=${applied.start_date}&end_date=${applied.end_date}&txn_type=${applied.txn_type}&page=${page}&limit=50`;
+  const qs = `?assignor=${encodeURIComponent(applied.assignor)}&assignee=${encodeURIComponent(applied.assignee)}&cfn=${encodeURIComponent(applied.cfn)}&start_date=${applied.start_date}&end_date=${applied.end_date}&txn_type=${applied.txn_type}&page=${page}&limit=50`;
 
   const { data, isLoading, isFetching } = useQuery({
     queryKey: ['/api/clean-events', qs],
@@ -436,7 +437,7 @@ export default function CleanEvents() {
 
       {/* ── Filters ─────────────────────────────────────────────────────── */}
       <div className="bg-card border border-border rounded-lg p-4 space-y-3">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
           <div className="flex flex-col gap-1">
             <label className="text-xs text-muted-foreground font-medium flex items-center gap-1">
               <TrendingUp size={10} className="text-orange-400" />
@@ -454,6 +455,13 @@ export default function CleanEvents() {
             </label>
             <Input placeholder="e.g. US BANK" value={draft.assignee}
               onChange={e => setDraft(p => ({ ...p, assignee: e.target.value }))}
+              onKeyDown={e => e.key === 'Enter' && apply()}
+              className="h-8 text-sm" />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-muted-foreground font-medium">CFN</label>
+            <Input placeholder="e.g. 2026R521735" value={draft.cfn}
+              onChange={e => setDraft(p => ({ ...p, cfn: e.target.value }))}
               onKeyDown={e => e.key === 'Enter' && apply()}
               className="h-8 text-sm" />
           </div>
@@ -504,44 +512,44 @@ export default function CleanEvents() {
             <thead className="border-b border-border bg-muted/20">
               <tr className="text-muted-foreground">
                 <th className="px-3 py-2.5 text-left font-medium">
-                  <ColHeader label="CFN" tooltip="County Filing Number — the unique ID assigned by the county Clerk when the document was officially recorded. Click the CFN link to view the original document in the county portal." />
+                  <ColHeader label={<DefTerm term="clean-events:CFN">CFN</DefTerm>} tooltip="County Filing Number — the unique ID assigned by the county Clerk when the document was officially recorded. Click the CFN link to view the original document in the county portal." />
                 </th>
                 <th className="px-3 py-2.5 text-left font-medium">
-                  <ColHeader label="Date" tooltip="Recording date — when the assignment was stamped by the county Clerk. Slightly later than the execution/signing date on the document itself." />
+                  <ColHeader label={<DefTerm term="clean-events:Date">Date</DefTerm>} tooltip="Recording date — when the assignment was stamped by the county Clerk. Slightly later than the execution/signing date on the document itself." />
                 </th>
                 <th className="px-3 py-2.5 text-left font-medium">
-                  <ColHeader label="County" tooltip="Which county's Official Records the document was recorded in. Matters most under the All Counties scope, where every county's document numbers sit side by side. The counties are not equally deep: Broward's pre-Aug-2026 history is index-only, and Hillsborough's documents are still being read." />
+                  <ColHeader label={<DefTerm term="clean-events:County">County</DefTerm>} tooltip="Which county's Official Records the document was recorded in. Matters most under the All Counties scope, where every county's document numbers sit side by side. The counties are not equally deep: Broward's pre-Aug-2026 history is index-only, and Hillsborough's documents are still being read." />
                 </th>
                 <th className="px-3 py-2.5 text-left font-medium">
                   <span className="flex items-center gap-1">
                     <TrendingUp size={10} className="text-orange-400" />
-                    <ColHeader label={<>Assignor <span className="text-muted-foreground/60 font-normal">(Seller)</span></>} tooltip="The party transferring/selling the mortgage. This entity gives up the right to collect or enforce the debt. Institutional assignors (banks, servicers, PE funds) are the primary signal for market activity." />
+                    <ColHeader label={<><DefTerm term="clean-events:Assignor (Seller)">Assignor</DefTerm> <span className="text-muted-foreground/60 font-normal">(Seller)</span></>} tooltip="The party transferring/selling the mortgage. This entity gives up the right to collect or enforce the debt. Institutional assignors (banks, servicers, PE funds) are the primary signal for market activity." />
                   </span>
                 </th>
                 <th className="px-3 py-2.5 text-center font-medium w-6"></th>
                 <th className="px-3 py-2.5 text-left font-medium">
                   <span className="flex items-center gap-1">
                     <TrendingDown size={10} className="text-blue-400" />
-                    <ColHeader label={<>Assignee <span className="text-muted-foreground/60 font-normal">(Buyer)</span></>} tooltip="The party receiving/buying the mortgage. This entity now holds the right to collect payments or foreclose. Tracking institutional assignees reveals who is actively acquiring mortgage debt." />
+                    <ColHeader label={<><DefTerm term="clean-events:Assignee (Buyer)">Assignee</DefTerm> <span className="text-muted-foreground/60 font-normal">(Buyer)</span></>} tooltip="The party receiving/buying the mortgage. This entity now holds the right to collect payments or foreclose. Tracking institutional assignees reveals who is actively acquiring mortgage debt." />
                   </span>
                 </th>
                 <th className="px-3 py-2.5 text-left font-medium">
-                  <ColHeader label="Type" tooltip="Transaction classification: Market Transfer (institution→institution), Origination (individual→institution, new supply entering), MERS Release (registry housekeeping), Self-Assign (administrative, same entity both sides), Inst. Out (institution→individual, e.g. REO/payoff), or Private (individual→individual)." />
+                  <ColHeader label={<DefTerm term="clean-events:Type">Type</DefTerm>} tooltip="Transaction classification: Market Transfer (institution→institution), Origination (individual→institution, new supply entering), MERS Release (registry housekeeping), Self-Assign (administrative, same entity both sides), Inst. Out (institution→individual, e.g. REO/payoff), or Private (individual→individual)." />
                 </th>
                 <th className="px-3 py-2.5 text-left font-medium">
-                  <ColHeader label="Property" tooltip="Street address of the encumbered property, extracted from the recorded PDF document when stated (falls back to the county index address). Blank when the document only gives a legal description." />
+                  <ColHeader label={<DefTerm term="clean-events:Property">Property</DefTerm>} tooltip="Street address of the encumbered property, extracted from the recorded PDF document when stated (falls back to the county index address). Blank when the document only gives a legal description." />
                 </th>
                 <th className="px-3 py-2.5 text-right font-medium">
-                  <ColHeader label="Amount" tooltip="Dollar amount extracted from the recorded PDF: the original loan/mortgage amount when stated, or the actual consideration paid for the assignment. Nominal recitals ($10 and other consideration) are ignored. Blank when no amount appears in the document." />
+                  <ColHeader label={<DefTerm term="clean-events:Amount">Amount</DefTerm>} tooltip="Dollar amount extracted from the recorded PDF: the original loan/mortgage amount when stated, or the actual consideration paid for the assignment. Nominal recitals ($10 and other consideration) are ignored. Blank when no amount appears in the document." />
                 </th>
                 <th className="px-3 py-2.5 text-center font-medium">
                   <span className="flex items-center justify-center gap-1">
                     <Users size={10} />
-                    <ColHeader label="Parties" tooltip="Number of parties named on the original county filing document. Most assignments are 2-party (one seller, one buyer); more parties indicate co-assignments or complex structured deals." />
+                    <ColHeader label={<DefTerm term="clean-events:Parties">Parties</DefTerm>} tooltip="Number of parties named on the original county filing document. Most assignments are 2-party (one seller, one buyer); more parties indicate co-assignments or complex structured deals." />
                   </span>
                 </th>
                 <th className="px-3 py-2.5 text-left font-medium">
-                  <ColHeader label="Book / Page" tooltip="county Official Records locator — the book and page number of the recorded instrument. Used internally by the Clerk's office as an alternate document reference." />
+                  <ColHeader label={<DefTerm term="clean-events:Book / Page">Book / Page</DefTerm>} tooltip="county Official Records locator — the book and page number of the recorded instrument. Used internally by the Clerk's office as an alternate document reference." />
                 </th>
               </tr>
             </thead>

@@ -1,4 +1,5 @@
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { COLUMN_GLOSSARY } from "@/lib/glossary"
 
 export type MetricDefRich = {
   definition: string
@@ -67,7 +68,9 @@ export function DefTerm({
   children,
   customTrigger,
 }: { term: string; children: React.ReactNode; customTrigger?: boolean }) {
-  const def = METRIC_DEFINITIONS[term]
+  // Page column headers live in client/src/lib/glossary (namespaced "<page>:<Label>");
+  // the original FDIC glossary above is kept as is.
+  const def = METRIC_DEFINITIONS[term] ?? COLUMN_GLOSSARY[term]
   if (!def) return <>{children}</>
   return (
     <Tooltip>

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Gauge, Search } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
+import { DefTerm } from '@/components/DefTerm'
 import { BankStressDrawer } from '@/components/BankStressDrawer'
 import {
   loadBsMeta, loadBsRanking, formatQuarter, formatThousands, formatPct, formatScore, stressTone,
@@ -109,13 +110,14 @@ export default function BankStress() {
   const flagLabel = (id: string) => defs?.flags.find((f) => f.id === id)?.label ?? defs?.watch_flags.find((f) => f.id === id)?.label ?? id
   const bandLabel = (key: string | null) => defs?.peer_bands.find((b) => b.key === key)?.label ?? key ?? '—'
 
-  const Th = ({ k, children, title, align = 'right' }: { k: SortKey; children: React.ReactNode; title?: string; align?: 'left' | 'right' }) => (
+  // Sortable header. The label is the glossary key ("bank-stress:<label>"), so
+  // hovering explains the column and clicking anywhere on the cell still sorts.
+  const Th = ({ k, children, align = 'right' }: { k: SortKey; children: string; align?: 'left' | 'right' }) => (
     <th
       className={`py-2 px-2 font-medium text-slate-600 cursor-pointer select-none whitespace-nowrap ${align === 'left' ? 'text-left' : 'text-right'} ${sortKey === k ? 'text-slate-900' : ''}`}
-      title={title}
       onClick={() => sortBy(k)}
     >
-      {children}{sortKey === k ? (sortDesc ? ' ↓' : ' ↑') : ''}
+      <DefTerm term={`bank-stress:${children}`}>{children}</DefTerm>{sortKey === k ? (sortDesc ? ' ↓' : ' ↑') : ''}
     </th>
   )
 
@@ -216,19 +218,19 @@ export default function BankStress() {
             <table className="w-full text-xs">
               <thead className="bg-slate-50 border-b border-slate-200">
                 <tr>
-                  <Th k="rank" align="left" title="Rank among all ranked banks this quarter (composite, ties by CRE concentration)">#</Th>
+                  <Th k="rank" align="left">#</Th>
                   <Th k="name" align="left">Bank</Th>
-                  <th className="py-2 px-2 text-left font-medium text-slate-600">Band</th>
-                  <Th k="composite" title="Weighted mean of the three sub-scores (40 / 40 / 20)">Composite</Th>
-                  <Th k="condition" title="Level: ROA, core ROA, efficiency, noncurrent, reserve coverage, Tier 1 leverage, loans/deposits">Condition</Th>
-                  <Th k="deterioration" title="Change: YoY and 4-quarter trend of NII/assets, funding cost, provision, CRE charge-offs, noncurrent">Deterior.</Th>
-                  <Th k="cre_exposure" title="CRE/Tier 1, CRE share of charge-offs, loan & OREO sale gains/losses">CRE</Th>
-                  <Th k="flag_count" title="Rule flags 1–8, one point each">Flags</Th>
-                  <th className="py-2 px-2 text-left font-medium text-slate-600">Top drivers</th>
-                  <th className="py-2 px-2 text-left font-medium text-slate-600">Signal</th>
-                  <Th k="cre_concentration" title="(construction + multifamily + non-owner-occupied nonfarm nonres) / Tier 1 capital">CRE / T1</Th>
-                  <Th k="noncurrent_ratio" title="Noncurrent loans / gross loans">Noncurr.</Th>
-                  <Th k="tier1_leverage" title="Tier 1 leverage ratio">T1 lev.</Th>
+                  <th className="py-2 px-2 text-left font-medium text-slate-600"><DefTerm term="bank-stress:Band">Band</DefTerm></th>
+                  <Th k="composite">Composite</Th>
+                  <Th k="condition">Condition</Th>
+                  <Th k="deterioration">Deterior.</Th>
+                  <Th k="cre_exposure">CRE</Th>
+                  <Th k="flag_count">Flags</Th>
+                  <th className="py-2 px-2 text-left font-medium text-slate-600"><DefTerm term="bank-stress:Top drivers">Top drivers</DefTerm></th>
+                  <th className="py-2 px-2 text-left font-medium text-slate-600"><DefTerm term="bank-stress:Signal">Signal</DefTerm></th>
+                  <Th k="cre_concentration">CRE / T1</Th>
+                  <Th k="noncurrent_ratio">Noncurr.</Th>
+                  <Th k="tier1_leverage">T1 lev.</Th>
                   <Th k="assets_k">Assets</Th>
                 </tr>
               </thead>

@@ -6,6 +6,8 @@ export interface FacilityGroupFilters {
   county?: string | null;
   lender?: string;
   borrower?: string;
+  /** Substring of a county file number: keeps only relationships that include that document. */
+  cfn?: string;
   facilityType?: string;
   startDate?: string;
   endDate?: string;
@@ -34,13 +36,14 @@ const SORT_COLS: Record<string, string> = {
 // route's own comments (routes.ts, same query, kept in sync here) for why
 // family rows never sum facility_amount and why is_family exists.
 export function queryGroupedFacilities(db: Database.Database, filters: FacilityGroupFilters): FacilityGroupResult {
-  const { county, lender, borrower, facilityType, startDate, endDate, sort, dir, limit, offset } = filters;
+  const { county, lender, borrower, cfn, facilityType, startDate, endDate, sort, dir, limit, offset } = filters;
 
   const where: string[] = [];
   const params: any[] = [];
   if (county)       { where.push(`COALESCE(county, '${DEFAULT_COUNTY}') = ?`); params.push(county); }
   if (lender)       { where.push("UPPER(facility_lender_name) LIKE UPPER(?)"); params.push(`%${lender}%`); }
   if (borrower)     { where.push("UPPER(facility_borrower_name) LIKE UPPER(?)"); params.push(`%${borrower}%`); }
+  if (cfn)          { where.push("UPPER(cfn) LIKE UPPER(?)"); params.push(`%${cfn}%`); }
   if (facilityType) { where.push("facility_type = ?"); params.push(facilityType); }
   if (startDate)    { where.push("rec_date >= ?"); params.push(startDate); }
   if (endDate)      { where.push("rec_date <= ?"); params.push(endDate); }

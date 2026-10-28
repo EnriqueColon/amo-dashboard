@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import DocLink from '@/components/DocLink';
+import { DefTerm } from '@/components/DefTerm';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -36,7 +37,7 @@ const CATEGORY_OPTIONS: [string, string][] = [
 function Stat({ label, value, note }: { label: string; value: string; note?: string }) {
   return (
     <div className="bg-card border border-border rounded-lg px-3 py-2.5">
-      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className="text-[10px] uppercase tracking-wide text-muted-foreground"><DefTerm term={`ucc:${label}`}>{label}</DefTerm></div>
       <div className="text-lg font-semibold tabular-nums leading-tight mt-0.5">{value}</div>
       {note && <div className="text-[11px] text-muted-foreground mt-0.5">{note}</div>}
     </div>
@@ -284,13 +285,13 @@ export default function UccFilings() {
           <table className="w-full text-xs">
             <thead className="bg-muted/40 border-b border-border">
               <tr className="text-left text-[10px] uppercase tracking-wide text-muted-foreground">
-                <th className="px-3 py-2 font-medium">CFN</th>
-                <th className="px-3 py-2 font-medium">Date</th>
-                <th className="px-3 py-2 font-medium">Borrower</th>
-                <th className="px-3 py-2 font-medium">Lender</th>
-                <th className="px-3 py-2 font-medium">Property</th>
-                <th className="px-3 py-2 font-medium">Collateral</th>
-                <th className="px-3 py-2 font-medium text-right">Amount</th>
+                <th className="px-3 py-2 font-medium"><DefTerm term="ucc:CFN">CFN</DefTerm></th>
+                <th className="px-3 py-2 font-medium"><DefTerm term="ucc:Date">Date</DefTerm></th>
+                <th className="px-3 py-2 font-medium"><DefTerm term="ucc:Borrower">Borrower</DefTerm></th>
+                <th className="px-3 py-2 font-medium"><DefTerm term="ucc:Lender">Lender</DefTerm></th>
+                <th className="px-3 py-2 font-medium"><DefTerm term="ucc:Property">Property</DefTerm></th>
+                <th className="px-3 py-2 font-medium"><DefTerm term="ucc:Collateral">Collateral</DefTerm></th>
+                <th className="px-3 py-2 font-medium text-right"><DefTerm term="ucc:Amount">Amount</DefTerm></th>
               </tr>
             </thead>
             <tbody>

@@ -5,8 +5,10 @@ import { apiRequest } from '@/lib/queryClient';
 import DocLink from '@/components/DocLink';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Shield, ChevronLeft, ChevronRight, ArrowRight, ExternalLink } from 'lucide-react';
 import CategoryBadge from '@/components/CategoryBadge';
+import { DefTerm } from '@/components/DefTerm';
 
 // Transaction type badge — compact version for this table
 const TXN_META: Record<string, { label: string; color: string }> = {
@@ -29,10 +31,18 @@ function TxnBadge({ type }: { type: string }) {
 
 export default function PrivateCredit() {
   const [page, setPage] = useState(1);
+  // CFN lookup: `draft` is what is typed, `cfn` is what has been applied (Enter
+  // or the Apply button). The server matches any part of the clerk file number,
+  // case-insensitively.
+  const [draft, setDraft] = useState('');
+  const [cfn, setCfn] = useState('');
+  const applyCfn = () => { setCfn(draft.trim()); setPage(1); };
+  const clearCfn = () => { setDraft(''); setCfn(''); setPage(1); };
 
+  const qs = `?page=${page}&limit=50` + (cfn ? `&cfn=${encodeURIComponent(cfn)}` : '');
   const { data: _data, isLoading } = useQuery({
-    queryKey: ['/api/private-credit', page],
-    queryFn: () => apiRequest('GET', `/api/private-credit?page=${page}&limit=50`).then(r => r.json()),
+    queryKey: ['/api/private-credit', page, cfn],
+    queryFn: () => apiRequest('GET', `/api/private-credit${qs}`).then(r => r.json()),
     keepPreviousData: true,
   } as any);
   const data = _data as any;
@@ -57,7 +67,7 @@ export default function PrivateCredit() {
       {/* Top PE acquirers */}
       {assignees && (
         <div className="bg-card border border-border rounded-lg p-4">
-          <h2 className="text-sm font-semibold mb-1 text-foreground">Top Private Credit Acquirers</h2>
+          <h2 className="text-sm font-semibold mb-1 text-foreground"><DefTerm term="private-credit:Top Private Credit Acquirers">Top Private Credit Acquirers</DefTerm></h2>
           <p className="text-[10px] text-muted-foreground mb-3">Ranked by inbound assignment count — self-assigns excluded</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {(assignees as any[]).map((row, i) => (
@@ -73,20 +83,41 @@ export default function PrivateCredit() {
         </div>
       )}
 
+      {/* CFN lookup — a real <form> so Enter applies, like every search box */}
+      <div className="bg-card border border-border rounded-lg p-4">
+        <form onSubmit={e => { e.preventDefault(); applyCfn(); }} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+          <div>
+            <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">CFN</label>
+            <Input placeholder="e.g. 2026R521735" value={draft}
+              onChange={e => setDraft(e.target.value)} className="h-8 text-xs mt-1 font-mono"
+              title="Clerk file number — matches any part of the number" />
+          </div>
+          <div className="flex items-end gap-2">
+            <Button size="sm" type="submit" className="h-8 text-xs">Apply</Button>
+            {cfn && <Button size="sm" type="button" variant="ghost" onClick={clearCfn} className="h-8 text-xs">Clear</Button>}
+          </div>
+        </form>
+      </div>
+
       {/* Transactions table */}
       <div className="bg-card border border-border rounded-lg overflow-hidden">
+        {cfn && (
+          <div className="px-4 py-2 border-b border-border bg-muted/10 text-[11px] text-muted-foreground">
+            {data ? `${data.total.toLocaleString()} transaction${data.total === 1 ? '' : 's'} matching CFN "${cfn}"` : ''}
+          </div>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead className="border-b border-border bg-muted/20">
               <tr className="text-muted-foreground">
-                <th className="px-3 py-2.5 text-left font-medium">CFN</th>
-                <th className="px-3 py-2.5 text-left font-medium">Date</th>
-                <th className="px-3 py-2.5 text-left font-medium" title="Which county's Official Records the document was recorded in. Matters most under the All Counties scope, where every county's document numbers sit side by side. The counties are not equally deep: Broward's pre-Aug-2026 history is index-only, and Hillsborough's documents are still being read.">County</th>
-                <th className="px-3 py-2.5 text-left font-medium">Grantor (Seller)</th>
+                <th className="px-3 py-2.5 text-left font-medium"><DefTerm term="private-credit:CFN">CFN</DefTerm></th>
+                <th className="px-3 py-2.5 text-left font-medium"><DefTerm term="private-credit:Date">Date</DefTerm></th>
+                <th className="px-3 py-2.5 text-left font-medium"><DefTerm term="private-credit:County">County</DefTerm></th>
+                <th className="px-3 py-2.5 text-left font-medium"><DefTerm term="private-credit:Grantor (Seller)">Grantor (Seller)</DefTerm></th>
                 <th className="px-2 py-2.5 w-5"></th>
-                <th className="px-3 py-2.5 text-left font-medium">Grantee (Buyer)</th>
-                <th className="px-3 py-2.5 text-left font-medium">Type</th>
-                <th className="px-3 py-2.5 text-left font-medium">PE Role</th>
+                <th className="px-3 py-2.5 text-left font-medium"><DefTerm term="private-credit:Grantee (Buyer)">Grantee (Buyer)</DefTerm></th>
+                <th className="px-3 py-2.5 text-left font-medium"><DefTerm term="private-credit:Type">Type</DefTerm></th>
+                <th className="px-3 py-2.5 text-left font-medium"><DefTerm term="private-credit:PE Role">PE Role</DefTerm></th>
                 <th className="px-3 py-2.5 text-center font-medium w-8"></th>
               </tr>
             </thead>
@@ -150,7 +181,7 @@ export default function PrivateCredit() {
                   })
               }
               {!isLoading && !data?.rows?.length && (
-                <tr><td colSpan={9} className="px-3 py-10 text-center text-muted-foreground">No records found.</td></tr>
+                <tr><td colSpan={9} className="px-3 py-10 text-center text-muted-foreground">{cfn ? `No private credit transactions match CFN "${cfn}".` : 'No records found.'}</td></tr>
               )}
             </tbody>
           </table>

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import DocLink from '@/components/DocLink';
+import { DefTerm } from '@/components/DefTerm';
 import { useCounty, countyLabel, type CountyScope } from '@/lib/county';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -370,19 +371,19 @@ function TransactionsTable({ title, filterQs, exportQs }: {
         <table className="w-full text-[11px] border-collapse">
           <thead>
             <tr className="bg-muted/40 border-b border-border text-muted-foreground">
-              <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap">CFN</th>
-              <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap">Date</th>
-              <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap">County</th>
-              <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap">Assignor</th>
-              <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap">Type</th>
-              <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap">Assignee</th>
-              <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap">Type</th>
-              <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap">Property</th>
-              <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap">Folio</th>
-              <th className="px-2 py-2 text-right font-semibold border-r border-border/40 whitespace-nowrap">Loan Amt</th>
-              <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap">Signatory</th>
-              <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap">Class.</th>
-              <th className="px-2 py-2 text-center font-semibold whitespace-nowrap">✓</th>
+              <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap"><DefTerm term="reporting:CFN">CFN</DefTerm></th>
+              <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap"><DefTerm term="reporting:Date">Date</DefTerm></th>
+              <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap"><DefTerm term="reporting:County">County</DefTerm></th>
+              <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap"><DefTerm term="reporting:Assignor">Assignor</DefTerm></th>
+              <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap"><DefTerm term="reporting:Type">Type</DefTerm></th>
+              <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap"><DefTerm term="reporting:Assignee">Assignee</DefTerm></th>
+              <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap"><DefTerm term="reporting:Type">Type</DefTerm></th>
+              <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap"><DefTerm term="reporting:Property">Property</DefTerm></th>
+              <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap"><DefTerm term="reporting:Folio">Folio</DefTerm></th>
+              <th className="px-2 py-2 text-right font-semibold border-r border-border/40 whitespace-nowrap"><DefTerm term="reporting:Loan Amt">Loan Amt</DefTerm></th>
+              <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap"><DefTerm term="reporting:Signatory">Signatory</DefTerm></th>
+              <th className="px-2 py-2 text-left font-semibold border-r border-border/40 whitespace-nowrap"><DefTerm term="reporting:Class.">Class.</DefTerm></th>
+              <th className="px-2 py-2 text-center font-semibold whitespace-nowrap"><DefTerm term="reporting:✓">✓</DefTerm></th>
             </tr>
           </thead>
           <tbody>

@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
+import { DefTerm } from '@/components/DefTerm';
 import {
   Crosshair, Search, Plus, Trash2, LayoutList, ArrowUpRight,
   ArrowUp, ArrowDown, ChevronsUpDown,
@@ -242,7 +243,7 @@ export default function Targets() {
                       className={`px-3 py-2 font-semibold whitespace-nowrap cursor-pointer select-none hover:text-foreground transition-colors ${col.align === 'right' ? 'text-right' : 'text-left'} ${active ? 'text-foreground' : ''}`}
                       onClick={() => toggleSort(col.key)}>
                       <span className={`inline-flex items-center gap-1 ${col.align === 'right' ? 'flex-row-reverse' : ''}`}>
-                        {col.label}
+                        <DefTerm term={`targets:${col.label}`}>{col.label}</DefTerm>
                         {active
                           ? (sortDir === 'asc' ? <ArrowUp size={10} /> : <ArrowDown size={10} />)
                           : <ChevronsUpDown size={10} className="opacity-30" />}
