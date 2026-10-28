@@ -184,7 +184,8 @@ Steps 1–4: about a week, leaving a usable merged tool. Step 5 is optional per 
 | 3 | Postgres: local on the droplet, or free Neon | Local (one less account) / Neon (zero ops) | ✅ **local, forced, 28 Oct 2026:** Vercel will not export values it marks sensitive, so the Neon connection string could not be pulled; PostgreSQL 16 on the droplet, db `market_intelligence`, role `mi`, via a `pg` shim (`lib/db-pg.ts`). **The droplet DB starts empty** — see §7 "data not migrated" |
 | 4 | Access to `market-intelligence-tool` | — | ✅ **not needed** — the repo is public and owned by the same account (28 Oct 2026) |
 | 5 | Confirm the order: steps 1–4 first, step 5 per tab afterwards | yes / change | ✅ **confirmed by the owner, 28 Oct 2026** |
-| 6 | Which of News / Legal / Market Research are worth porting at all, vs leaving in the co-hosted app | per tab | **open — decide after step 4** |
+| 6 | Which of News / Legal / Market Research are worth porting at all, vs leaving in the co-hosted app | per tab | ✅ **all of them — owner, 28 Oct 2026:** "a complete integration of the tool's functionality into the AMO tracker… not just a link or a URL." The co-hosted Next app is a bridge only; every remaining tab (Peers, News, Legal Landscape, Market Research) is rebuilt inside the dashboard's own React client and Express server, and the Next app is retired when the last one lands. A sidebar link to `/intel` may exist in the interim but is not the deliverable |
+| 7 | Product name | — | ✅ **owner, 28 Oct 2026: the AMO tracker becomes "SHCP Intelligence Platform"** once the tools are merged. Rename is part of the port (title, login page, sidebar, email report header, Confluence page), not a separate task. Hostname `intelligence.safeharborcp.com` fits it |
 
 ---
 
@@ -229,9 +230,14 @@ unavailable today" banner in the UI. Still a cut-over decision (§7 step-1 entry
 
 **Open:** unchanged from step 1 — data migration from Neon (needs the connection string from the
 Vercel dashboard), The Real Deal, DNS/TLS; plus the owner's next "push to production" to carry
-`dev` into `main`. Next: step 4 (hide Market Analytics via `ENABLED_TABS`, disable
-`/api/analytics/v1/*`) once the Bank Stress stage 4 job verifies on 29 Oct, and the nav link in the
-AMO sidebar (the rest of step 3).
+`dev` into `main`.
+
+**Owner's direction at the end of the day ("lets wait"):** the target is **full integration** — every
+tab rebuilt inside the dashboard, which becomes **SHCP Intelligence Platform** — not a link (§6 rows
+6–7). Holding here. When work resumes: step 4 (hide Market Analytics via `ENABLED_TABS`, disable
+`/api/analytics/v1/*`) once the Bank Stress stage 4 job verifies on 29 Oct, then step 5 starting with
+Peers, each tab shipped as a page in `client/src/pages/` + routes under `/api/intel/*`, switched off
+in the Next app as it lands. The sidebar link is optional interim scaffolding only.
 
 ### 2026-10-28 (later) — STEP 1 DONE: Market Intelligence runs on the droplet at `/intel`
 

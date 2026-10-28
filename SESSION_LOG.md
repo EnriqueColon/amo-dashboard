@@ -11,7 +11,8 @@ Owner logged in at `/intel`, tabs work ("Works, continue"). Details in `docs/MAR
 - **Blob → disk:** `lib/report-storage.ts` + `app/api/research/upload-file` in the MI repo (branch `vercel-services-swap` → merged into `dev`, droplet checkout now on `dev`); files under `/opt/market-intelligence-uploads`, rows record `local-report://…`; verified upload→register→list→download→delete from the shell. `@vercel/analytics` only when `VERCEL=1`. Postgres (step 1) and crons (staged, commented) already done → nothing on the droplet copy talks to Vercel.
 - **New here:** `collector/run_mi_backup.sh` (`78e3e0a`) — nightly 03:45 UTC `pg_dump` of `market_intelligence` + copy of the uploads folder to the Space (`mi_db/`, `mi_uploads/`); first run ok; cron installed on the droplet.
 - **The Real Deal:** CloudFront/WAF blocks the droplet IP (202, empty) even with browser headers — owner saw the "Subscriber sources unavailable" banner; cut-over decision, not fixable here.
-- **Open:** Neon data migration (owner must fetch the connection string from the Vercel dashboard), TRD, DNS/TLS, owner's "push to production" to carry `dev`→`main`. Next: step 4 after Bank Stress stage 4 verifies 29 Oct; AMO sidebar link.
+- **Open:** Neon data migration (owner must fetch the connection string from the Vercel dashboard), TRD, DNS/TLS, owner's "push to production" to carry `dev`→`main`.
+- **Owner's direction, end of day ("lets wait"): full integration, not a link.** Every MI tab is to be rebuilt inside this dashboard, which is to be renamed **"SHCP Intelligence Platform"**; the co-hosted Next app is a bridge and is retired when the last tab lands (merge doc §6 rows 6–7). Holding. Resume with step 4 after the 29 Oct stage 4 check, then step 5 starting with Peers.
 
 ## 2026-10-28 (earlier) — Market Intelligence merge STEP 1 DONE: MI runs on the droplet at `/intel` (Vercel untouched, not announced)
 
