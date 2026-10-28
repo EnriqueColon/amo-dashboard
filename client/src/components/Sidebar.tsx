@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'wouter';
-import { BarChart2, FileText, CheckCircle, Shield, Building2, ClipboardList, Menu, X, LineChart, LayoutList, LogOut, Crosshair, Landmark, FileSignature, MessageSquare, Gauge, Users } from 'lucide-react';
+import { BarChart2, FileText, CheckCircle, Shield, Building2, ClipboardList, Menu, X, LineChart, LayoutList, LogOut, Crosshair, Landmark, FileSignature, MessageSquare, Gauge, Users, Newspaper } from 'lucide-react';
 import { useState } from 'react';
 import { useCounty, COUNTY_OPTIONS, type CountyScope } from '@/lib/county';
 import { FilterHint } from '@/components/FilterHint';
@@ -22,6 +22,7 @@ const NAV = [
   // Intelligence: the Market Intelligence tool's tabs, rebuilt here one at a time
   // (docs/MARKET_INTEL_MERGE_SESSION.md). Peers first; News, Legal Landscape and
   // Market Research follow as each is ported.
+  { href: '/news',             icon: Newspaper,    label: 'News',               group: 'intel', badge: 'New' },
   { href: '/peers',            icon: Users,        label: 'Peers',              group: 'intel', badge: 'New' },
   { href: '/assignments',      icon: FileText,     label: 'Raw Assignments',    group: 'data' },
   { href: '/entities',         icon: Building2,    label: 'Entities',           group: 'data' },

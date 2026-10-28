@@ -11,7 +11,8 @@
     "check:types": "tsc",
     "check:metrics": "tsx script/check-metric-directions.ts",
     "db:push": "drizzle-kit push",
-    "test:peer-intel": "tsx --test shared/peer-intel/*.test.ts"
+    "test:peer-intel": "tsx --test shared/peer-intel/*.test.ts",
+    "test:news": "tsx --test shared/news/*.test.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

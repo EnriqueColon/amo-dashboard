@@ -20,6 +20,7 @@ import type { Express, Request, Response } from "express"
 import { clearCacheByPrefix, getCached, setCached } from "../cache"
 import { buildLayerAdv, buildPeerIntelPayload, type PeerIntelPayload } from "./peer-intel-service"
 import type { PeerLayer } from "@shared/peer-intel/edgar-contract"
+import { registerNewsRoutes, scheduleNewsWarmup } from "./news/routes"
 
 const LAYERS: readonly PeerLayer[] = ["miami-dade", "florida", "national"]
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000
@@ -57,6 +58,8 @@ function isLayer(value: unknown): value is PeerLayer {
 }
 
 export function registerIntelRoutes(app: Express): void {
+  registerNewsRoutes(app)
+
   app.get("/api/intel/peers", async (req: Request, res: Response) => {
     const layer = req.query.layer ?? "miami-dade"
     if (!isLayer(layer)) {
@@ -122,4 +125,10 @@ export function schedulePeerIntelWarmup(delayMs = 15_000, everyMs = 6 * 24 * 60 
     clearCacheByPrefix(`intel:peers:${PAYLOAD_VERSION}:`)
     void run()
   }, everyMs).unref()
+}
+
+/** Every Intelligence warm-up: Peers after 15 s then every six days; News after 60 s then daily at 05:00 UTC. */
+export function scheduleIntelWarmups(): void {
+  schedulePeerIntelWarmup()
+  scheduleNewsWarmup()
 }
