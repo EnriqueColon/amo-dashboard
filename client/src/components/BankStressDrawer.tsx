@@ -162,18 +162,45 @@ export function BankStressDrawer({ cert, name, onClose, definitions }: { cert: n
             </div>
 
             <div>
-              <p className="text-xs font-semibold text-slate-700 mb-1">Flags by quarter</p>
+              <p className="text-xs font-semibold text-slate-700 mb-0.5">Which stress rules the bank tripped, quarter by quarter</p>
+              <p className="text-[11px] text-slate-500 mb-1">One row per rule, one column per quarter, oldest on the left. A red cell means the rule tripped that quarter; read across a row to see whether a problem is new or has persisted, read down a column to see how many rules fired at once. Hover a rule for its exact threshold.</p>
               <table className="text-[11px] w-full">
-                <thead><tr className="text-slate-500"><th className="text-left font-medium py-1">Quarter</th>{(definitions?.flags ?? []).map((f) => <th key={f.id} className="font-medium py-1" title={`${f.label} — ${f.rule}`}>{f.id.toUpperCase()}</th>)}<th className="text-right font-medium py-1">Tier</th><th className="text-right font-medium py-1">Composite</th></tr></thead>
+                <thead>
+                  <tr className="text-slate-500">
+                    <th className="text-left font-medium py-1 pr-2">Rule</th>
+                    {detail.history.map((h) => <th key={h.repdte} className="text-center font-medium py-1 whitespace-nowrap">{formatQuarter(h.repdte)}</th>)}
+                  </tr>
+                </thead>
                 <tbody>
-                  {[...detail.history].reverse().map((h) => (
-                    <tr key={h.repdte} className="border-t border-slate-100">
-                      <td className="py-1 text-slate-700">{formatQuarter(h.repdte)}</td>
-                      {(definitions?.flags ?? []).map((f) => <td key={f.id} className="text-center py-1">{h.flags.includes(f.id) ? <span className="inline-block h-2.5 w-2.5 rounded-full bg-red-500" /> : <span className="inline-block h-2.5 w-2.5 rounded-full bg-slate-100" />}</td>)}
-                      <td className="text-right py-1"><span className={`rounded border px-1.5 py-0.5 ${TIER_TONE[h.tier]}`}>{TIER_LABEL[h.tier]}</span></td>
-                      <td className={`text-right py-1 tabular-nums font-medium ${stressTone(h.composite)}`}>{formatScore(h.composite)}</td>
+                  {(definitions?.flags ?? []).map((f, i) => (
+                    <tr key={f.id} className="border-t border-slate-100">
+                      <td className="py-1 pr-2 text-slate-700 whitespace-nowrap" title={f.rule}><span className="text-slate-400 mr-1">{i + 1}.</span>{f.label}</td>
+                      {detail.history.map((h) => {
+                        const on = h.flags.includes(f.id)
+                        return (
+                          <td key={h.repdte} className="text-center py-1" title={`${formatQuarter(h.repdte)}: ${on ? 'tripped' : 'not tripped'} — ${f.rule}`}>
+                            <span className={`inline-block h-4 w-6 rounded-sm ${on ? 'bg-red-500' : 'bg-slate-100'}`} aria-label={on ? 'tripped' : 'clear'} />
+                          </td>
+                        )
+                      })}
                     </tr>
                   ))}
+                  <tr className="border-t border-slate-200 font-medium">
+                    <td className="py-1 pr-2 text-slate-700">Rules tripped</td>
+                    {detail.history.map((h) => <td key={h.repdte} className="text-center py-1 tabular-nums">{h.flag_count}</td>)}
+                  </tr>
+                  <tr>
+                    <td className="py-1 pr-2 text-slate-700">Tier</td>
+                    {detail.history.map((h) => <td key={h.repdte} className="text-center py-1"><span className={`rounded border px-1 py-0.5 text-[10px] ${TIER_TONE[h.tier]}`}>{TIER_LABEL[h.tier]}</span></td>)}
+                  </tr>
+                  <tr>
+                    <td className="py-1 pr-2 text-slate-700">Composite</td>
+                    {detail.history.map((h) => <td key={h.repdte} className={`text-center py-1 tabular-nums font-medium ${stressTone(h.composite)}`}>{formatScore(h.composite)}</td>)}
+                  </tr>
+                  <tr>
+                    <td className="py-1 pr-2 text-slate-700">CRE seller signal</td>
+                    {detail.history.map((h) => <td key={h.repdte} className="text-center py-1">{h.cre_seller_signal ? <span className="rounded bg-red-600 text-white px-1 py-0.5 text-[10px]">yes</span> : <span className="text-slate-300">—</span>}</td>)}
+                  </tr>
                 </tbody>
               </table>
             </div>
