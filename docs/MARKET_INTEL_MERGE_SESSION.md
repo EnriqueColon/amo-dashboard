@@ -1,6 +1,6 @@
 # Market Intelligence → AMO Dashboard merge — running session doc
 
-> **Status:** SCOPED, nothing built · **Owner:** Enrique C. · **Started:** 28 Oct 2026 · **Last updated:** 28 Oct 2026
+> **Status:** STEP 1 DONE — droplet copy live at `http://165.22.35.75/intel` (not announced; Vercel still production) · **Owner:** Enrique C. · **Started:** 28 Oct 2026 · **Last updated:** 28 Oct 2026
 >
 > Read this before doing anything on the merge. The state header above and the log at the bottom are the
 > source of truth; update both at the end of every session that touches this work. The plain-English
@@ -180,8 +180,8 @@ Steps 1–4: about a week, leaving a usable merged tool. Step 5 is optional per 
 | # | Decision | Options | Status |
 |---|---|---|---|
 | 1 | Domain + TLS for the droplet before co-hosting | Buy/point a domain → Let's Encrypt; or accept plain HTTP for now | ✅ **owner, 28 Oct 2026: merge first, DNS after.** Name will be `intelligence.safeharborcp.com` (IT adds an A record → `165.22.35.75`). Safeguard: build steps 1–3 on the droplet but **keep Vercel live and do not tell users about the droplet address until the certificate is installed**, so Market Intelligence never runs over plain HTTP for real users. Cut-over = the day the name resolves |
-| 2 | Node: relax MI's `engines` pin, or upgrade droplet to Node 24 | Relax (recommended) / upgrade | **open** |
-| 3 | Postgres: local on the droplet, or free Neon | Local (one less account) / Neon (zero ops) | **open** |
+| 2 | Node: relax MI's `engines` pin, or upgrade droplet to Node 24 | Relax (recommended) / upgrade | ✅ **neither — a third way, 28 Oct 2026:** Node 24.22.1 installed in isolation at `/opt/node24` and used only by the MI PM2 app; the system Node 22 and the AMO app are untouched, and the pin stays as Vercel wants it |
+| 3 | Postgres: local on the droplet, or free Neon | Local (one less account) / Neon (zero ops) | ✅ **local, forced, 28 Oct 2026:** Vercel will not export values it marks sensitive, so the Neon connection string could not be pulled; PostgreSQL 16 on the droplet, db `market_intelligence`, role `mi`, via a `pg` shim (`lib/db-pg.ts`). **The droplet DB starts empty** — see §7 "data not migrated" |
 | 4 | Access to `market-intelligence-tool` | — | ✅ **not needed** — the repo is public and owned by the same account (28 Oct 2026) |
 | 5 | Confirm the order: steps 1–4 first, step 5 per tab afterwards | yes / change | ✅ **confirmed by the owner, 28 Oct 2026** |
 | 6 | Which of News / Legal / Market Research are worth porting at all, vs leaving in the co-hosted app | per tab | **open — decide after step 4** |
@@ -189,6 +189,67 @@ Steps 1–4: about a week, leaving a usable merged tool. Step 5 is optional per 
 ---
 
 ## 7. Log (most recent first)
+
+### 2026-10-28 (later) — STEP 1 DONE: Market Intelligence runs on the droplet at `/intel`
+
+**What is live.** `http://165.22.35.75/intel` → login page → the five tabs. PM2 app
+`market-intelligence` (port 3100, Node 24.22.1 from `/opt/node24`, config at
+`/opt/market-intelligence.config.cjs` outside the repo), code at `/opt/market-intelligence` on branch
+**`droplet-cohost`** (`fb50fdb` + `faa4bd2`, pushed to GitHub, **not merged to `dev`/`main`**), nginx
+`location ~ ^/intel(/|$)` in `sites-available/amo-dashboard` (backup `*.before_intel.<ts>`),
+PostgreSQL 16 local. The AMO app, its port, its PM2 entry and its nginx block are unchanged; verified
+`/` still answers as before. Vercel is untouched and remains production. **Nobody has been told the
+droplet address** (plain HTTP; cut-over waits for the certificate).
+
+**Verified from the droplet shell:** unauthenticated `/intel` → 307 to `/intel/login`; wrong password →
+401; a session cookie renders the dashboard (308 KB, all five tab triggers present, so `ENABLED_TABS`
+gating is active); assets under `/intel/_next/...` → 200; the login page screenshot through nginx.
+**Not verified:** an actual browser login and each tab's data (needs the password typed on a
+production host, which is the owner's to do). Memory after both apps: ~0.9 GB used of 7.9.
+
+**Code changes (branch `droplet-cohost`, inert on Vercel because none of the variables are set there):**
+- `NEXT_PUBLIC_BASE_PATH` → Next `basePath`; `lib/base-path.ts` + the 15 client `fetch("/...")`
+  calls go through `withBasePath()`; middleware login redirects add the base path back.
+- `middleware.ts` matcher lists `'/'` explicitly — under a basePath the catch-all never matched the
+  bare `/intel`, so **the home page rendered without a session check** until this fix.
+- `COOKIE_SECURE=false` keeps the auth cookie usable over plain HTTP until TLS.
+- `lib/db-pg.ts` + `POSTGRES_DRIVER=pg`: a `pg` Pool behind the same `sql`/`sql.query` shapes;
+  `pg` added to `package.json`/lockfile and `serverExternalPackages`.
+- `fetch-research-feed.ts` self-URL precedence bug fixed (`a || b ? x : y` → "https://undefined").
+
+**Environment.** `vercel env pull` (CLI already logged in as the owner) gave 68 variables, but Vercel
+returns an **empty string for anything marked sensitive** — 22 keys, incl. `APP_PASSWORD`,
+`COOKIE_SECRET`, `CRON_SECRET`, every `POSTGRES_*`/`PG*`/`DATABASE_URL`, `BLOB_READ_WRITE_TOKEN`,
+`ANALYTICS_API_KEY`, `ANTHROPIC_API_KEY`. On the droplet (`/opt/market-intelligence/.env.production.local`,
+mode 600, gitignored, loaded by `next build`/`next start` directly — no PM2 `--update-env` for this app):
+`APP_PASSWORD` **= the AMO dashboard password** (copied from `/opt/amo-dashboard/.env` shell-side,
+merge step 3 in effect already); `COOKIE_SECRET` and `CRON_SECRET` freshly generated; `POSTGRES_URL`
+local; `VERCEL*`/`TURBO*` dropped; `APP_URL`/`NEXT_PUBLIC_APP_URL=http://127.0.0.1:3100/intel`;
+`NODE_OPTIONS=--dns-result-order=ipv4first` in the PM2 config (the droplet has no IPv6 route and the
+first FDIC fetch hit ETIMEDOUT). Tables: `init-db` created three, the other four create themselves on
+first use (`bill-status-tracking.ts`, `fetch-industry-outlook.ts`, `institution-watchlist.ts`,
+`feed-reports/route.ts`). Crons staged in `crontab -l` **commented out** (05:00 warm-cache, 05:15
+warm-briefs, same as `vercel.json`) — enabling them before cut-over would double the OpenAI spend.
+
+**Open from this step (carry to cut-over):**
+1. **Data not migrated.** The droplet DB is empty: no uploaded research reports, no watchlist, no bill
+   history, cold caches. Migrating needs the Neon connection string, which only the Vercel dashboard
+   shows (Storage → the database → `.env.local` tab). Owner action: paste `POSTGRES_URL` into the
+   droplet env **or** run `pg_dump` from a machine that has it; a `pg_restore` into
+   `market_intelligence` then takes minutes. Same for `BLOB_READ_WRITE_TOKEN` to copy the PDFs (step 2).
+2. **The Real Deal blocks the droplet.** `therealdeal.com` (JSON API *and* RSS) answers the droplet
+   with `202` and an empty body — a bot-manager verdict on the DigitalOcean IP; this Mac gets 403 to
+   the same URLs; Vercel's warm runs report `subscriberSources: ok`. The News tab's "Subscriber
+   sources" picks will be empty on the droplet. Options: fetch that one source through a proxy, keep
+   a tiny Vercel function for it, or accept the loss. Decide before cut-over.
+3. **Branch not merged.** `droplet-cohost` must be merged into `dev` → `main` by the owner's MI
+   workflow so future releases carry the base-path code; otherwise the droplet stays pinned to today's
+   code. Droplet update procedure once merged:
+   `cd /opt/market-intelligence && git pull && PATH=/opt/node24/bin:$PATH npm ci && npm run build && pm2 restart market-intelligence`.
+4. Blob upload paths (`handle-upload`, `token-preflight`, `register-upload`) fail on the droplet with
+   the token unset — expected, replaced in step 2.
+5. `ANALYTICS_API_KEY` unset → `/api/analytics/v1/*` closed on the droplet — expected, step 4.
+6. The ENABLED_TABS value carries a trailing `\n` from Vercel (`…,news-v2\n`); harmless after `trim()`.
 
 ### 2026-10-28 — Scoped; nothing built
 - Owner asked to merge the Vercel tool into AMO "in an efficient manner" and supplied a code-level

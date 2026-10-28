@@ -4,7 +4,15 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
-## 2026-10-28 (latest) — Market Intelligence merge SCOPED (doc only, nothing built)
+## 2026-10-28 (latest) — Market Intelligence merge STEP 1 DONE: MI runs on the droplet at `/intel` (Vercel untouched, not announced)
+
+Owner: "Yes, start step 1." Full record in **`docs/MARKET_INTEL_MERGE_SESSION.md` §7**; the essentials:
+
+- **Live:** `http://165.22.35.75/intel` — PM2 app `market-intelligence` (port 3100), **isolated Node 24.22.1 at `/opt/node24`** (system Node 22 + AMO untouched), code `/opt/market-intelligence` on MI branch **`droplet-cohost`** (2 commits, pushed, **not merged to MI `main`**), nginx `location ~ ^/intel(/|$)` added to `sites-available/amo-dashboard` (backup kept), **PostgreSQL 16 installed** (db `market_intelligence`, role `mi`, local only). AMO's `/` verified unchanged. Password for MI on the droplet = `AMO_PASSWORD` (step 3 already in effect). Crons staged commented-out; Vercel stays production until the certificate.
+- **Gotchas found:** Vercel exports empty strings for sensitive env vars (22 keys, incl. the Neon DB URL → forced local Postgres + `pg` shim, DB starts **empty**); Next basePath skips middleware on the bare base path (home page rendered without auth until the matcher got `'/'`); PM2 only treats `*.config.cjs` as an app definition; `therealdeal.com` bot-blocks the droplet IP (202, empty body) — News "Subscriber sources" will be empty there; droplet has no IPv6 route → `--dns-result-order=ipv4first`.
+- **Before cut-over (owner):** merge `droplet-cohost` into MI `dev`→`main`; provide the Neon `POSTGRES_URL` (Vercel dashboard only) so watchlist/reports/bill history can be migrated; decide on The Real Deal; IT adds the A record for `intelligence.safeharborcp.com`.
+
+## 2026-10-28 (earlier) — Market Intelligence merge SCOPED (doc only, nothing built)
 
 User: merge the Vercel-hosted **Market Intelligence** tool (private Next.js 15 repo `EnriqueColon/market-intelligence-tool`, ~82k lines, 49 server actions, five tabs, Vercel Postgres/Blob/cron, single shared password) into this dashboard "in an efficient manner". Output: **`docs/MARKET_INTEL_MERGE_SESSION.md`** — the running doc for the merge; read it before touching the work. No code, production and Vercel untouched.
 
