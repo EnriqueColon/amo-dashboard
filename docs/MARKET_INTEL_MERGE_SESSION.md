@@ -21,7 +21,7 @@ The goal is one tool, one server, one login: Market Intelligence folded into the
 
 | Item | Fact |
 |---|---|
-| Repo | `github.com/EnriqueColon/market-intelligence-tool` — **private** (invite needed) |
+| Repo | `github.com/EnriqueColon/market-intelligence-tool` — owned by the same GitHub account as this repo and **public** (checked with `gh repo view` on 28 Oct 2026; the code-read notes called it private). No invite or deploy key needed; the droplet can clone it directly |
 | Size | ~406 TS/TSX files, ~82k lines across `app/`, `lib/`, `components/`; **49 server actions**, 12 API route groups |
 | Framework | Next.js 15.5.12, App Router, React 18.3, Tailwind 4, Radix/shadcn, TypeScript; **Node 24.x pinned in `engines`** |
 | Runtime | Every route handler is `runtime = "nodejs"`. No edge functions, no KV, no Upstash, no AI SDK |
@@ -81,8 +81,9 @@ is worth owning.
 AMO dashboard and start it there as a second program running side by side. Nothing about the app
 changes yet; it just runs in a different place, at an address like `http://server/intel`.*
 
-- Clone the private repo to its own folder on the droplet (e.g. `/opt/market-intelligence`).
-  **Never copy MI code into `amo-dashboard` — that repo is public and MI's is private.**
+- Clone the repo to its own folder on the droplet (e.g. `/opt/market-intelligence`).
+  **Keep MI code in its own repo, never inside `amo-dashboard`** — separate history, separate
+  deploy, and both repos are public so no secrets in either.
 - `next.config.mjs`: set `basePath: '/intel'` (and `assetPrefix`) so it lives under a path.
 - nginx: `location /intel/ { proxy_pass http://127.0.0.1:<port>; }` beside the existing AMO block.
 - PM2: second app `market-intelligence` (`next start -p <port>`), `pm2 save`. Same `--update-env`
@@ -165,9 +166,10 @@ Steps 1–4: about a week, leaving a usable merged tool. Step 5 is optional per 
   `gpt-4.1-mini` call sites are unaffected today. Same family, same deprecation track: centralize
   MI's six model env vars in one place so the next retirement is a one-line change. A 404
   `model_not_found` should abort loudly (AMO's `extract_pdfs.py` convention).
-- **Public vs private repo.** MI code must stay in its own repo. The `amo-dashboard` origin remote
-  still carries a plaintext PAT (Confluence §7.6 item 1) — fix that before adding a second deploy
-  key to the droplet.
+- **Both repos are public.** MI code still stays in its own repo (separate history, separate deploy),
+  but there is no privacy boundary between them. Both being public means **no secrets may ever be
+  committed to either** — check MI's history for `.env` files or keys before cloning it onto the
+  droplet. The `amo-dashboard` origin remote still carries a plaintext PAT (Confluence §7.6 item 1).
 - **Peers readings convention.** Never have a model write a reading; they are computed from the
   figures on screen. Carry this into any port.
 
@@ -180,7 +182,7 @@ Steps 1–4: about a week, leaving a usable merged tool. Step 5 is optional per 
 | 1 | Domain + TLS for the droplet before co-hosting | Buy/point a domain → Let's Encrypt; or accept plain HTTP for now | ✅ **owner, 28 Oct 2026: merge first, DNS after.** Name will be `intelligence.safeharborcp.com` (IT adds an A record → `165.22.35.75`). Safeguard: build steps 1–3 on the droplet but **keep Vercel live and do not tell users about the droplet address until the certificate is installed**, so Market Intelligence never runs over plain HTTP for real users. Cut-over = the day the name resolves |
 | 2 | Node: relax MI's `engines` pin, or upgrade droplet to Node 24 | Relax (recommended) / upgrade | **open** |
 | 3 | Postgres: local on the droplet, or free Neon | Local (one less account) / Neon (zero ops) | **open** |
-| 4 | Invite `enriquec012@outlook.com`'s GitHub identity to `market-intelligence-tool` | — | **open** |
+| 4 | Access to `market-intelligence-tool` | — | ✅ **not needed** — the repo is public and owned by the same account (28 Oct 2026) |
 | 5 | Confirm the order: steps 1–4 first, step 5 per tab afterwards | yes / change | ✅ **confirmed by the owner, 28 Oct 2026** |
 | 6 | Which of News / Legal / Market Research are worth porting at all, vs leaving in the co-hosted app | per tab | **open — decide after step 4** |
 
@@ -202,4 +204,7 @@ Steps 1–4: about a week, leaving a usable merged tool. Step 5 is optional per 
 - **Gotcha to check in the MI code once the repo is readable:** if `POST /api/auth` sets the
   `auth_token` cookie with `secure: true` in production, browsers will refuse to send it over plain
   HTTP, and login on the droplet will silently fail until TLS lands. Make it follow an env flag.
-- **Next:** repo invite (decision 4), then step 1 on the droplet.
+- **Repo access resolved:** `gh repo view` shows the repo is public and owned by the same account
+  as this one, so decision 4 is moot. Nothing blocks step 1 now.
+- **Next:** step 1 on the droplet (clone to `/opt/market-intelligence`, basePath, nginx, PM2),
+  keeping Vercel live.
