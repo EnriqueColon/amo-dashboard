@@ -1,6 +1,6 @@
 # Market Intelligence → AMO Dashboard merge — running session doc
 
-> **Status:** STEP 1 DONE — droplet copy live at `http://165.22.35.75/intel` (not announced; Vercel still production) · **Owner:** Enrique C. · **Started:** 28 Oct 2026 · **Last updated:** 28 Oct 2026
+> **Status:** STEPS 1–3 DONE — droplet copy live at `http://165.22.35.75/intel` with no Vercel service left in use (not announced; Vercel still production) · **Owner:** Enrique C. · **Started:** 28 Oct 2026 · **Last updated:** 28 Oct 2026
 >
 > Read this before doing anything on the merge. The state header above and the log at the bottom are the
 > source of truth; update both at the end of every session that touches this work. The plain-English
@@ -189,6 +189,49 @@ Steps 1–4: about a week, leaving a usable merged tool. Step 5 is optional per 
 ---
 
 ## 7. Log (most recent first)
+
+### 2026-10-28 (latest) — STEP 2 DONE: no Vercel service in use on the droplet; `droplet-cohost` merged into `dev`
+
+Owner: "Works, continue" after logging in at `/intel` and clicking through the tabs (the first
+browser verification). Asked for step 2 and for the branch to be merged into MI's `dev`.
+
+**Branches.** `droplet-cohost` merged into `dev` (`ae1da23`), then step 2 on `vercel-services-swap`
+(`3dc1987`) merged into `dev` as a fast-forward. **The droplet now tracks `dev`** (same tree as the
+running build, no rebuild needed). MI `main` still lacks all of it until the owner's next "push to
+production"; none of it does anything on Vercel because the switches are droplet-only env vars.
+
+**Blob → disk** (`lib/report-storage.ts`, new route `app/api/research/upload-file`). With
+`REPORT_STORAGE=disk` and `NEXT_PUBLIC_REPORT_STORAGE=disk` the browser posts the PDF to the server
+instead of running the Blob token handshake; files live under `REPORT_STORAGE_DIR` =
+`/opt/market-intelligence-uploads` (outside the repo, mode 700) and are recorded in `research_reports`
+as `local-report://market-research/YYYY/MM/<file>.pdf`. `register-upload`, `summarize-report` and
+`report-file` read bytes through one helper that handles both Blob and disk; `delete-report` removes
+the file with its row; `token-preflight`/`transfer-diagnostics`/`blob-health` report disk mode. The
+two `report-file` links and the Blob handshake URL now go through `withBasePath`. **Verified end to
+end from the droplet shell:** upload → file on disk → register (id 1) → listed → downloaded as
+`application/pdf` → deleted, 0 files left. `@vercel/analytics` renders only when `VERCEL=1`.
+Not verified: the upload form in a browser (needs the admin upload token typed on a production host).
+
+**Postgres** — done in step 1 (local, `pg` shim). **Crons** — staged in step 1, still commented out.
+**Analytics API** — closed on the droplet (`ANALYTICS_API_KEY` unset); the routes themselves are
+step 4. So nothing on the droplet copy talks to Vercel any more.
+
+**Backups.** The droplet is now the only place MI's database and uploads exist, so
+`collector/run_mi_backup.sh` (amo-dashboard `78e3e0a`) dumps `market_intelligence` with
+`pg_dump --clean --if-exists`, checks the trailer, ships to the Space under `mi_db/` and copies the
+uploads folder to `mi_uploads/` (copy, never sync), keeps 7 local. First run: ok, 4 tables, 2 KB.
+Cron **03:45 UTC** installed. Restore: `gunzip -c mi-<stamp>.sql.gz | sudo -u postgres psql market_intelligence`.
+
+**The Real Deal, re-tested:** CloudFront answers the droplet with `202` and an empty body on the
+JSON API and both RSS feeds, with or without full Chrome headers — an AWS WAF bot-control verdict on
+the IP range, not something a header fixes. The owner saw the resulting "Subscriber sources
+unavailable today" banner in the UI. Still a cut-over decision (§7 step-1 entry, item 2).
+
+**Open:** unchanged from step 1 — data migration from Neon (needs the connection string from the
+Vercel dashboard), The Real Deal, DNS/TLS; plus the owner's next "push to production" to carry
+`dev` into `main`. Next: step 4 (hide Market Analytics via `ENABLED_TABS`, disable
+`/api/analytics/v1/*`) once the Bank Stress stage 4 job verifies on 29 Oct, and the nav link in the
+AMO sidebar (the rest of step 3).
 
 ### 2026-10-28 (later) — STEP 1 DONE: Market Intelligence runs on the droplet at `/intel`
 

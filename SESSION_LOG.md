@@ -4,7 +4,16 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
-## 2026-10-28 (latest) — Market Intelligence merge STEP 1 DONE: MI runs on the droplet at `/intel` (Vercel untouched, not announced)
+## 2026-10-28 (latest) — Market Intelligence merge STEP 2 DONE: no Vercel service used by the droplet copy; MI backups; droplet tracks MI `dev`
+
+Owner logged in at `/intel`, tabs work ("Works, continue"). Details in `docs/MARKET_INTEL_MERGE_SESSION.md` §7.
+
+- **Blob → disk:** `lib/report-storage.ts` + `app/api/research/upload-file` in the MI repo (branch `vercel-services-swap` → merged into `dev`, droplet checkout now on `dev`); files under `/opt/market-intelligence-uploads`, rows record `local-report://…`; verified upload→register→list→download→delete from the shell. `@vercel/analytics` only when `VERCEL=1`. Postgres (step 1) and crons (staged, commented) already done → nothing on the droplet copy talks to Vercel.
+- **New here:** `collector/run_mi_backup.sh` (`78e3e0a`) — nightly 03:45 UTC `pg_dump` of `market_intelligence` + copy of the uploads folder to the Space (`mi_db/`, `mi_uploads/`); first run ok; cron installed on the droplet.
+- **The Real Deal:** CloudFront/WAF blocks the droplet IP (202, empty) even with browser headers — owner saw the "Subscriber sources unavailable" banner; cut-over decision, not fixable here.
+- **Open:** Neon data migration (owner must fetch the connection string from the Vercel dashboard), TRD, DNS/TLS, owner's "push to production" to carry `dev`→`main`. Next: step 4 after Bank Stress stage 4 verifies 29 Oct; AMO sidebar link.
+
+## 2026-10-28 (earlier) — Market Intelligence merge STEP 1 DONE: MI runs on the droplet at `/intel` (Vercel untouched, not announced)
 
 Owner: "Yes, start step 1." Full record in **`docs/MARKET_INTEL_MERGE_SESSION.md` §7**; the essentials:
 
