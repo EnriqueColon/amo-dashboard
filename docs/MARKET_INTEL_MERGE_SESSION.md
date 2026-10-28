@@ -1,6 +1,6 @@
 # Market Intelligence → AMO Dashboard merge — running session doc
 
-> **Status:** REBUILD STARTED — dashboard renamed **SHCP Intelligence Platform**, Intelligence section live with **Peers ported and deployed** (28 Oct 2026); bridge copy still at `/intel`; Vercel still production for the other three tabs · **Owner:** Enrique C. · **Started:** 28 Oct 2026 · **Last updated:** 28 Oct 2026
+> **Status:** REBUILD IN PROGRESS — dashboard renamed **SHCP Intelligence Platform**; Intelligence section live with **Peers and News ported and deployed** (28 Oct 2026), The Real Deal reached through a relay; Legal Landscape and Market Research next; bridge copy still at `/intel`; Vercel still production for those two · **Owner:** Enrique C. · **Started:** 28 Oct 2026 · **Last updated:** 28 Oct 2026
 >
 > Read this before doing anything on the merge. The state header above and the log at the bottom are the
 > source of truth; update both at the end of every session that touches this work. The plain-English
@@ -142,8 +142,8 @@ tool's own unit tests for that tab's logic carried over. **All four tabs are por
 | Phase | Work | Effort |
 |---|---|---|
 | **A. Clear the ground** | step 4 (hide Market Analytics, close the analytics API) after the 29 Oct stage 4 check; copy watchlist / reports / bill history from Neon (owner supplies the connection string); decide The Real Deal | ~2 days |
-| **B. Foundation in the dashboard** | ✅ **Rename done 28 Oct** (title, login, sidebar, email subject/header, activity report, workbook, chat prompt); ✅ **Intelligence sidebar section done**; still to do when News lands: OpenAI Responses-API client in Express + cache tables, shared article/card components, glossary entries | ~3 days → ~1.5 left |
-| **C. Rebuild the tabs** | ✅ **Peers DONE and deployed 28 Oct** (see §7) → News 4–6 d → Legal Landscape 4–6 d → Market Research 5–7 d; each switched off in the bridge app as it lands | 3–4 weeks |
+| **B. Foundation in the dashboard** | ✅ **Done 28 Oct**: rename (title, login, sidebar, email subject/header, activity report, workbook, chat prompt); Intelligence sidebar section; OpenAI Responses-API client (`server/intel/openai.ts`); `intel.db` SQLite with the daily cache (`server/intel/db.ts`, `cache-shim.ts`). Still open: glossary entries for the new pages | done |
+| **C. Rebuild the tabs** | ✅ **Peers DONE 28 Oct** · ✅ **News DONE 28 Oct** (+ The Real Deal relay) → Legal Landscape 4–6 d → Market Research 5–7 d; each switched off in the bridge app as it lands | 2–3 weeks left |
 | **D. Cut over and retire** | DNS + TLS, users get the new name; remove the bridge app, its nginx route, PM2 entry, Postgres and backup job; close the Vercel project | ~2 days |
 
 Total ≈ 5–6 weeks of build. **Design call pending with the owner:** the ported data lives in the
@@ -204,6 +204,66 @@ Steps 1–4: about a week, leaving a usable merged tool. Step 5 is optional per 
 ---
 
 ## 7. Log (most recent first)
+
+### 2026-10-28 (late night) — NEWS ported and deployed (`f6ae539`); The Real Deal relay (`8afad40`)
+
+Owner: "Yes, News next", then — on seeing "Subscriber sources unavailable" — asked whether adding
+the firm's Real Deal login would help. It would not (the block is CloudFront bot control on the
+droplet's IP, answered before any credential is read, and the tool uses the public article API,
+not a subscriber one); the owner chose the relay.
+
+**Size, from the code:** ~9,000 lines of server code (feeds, briefs, digest, outlook, The Real
+Deal) and 2,100 of UI, plus two test suites. Portable the same way Peers was: pure libraries with no
+dependencies, components on shadcn + lucide, and only two Next-isms — `unstable_cache` everywhere
+and `after()` in the server-rendered preload (dropped; the page fetches).
+
+**What landed (amo-dashboard `f6ae539`):**
+- `server/intel/db.ts` — **`intel.db`**, the section's own SQLite beside the AMO database (env
+  `AMO_INTEL_DB_PATH`), table `intel_cache(key, value, created_at, expires_at)`. This is where the
+  owner's "SQLite for the ported data" lands: feeds, memos and briefs persist across restarts.
+- `server/intel/cache-shim.ts` — `unstable_cache(fn, keyParts, { revalidate })` with Next's
+  signature on that table, so ~40 call sites were untouched: served until expiry, **a throwing
+  build stores nothing**, concurrent builds of one key coalesced. No stale-while-revalidate; the
+  daily warm-up exists so no user's request is the one that regenerates.
+- `server/intel/openai.ts` — the tool's Responses-API client verbatim (web search, domain
+  filters, citation stripping). Reads `OPENAI_API_KEY`, which the droplet already had for Ask the
+  Data, plus optional `OPENAI_SMART_MODEL`/`OPENAI_FAST_MODEL`/`OPENAI_SEARCH_FILTER_MODEL`.
+- `server/intel/news/` — the actions/services (`fetch-public-mentions`, `fetch-investing-news`,
+  `fetch-subscriber-sources`, `fetch-news-summary`, `fetch-article-digest`, `fetch-trd-article`,
+  `news-access`, `fetch-open-backfill`, `trd-service`, `memo-evidence`, `verified-metrics`,
+  `industry-outlook/*`) with import paths rewritten; `pdf-text-extraction.js` became an ES module
+  (`.mjs` + `.d.mts`) because this repo is ESM. **The outlook's Florida figures come from
+  `bank_stress.db`** (`industry-outlook/florida-cohort.ts`, this dashboard's CRE definition) instead
+  of the tool's live FDIC pull — 1,800 lines of FDIC client not carried over, and the memo now
+  agrees with the bank pages. FRED series stay keyless CSV fetches.
+- `server/intel/news/routes.ts` — `/api/intel/news/{public-mentions,investing-news,subscriber-sources,outlook,brief,trd-article,digest/url,digest/text,digest/file,warm}`;
+  a PDF for the digest travels as base64 JSON (the action's 15 MB cap applies). `warmNews()` =
+  the tool's `warm-cache` + `warm-briefs`: outlook → 3 levels × 2 feeds → picks → briefs for the
+  first 8 rows per list; after start and **daily 05:00 UTC** in-process (`scheduleIntelWarmups`).
+- `shared/news/` — `trd.ts`, `morning.ts`, `news-tab-cache.ts` + tests (**26 pass**,
+  `npm run test:news`). `client/src/components/intel/news/*` + `pages/News.tsx`, data through
+  `lib/intel/news-api.ts`. Sidebar: **News** under Intelligence, route `/news`.
+- Verified locally (dev server, no OpenAI key): morning scan, 10 Real Deal picks (the Mac is not
+  blocked), both feeds, the fallback memo carrying the bank_stress figures ($77.4B CRE, 30.9%,
+  0.92% noncurrent, 80 institutions, Q2 2026), console clean. `npm run check` + `npm run build` pass.
+- Production (deployed 18:47 UTC): outlook generated by OpenAI in 59 s (4,891 chars, FRED Q2 2026
+  figures); public-mentions miami 20 items from cache in 6 ms; picks **0** — the known block.
+
+**The Real Deal relay (`8afad40`, `tools/trd-relay/`).** One Vercel serverless function
+(project **`trd-relay`**, `https://trd-relay.vercel.app/api/trd?url=…`, header `x-relay-key`):
+GET only, forwards to `therealdeal.com` only, returns the upstream status/body, no credentials.
+Verified from the Mac: 401 without key, 400 for another host, 200 with two live posts. Vercel env
+`RELAY_KEY`; droplet `.env` **and** PM2 (`--update-env`, exporting only those two) carry
+`TRD_RELAY_URL` + `TRD_RELAY_KEY`. `trd-service.ts` goes through the relay when `TRD_RELAY_URL` is
+set, direct otherwise (Vercel copy unchanged). **Production after the restart: 10 picks, both
+queries 200 (45 + 92 posts), full-text Read of post 1059627 in 0.44 s.** This is the one piece
+that stays on Vercel after cut-over: free tier, no data, ~60 lines.
+
+**Open from this slice:** (1) the daily News warm-up runs > 6 minutes (≈48 briefs at ~5 s each
+after the outlook) — fine at 05:00 UTC, but the post-deploy warm overlaps a visitor's first load; (2)
+no glossary entries for News/Peers; (3) the bridge app's News and Peers tabs are still on at
+`/intel` — switch off with step 4; (4) the Confluence page title; (5) the `Session.md` in the repo
+root is the owner's parallel UI-brainstorm session's log, not this work — left untracked.
 
 ### 2026-10-28 (night) — REBUILD STARTED: renamed SHCP Intelligence Platform; Peers ported, tested, deployed (`3041116`)
 

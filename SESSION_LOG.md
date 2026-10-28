@@ -4,6 +4,16 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-10-28 (late night) — NEWS PORTED + DEPLOYED (`f6ae539`, prod 18:47 UTC); THE REAL DEAL RELAY (`8afad40`)
+
+Owner: "Yes, News next"; then chose a relay over adding the firm's Real Deal login (the block is CloudFront bot control on the droplet IP, not a subscription). Full record in `docs/MARKET_INTEL_MERGE_SESSION.md` §7.
+
+- **intel.db** (`server/intel/db.ts`, beside the AMO DB, env `AMO_INTEL_DB_PATH`) with `intel_cache`; `server/intel/cache-shim.ts` = Next's `unstable_cache` signature on that table (failures never stored). `server/intel/openai.ts` = the tool's Responses-API client (uses the droplet's existing `OPENAI_API_KEY`).
+- **News:** `server/intel/news/*` (actions/services verbatim, paths rewritten; `pdf-text-extraction` → `.mjs`), `/api/intel/news/*`, `warmNews()` after start + daily 05:00 UTC; `shared/news/*` (26 tests pass, `npm run test:news`); `client/src/components/intel/news/*` + `pages/News.tsx`; sidebar **News** under Intelligence. **Outlook's Florida figures now from `bank_stress.db`** (`industry-outlook/florida-cohort.ts`), not a live FDIC pull.
+- **Relay:** `tools/trd-relay/` → Vercel project `trd-relay` (`https://trd-relay.vercel.app/api/trd`), key in Vercel env `RELAY_KEY`; droplet `.env` + PM2 carry `TRD_RELAY_URL`/`TRD_RELAY_KEY` (**keep the two in step**, `--update-env` with only those exported). Prod after restart: 10 picks, both queries 200, Read view 0.44 s.
+- **Prod checks:** outlook via OpenAI 59 s; feeds from cache in ms; `pdftotext`/`tesseract`/`pdftoppm` present for file digests.
+- **Open:** warm-up > 6 min (48 briefs); glossary for News/Peers; bridge app tabs still on (step 4); Confluence title. `Session.md` at repo root = owner's parallel UI-brainstorm log, untracked, not ours.
+
 ## 2026-10-28 (night) — RENAMED "SHCP Intelligence Platform"; Intelligence section; PEERS PORTED + DEPLOYED (`3041116`, prod 17:44 UTC)
 
 Owner: full integration of Market Intelligence into this dashboard, renamed SHCP Intelligence Platform; "Start now". Full record in `docs/MARKET_INTEL_MERGE_SESSION.md` §7.
