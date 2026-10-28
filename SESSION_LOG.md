@@ -4,6 +4,16 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-10-28 (latest) — Market Intelligence merge SCOPED (doc only, nothing built)
+
+User: merge the Vercel-hosted **Market Intelligence** tool (private Next.js 15 repo `EnriqueColon/market-intelligence-tool`, ~82k lines, 49 server actions, five tabs, Vercel Postgres/Blob/cron, single shared password) into this dashboard "in an efficient manner". Output: **`docs/MARKET_INTEL_MERGE_SESSION.md`** — the running doc for the merge; read it before touching the work. No code, production and Vercel untouched.
+
+- **Decision: co-host first, port tabs second.** 1 run MI on the droplet as a second PM2 app behind nginx at `/intel` (cloned to its own folder — **never into this public repo**); 2 swap crons → crontab, Blob → disk folder, Postgres → local/Neon, drop `@vercel/analytics`; 3 one login (`APP_PASSWORD = AMO_PASSWORD`, AMO login also sets MI's `auth_token` cookie); 4 hide the Market Analytics tab + `/api/analytics/v1/*` — Bank Stress stages 1–3 already superseded them and nothing here reads MI; 5 port tabs into the React client one at a time, Peers → News → Legal → Market Research last/never. Steps 1–4 ≈ a week.
+- **Open before step 1:** domain + TLS on the droplet (MI loses HTTPS otherwise); relax MI's Node 24 pin (droplet is 22.23.4, Next 15 needs 18.18+); local Postgres vs Neon; invite to the private repo; move MI's 05:00/05:15 crons off the collector window. Six owner decisions tabled in the doc §6.
+- Also noted: the 24 Oct LLM outage was `gpt-4.1-nano` retirement, not the key — MI's `gpt-4.1-mini` is fine today, same deprecation track.
+
+---
+
 ## 2026-10-28 (later) — Palm Beach expansion SCOPED again (research + doc only, nothing built)
 
 User: "expand the AOM document collection to West Palm Beach — scope process and tool integration." Output: `docs/PALM_BEACH_EXPANSION_SCOPE.md`. No code, production untouched.
