@@ -177,7 +177,7 @@ Steps 1–4: about a week, leaving a usable merged tool. Step 5 is optional per 
 
 | # | Decision | Options | Status |
 |---|---|---|---|
-| 1 | Domain + TLS for the droplet before co-hosting | Buy/point a domain → Let's Encrypt; or accept plain HTTP for now | **open** |
+| 1 | Domain + TLS for the droplet before co-hosting | Buy/point a domain → Let's Encrypt; or accept plain HTTP for now | ✅ **owner, 28 Oct 2026: merge first, DNS after.** Name will be `intelligence.safeharborcp.com` (IT adds an A record → `165.22.35.75`). Safeguard: build steps 1–3 on the droplet but **keep Vercel live and do not tell users about the droplet address until the certificate is installed**, so Market Intelligence never runs over plain HTTP for real users. Cut-over = the day the name resolves |
 | 2 | Node: relax MI's `engines` pin, or upgrade droplet to Node 24 | Relax (recommended) / upgrade | **open** |
 | 3 | Postgres: local on the droplet, or free Neon | Local (one less account) / Neon (zero ops) | **open** |
 | 4 | Invite `enriquec012@outlook.com`'s GitHub identity to `market-intelligence-tool` | — | **open** |
@@ -196,6 +196,10 @@ Steps 1–4: about a week, leaving a usable merged tool. Step 5 is optional per 
 - Decided co-host-first (section 2), wrote the five steps (section 3), effort (4), risks (5), and the
   six open decisions (6). Saved the plan to Claude's memory so future sessions start here.
 - No code, no production change, no Vercel change.
-- **Owner confirmed decision 5 (the order) the same day.** Decisions 1–4 and 6 remain open.
-- **Next:** owner answers decisions 1–4; then step 1 on the droplet (needs the repo invite and a deploy
-  key for the private repo).
+- **Owner confirmed decision 5 (the order) the same day**, and decision 1: **merge first, DNS record
+  after**; the name will be `intelligence.safeharborcp.com`, added by company IT. Vercel stays live
+  until the certificate is on the droplet (see §6 row 1). Decisions 2, 3, 4 and 6 remain open.
+- **Gotcha to check in the MI code once the repo is readable:** if `POST /api/auth` sets the
+  `auth_token` cookie with `secure: true` in production, browsers will refuse to send it over plain
+  HTTP, and login on the droplet will silently fail until TLS lands. Make it follow an env flag.
+- **Next:** repo invite (decision 4), then step 1 on the droplet.
