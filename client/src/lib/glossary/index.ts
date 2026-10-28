@@ -18,8 +18,9 @@ import { GLOSSARY as collectionLog } from './collection-log'
 import { GLOSSARY as entities } from './entities'
 import { GLOSSARY as targets } from './targets'
 import { GLOSSARY as bankStress } from './bank-stress'
+import { GLOSSARY as news } from './news'
 
 export const COLUMN_GLOSSARY: Record<string, MetricDef> = {
   ...assignments, ...cleanEvents, ...reporting, ...ucc, ...creditFacilities,
-  ...privateCredit, ...collectionLog, ...entities, ...targets, ...bankStress,
+  ...privateCredit, ...collectionLog, ...entities, ...targets, ...bankStress, ...news,
 }

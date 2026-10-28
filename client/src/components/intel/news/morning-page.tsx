@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
-import { BookOpen, ExternalLink, FileText } from "lucide-react"
+import { BookOpen, ExternalLink, FileText, Newspaper, Search } from "lucide-react"
+import { DefTerm } from "@/components/DefTerm"
 import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { IndustryOutlook } from "./industry-outlook"
 import { ArticleDigest } from "./article-digest"
@@ -88,6 +88,9 @@ export function NewsMorningPage({ initialNews }: { initialNews?: InitialNewsData
   })
 
   const [topic, setTopic] = useState("All")
+  const [region, setRegion] = useState<"all" | MorningLevel>("all")
+  const [onlyNew, setOnlyNew] = useState(false)
+  const [search, setSearch] = useState("")
   const [showAllIndustry, setShowAllIndustry] = useState(false)
   const [showAllFinance, setShowAllFinance] = useState(false)
   const [briefTarget, setBriefTarget] = useState<BriefTarget | null>(null)
@@ -136,9 +139,18 @@ export function NewsMorningPage({ initialNews }: { initialNews?: InitialNewsData
   const financeRows = useMemo(() => newestFirst(withoutUrls(finance.items ?? [], pickUrls)), [finance.items, pickUrls])
 
   const chips = topicChips([...picks, ...industryRows, ...financeRows])
-  const visiblePicks = byTopic(picks, topic)
-  const visibleIndustry = byTopic(industryRows, topic)
-  const visibleFinance = byTopic(financeRows, topic)
+  const q = search.trim().toLowerCase()
+  const narrow = <T extends { region: string; date?: string; title: string; snippet?: string; source?: string }>(rows: T[]): T[] =>
+    rows.filter(
+      (r) =>
+        (region === "all" || r.region === region) &&
+        (!onlyNew || isSinceYesterday(r.date, today)) &&
+        (!q || `${r.title} ${r.snippet ?? ""} ${r.source ?? ""}`.toLowerCase().includes(q))
+    )
+  const visiblePicks = narrow(byTopic(picks, topic))
+  const visibleIndustry = narrow(byTopic(industryRows, topic))
+  const visibleFinance = narrow(byTopic(financeRows, topic))
+  const newCount = [...picks, ...industryRows, ...financeRows].filter((r) => isSinceYesterday(r.date, today)).length
 
   const trdReport = subscriber?.sources.find((s) => s.source === "The Real Deal")
   const asOf = subscriber?.generatedAt ? subscriber.generatedAt.slice(0, 10) : undefined
@@ -147,85 +159,132 @@ export function NewsMorningPage({ initialNews }: { initialNews?: InitialNewsData
     setBriefTarget({ title: item.title, url: item.resolved_url || item.url, source: item.source, date: item.date, summary: item.snippet, level })
   }
 
-  const recentPill = (date?: string) =>
-    isSinceYesterday(date, today) ? (
-      <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 ring-1 ring-emerald-200">Since yesterday</span>
-    ) : null
+  const th = (label: string, extra = "") => (
+    <th className={`py-2 px-2 text-left font-medium text-slate-600 whitespace-nowrap ${extra}`}>
+      <DefTerm term={`news:${label}`}>{label}</DefTerm>
+    </th>
+  )
 
-  const renderList = (rows: FeedItem[], showAll: boolean, onShowAll: () => void, emptyText: string, error?: string, loading?: boolean) => {
-    if (loading) {
-      return (
-        <div className="space-y-3 py-2">
-          <Skeleton className="h-4 w-10/12" />
-          <Skeleton className="h-4 w-8/12" />
-          <Skeleton className="h-4 w-11/12" />
-        </div>
-      )
-    }
-    if (error) return <p className="py-2 text-sm text-amber-700">Could not load this list: {error}</p>
-    if (rows.length === 0) return <p className="py-2 text-sm text-slate-600">{emptyText}</p>
+  const dateCell = (date?: string) => (
+    <td className="py-2 px-2 align-top whitespace-nowrap tabular-nums text-slate-600">
+      {date || "—"}
+      {isSinceYesterday(date, today) ? (
+        <span className="ml-1.5 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 ring-1 ring-emerald-200">new</span>
+      ) : null}
+    </td>
+  )
+
+  const headlineCell = (title: string, href: string | undefined, snippet: string | undefined, clamp = "line-clamp-1") => (
+    <td className="py-2 px-2 align-top min-w-[320px]">
+      {href ? (
+        <a href={href} target="_blank" rel="noreferrer" className="text-[13px] font-medium leading-snug text-slate-900 hover:text-primary hover:underline">
+          {title}
+        </a>
+      ) : (
+        <span className="text-[13px] font-medium leading-snug text-slate-900">{title}</span>
+      )}
+      {snippet ? <p className={`mt-0.5 text-xs leading-snug text-slate-500 ${clamp}`}>{snippet}</p> : null}
+    </td>
+  )
+
+  const smallBtn = "h-6 px-2 text-[11px]"
+
+  const feedTable = (
+    rows: FeedItem[],
+    showAll: boolean,
+    onShowAll: () => void,
+    emptyText: string,
+    error?: string,
+    loading?: boolean
+  ) => {
+    if (loading) return <p className="px-3 py-4 text-sm text-slate-500">Loading…</p>
+    if (error) return <p className="px-3 py-4 text-sm text-amber-700">Could not load this list: {error}</p>
+    if (rows.length === 0) return <p className="px-3 py-4 text-sm text-slate-500">{emptyText}</p>
     const shown = showAll ? rows : rows.slice(0, LIST_PREVIEW)
     return (
       <>
-        <ul className="divide-y divide-slate-200">
-          {shown.map((item, i) => {
-            const headline = cleanHeadline(item.title, item.source)
-            const snippet = usefulSnippet(item.title, item.snippet, item.source)
-            return (
-            <li key={`${item.id}-${i}`} className="flex items-start justify-between gap-3 py-3">
-              <div className="min-w-0 flex-1">
-                {item.url ? (
-                  <a
-                    href={item.resolved_url || item.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-[15px] font-medium leading-snug text-slate-900 hover:text-primary hover:underline"
-                  >
-                    {headline}
-                  </a>
-                ) : (
-                  <span className="text-[15px] font-medium leading-snug text-slate-900">{headline}</span>
-                )}
-                {snippet ? <p className="mt-0.5 line-clamp-2 text-sm text-slate-600">{snippet}</p> : null}
-                <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-slate-500">
-                  <span className="font-medium text-slate-700">{item.source || "—"}</span>
-                  {item.date ? (
-                    <>
-                      <span>·</span>
-                      <span>{item.date}</span>
-                    </>
-                  ) : null}
-                  <span>·</span>
-                  <span>{regionLabel(item.region)}</span>
-                  <span>·</span>
-                  <span>{item.topic}</span>
-                  {recentPill(item.date)}
-                </div>
-              </div>
-              <Button variant="ghost" size="sm" className="shrink-0 text-slate-700" onClick={() => briefFor({ ...item, title: headline, snippet }, item.feedLevel)}>
-                Brief
-              </Button>
-            </li>
-            )
-          })}
-        </ul>
+        <table className="w-full text-xs">
+          <thead className="bg-slate-50 border-b border-slate-200">
+            <tr>
+              {th("Date")}
+              {th("Headline")}
+              {th("Source")}
+              {th("Region")}
+              {th("Topic")}
+              {th("Actions", "text-right")}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {shown.map((item, i) => {
+              const headline = cleanHeadline(item.title, item.source)
+              const snippet = usefulSnippet(item.title, item.snippet, item.source)
+              return (
+                <tr key={`${item.id}-${i}`} className="hover:bg-slate-50/60">
+                  {dateCell(item.date)}
+                  {headlineCell(headline, item.resolved_url || item.url, snippet)}
+                  <td className="py-2 px-2 align-top whitespace-nowrap text-slate-700">{item.source || "—"}</td>
+                  <td className="py-2 px-2 align-top whitespace-nowrap text-slate-600">{regionLabel(item.region)}</td>
+                  <td className="py-2 px-2 align-top whitespace-nowrap text-slate-600">{item.topic}</td>
+                  <td className="py-2 px-2 align-top text-right whitespace-nowrap">
+                    <Button variant="outline" size="sm" className={smallBtn} onClick={() => briefFor({ ...item, title: headline, snippet }, item.feedLevel)}>
+                      Brief
+                    </Button>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
         {!showAll && rows.length > LIST_PREVIEW ? (
-          <button type="button" onClick={onShowAll} className="mt-2 text-sm font-medium text-primary hover:underline">
-            Show all {rows.length}
-          </button>
+          <div className="border-t border-slate-200 px-3 py-2">
+            <button type="button" onClick={onShowAll} className="text-xs font-medium text-primary hover:underline">
+              Show all {rows.length}
+            </button>
+          </div>
         ) : null}
       </>
     )
   }
 
+  const section = (title: string, hint: string, count: number | null, children: React.ReactNode) => (
+    <section className="rounded-md border border-slate-200 bg-white overflow-x-auto">
+      <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-slate-200 px-3 py-2">
+        <h2 className="text-sm font-semibold text-foreground">
+          {title}
+          <span className="ml-2 text-xs font-normal text-slate-500">{hint}</span>
+        </h2>
+        {count !== null ? <span className="text-[11px] text-slate-500">{count} stories</span> : null}
+      </div>
+      {children}
+    </section>
+  )
+
+  const tiles = [
+    { label: "Subscriber picks", value: subscriber && !subscriber.error ? picks.length : null },
+    { label: "Industry stories", value: industry.items ? industryRows.length : null },
+    { label: "Finance stories", value: finance.items ? financeRows.length : null },
+    { label: "Since yesterday", value: industry.items || finance.items ? newCount : null, tone: "text-emerald-700" },
+  ]
+
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-3">
+    <div className="max-w-[1500px] mx-auto">
+      <div className="flex items-start justify-between gap-4 flex-wrap mb-4">
         <div>
-          <h2 className="text-xl font-semibold text-slate-900">Morning scan</h2>
-          <p className="text-sm text-slate-600">
-            {longDateET(today)}. The firm&apos;s subscriptions first, then the feeds, newest first
-            {asOf ? `; subscriber picks read ${asOf}` : ""}.
+          <h1 className="text-2xl font-semibold text-slate-900 flex items-center gap-2">
+            <Newspaper className="h-6 w-6 text-slate-500" /> News
+          </h1>
+          <p className="text-sm text-slate-600 mt-1 max-w-3xl">
+            The morning scan: the firm&apos;s subscription picks, then industry and finance news for the past seven days, newest first,
+            with the industry outlook condensed to its key signals.
+          </p>
+          <p className="text-xs text-slate-500 mt-1">
+            {longDateET(today)}
+            {asOf ? (
+              <>
+                {" "}· subscriber picks read <span className="font-medium text-slate-700">{asOf}</span>
+              </>
+            ) : null}
+            {" "}· feeds refreshed each morning at 05:00 UTC
           </p>
         </div>
         <Button variant="outline" size="sm" onClick={() => setDigestOpen(true)} className="gap-1.5">
@@ -234,130 +293,130 @@ export function NewsMorningPage({ initialNews }: { initialNews?: InitialNewsData
         </Button>
       </div>
 
-      <IndustryOutlook initialText={initialNews?.outlook} condensed />
-
-      {chips.length > 1 && (
-        <div className="flex flex-wrap gap-1.5">
-          {chips.map(({ topic: t, count }) => (
-            <button
-              key={t}
-              type="button"
-              onClick={() => setTopic(t)}
-              className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
-                topic === t ? "bg-primary text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-              }`}
-            >
-              {t}
-              {t !== "All" ? <span className="ml-1 opacity-60">{count}</span> : null}
-            </button>
-          ))}
-        </div>
-      )}
-
-      <section aria-labelledby="subscriber-heading" className="space-y-3">
-        <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h3 id="subscriber-heading" className="text-base font-semibold text-slate-800">
-            From the firm&apos;s subscriptions
-            <span className="ml-2 text-sm font-normal text-slate-500">The Real Deal</span>
-          </h3>
-          {trdReport ? (
-            <span className="text-xs text-slate-500">
-              Top {picks.length} of {trdReport.candidates} articles this week
-            </span>
-          ) : null}
-        </div>
-        {subscriber?.error ? (
-          <p className="text-sm text-amber-700">Subscriber sources unavailable today: {subscriber.error}</p>
-        ) : !subscriber ? (
-          <div className="grid gap-3 sm:grid-cols-2">
-            {[0, 1, 2, 3].map((i) => (
-              <div key={`sk-${i}`} className="space-y-2 rounded-xl border border-slate-200 bg-card p-4">
-                <Skeleton className="h-3 w-1/3" />
-                <Skeleton className="h-5 w-11/12" />
-                <Skeleton className="h-4 w-full" />
-              </div>
+      <div className="flex flex-wrap items-end gap-3 mb-3 text-sm">
+        <label className="flex flex-col gap-1 text-xs text-slate-600">
+          Topic
+          <select className="border rounded px-2 py-1 text-sm" value={topic} onChange={(e) => setTopic(e.target.value)}>
+            {chips.map(({ topic: t, count }) => (
+              <option key={t} value={t}>
+                {t === "All" ? "All topics" : `${t} (${count})`}
+              </option>
             ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-slate-600">
+          Region
+          <select className="border rounded px-2 py-1 text-sm" value={region} onChange={(e) => setRegion(e.target.value as "all" | MorningLevel)}>
+            <option value="all">All regions</option>
+            {MORNING_LEVELS.map((l) => (
+              <option key={l} value={l}>
+                {regionLabel(l)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex items-center gap-2 text-xs text-slate-700 pb-1">
+          <input type="checkbox" checked={onlyNew} onChange={(e) => setOnlyNew(e.target.checked)} />
+          Since yesterday only
+        </label>
+        <label className="flex items-center gap-1 border rounded px-2 py-1 text-sm ml-auto">
+          <Search className="h-3.5 w-3.5 text-slate-400" />
+          <input className="outline-none w-48 text-sm" placeholder="Headline, source or text" value={search} onChange={(e) => setSearch(e.target.value)} />
+        </label>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+        {tiles.map((t) => (
+          <div key={t.label} className="rounded-md border border-slate-200 bg-white px-3 py-2">
+            <p className="text-[11px] uppercase tracking-wide text-slate-500">{t.label}</p>
+            <p className={`text-xl font-semibold tabular-nums ${t.tone ?? "text-slate-900"}`}>{t.value === null ? "—" : t.value.toLocaleString()}</p>
           </div>
-        ) : visiblePicks.length === 0 ? (
-          <p className="text-sm text-slate-600">
-            {picks.length === 0 ? subscriber.notes.join(" ") || "No subscriber articles qualified this week." : "No subscriber articles under this topic."}
-          </p>
-        ) : (
-          <div className="grid gap-3 sm:grid-cols-2">
-            {visiblePicks.map((p) => {
-              const postId = postIdOf(p)
-              return (
-                <article key={p.id} className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-card p-4 shadow-sm">
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-600">
-                    <span className="rounded-full bg-primary/10 px-2 py-0.5 font-medium text-primary">{p.source}</span>
-                    <span>{p.date}</span>
-                    {recentPill(p.date)}
-                    <span className="text-slate-400">·</span>
-                    <span>{regionLabel(p.region)}</span>
-                    <span className="text-slate-400">·</span>
-                    <span>{p.topic}</span>
-                  </div>
-                  <h4 className="text-base font-semibold leading-snug text-slate-900">{p.title}</h4>
-                  {p.snippet ? <p className="text-sm leading-relaxed text-slate-700">{p.snippet}</p> : null}
-                  {p.reasons.length > 0 ? (
-                    <details className="text-xs text-slate-600">
-                      <summary className="cursor-pointer select-none text-primary">Why it ranked (score {p.score})</summary>
-                      <ul className="mt-1 list-disc space-y-0.5 pl-4">
-                        {p.reasons.map((r, i) => (
-                          <li key={`r-${i}`}>{r}</li>
-                        ))}
-                      </ul>
-                    </details>
-                  ) : null}
-                  <div className="mt-auto flex flex-wrap gap-2 pt-1">
-                    {postId !== null ? (
-                      <Button
-                        size="sm"
-                        className="gap-1.5 bg-primary hover:bg-[#005a7a]"
-                        onClick={() => setReadTarget({ postId, title: p.title, source: p.source, date: p.date, url: p.url })}
+        ))}
+      </div>
+
+      <div className="space-y-4">
+        <IndustryOutlook initialText={initialNews?.outlook} condensed />
+
+        {section(
+          "From the firm's subscriptions",
+          trdReport ? `The Real Deal · top ${picks.length} of ${trdReport.candidates} articles this week` : "The Real Deal",
+          subscriber && !subscriber.error ? visiblePicks.length : null,
+          subscriber?.error ? (
+            <p className="px-3 py-4 text-sm text-amber-700">Subscriber sources unavailable today: {subscriber.error}</p>
+          ) : !subscriber ? (
+            <p className="px-3 py-4 text-sm text-slate-500">Loading…</p>
+          ) : visiblePicks.length === 0 ? (
+            <p className="px-3 py-4 text-sm text-slate-500">
+              {picks.length === 0 ? subscriber.notes.join(" ") || "No subscriber articles qualified this week." : "No subscriber articles match these filters."}
+            </p>
+          ) : (
+            <table className="w-full text-xs">
+              <thead className="bg-slate-50 border-b border-slate-200">
+                <tr>
+                  {th("Date")}
+                  {th("Headline")}
+                  {th("Region")}
+                  {th("Topic")}
+                  {th("Score", "text-right")}
+                  {th("Actions", "text-right")}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {visiblePicks.map((p) => {
+                  const postId = postIdOf(p)
+                  return (
+                    <tr key={p.id} className="hover:bg-slate-50/60">
+                      {dateCell(p.date)}
+                      {headlineCell(p.title, p.url, p.snippet, "line-clamp-2")}
+                      <td className="py-2 px-2 align-top whitespace-nowrap text-slate-600">{regionLabel(p.region)}</td>
+                      <td className="py-2 px-2 align-top whitespace-nowrap text-slate-600">{p.topic}</td>
+                      <td
+                        className="py-2 px-2 align-top text-right tabular-nums text-slate-700 cursor-help"
+                        title={p.reasons.length ? `Why it ranked:\n• ${p.reasons.join("\n• ")}` : undefined}
                       >
-                        <BookOpen className="h-4 w-4" />
-                        Read
-                      </Button>
-                    ) : null}
-                    <Button size="sm" variant="outline" asChild>
-                      <a href={p.url} target="_blank" rel="noreferrer" className="gap-1.5">
-                        Open
-                        <ExternalLink className="h-3.5 w-3.5" />
-                      </a>
-                    </Button>
-                    <Button size="sm" variant="ghost" className="text-slate-700" onClick={() => briefFor(p, p.region)}>
-                      Brief
-                    </Button>
-                  </div>
-                </article>
-              )
-            })}
-          </div>
+                        {p.score}
+                      </td>
+                      <td className="py-2 px-2 align-top text-right whitespace-nowrap">
+                        <div className="inline-flex gap-1">
+                          {postId !== null ? (
+                            <Button size="sm" className={`${smallBtn} gap-1`} onClick={() => setReadTarget({ postId, title: p.title, source: p.source, date: p.date, url: p.url })}>
+                              <BookOpen className="h-3 w-3" />
+                              Read
+                            </Button>
+                          ) : null}
+                          <Button size="sm" variant="outline" className={`${smallBtn} gap-1`} asChild>
+                            <a href={p.url} target="_blank" rel="noreferrer">
+                              Open
+                              <ExternalLink className="h-3 w-3" />
+                            </a>
+                          </Button>
+                          <Button size="sm" variant="outline" className={smallBtn} onClick={() => briefFor(p, p.region)}>
+                            Brief
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          )
         )}
-      </section>
 
-      <section aria-labelledby="industry-heading" className="space-y-1">
-        <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h3 id="industry-heading" className="text-base font-semibold text-slate-800">
-            Industry news
-            <span className="ml-2 text-sm font-normal text-slate-500">distressed CRE debt, past 7 days</span>
-          </h3>
-          {industry.items ? <span className="text-xs text-slate-500">{visibleIndustry.length} stories</span> : null}
-        </div>
-        {renderList(visibleIndustry, showAllIndustry, () => setShowAllIndustry(true), "No qualifying industry stories in the past 7 days.", industry.error, industry.items === null)}
-      </section>
+        {section(
+          "Industry news",
+          "distressed CRE debt, past 7 days",
+          industry.items ? visibleIndustry.length : null,
+          feedTable(visibleIndustry, showAllIndustry, () => setShowAllIndustry(true), "No qualifying industry stories in the past 7 days.", industry.error, industry.items === null)
+        )}
 
-      <section aria-labelledby="finance-heading" className="space-y-1">
-        <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h3 id="finance-heading" className="text-base font-semibold text-slate-800">
-            Finance news
-            <span className="ml-2 text-sm font-normal text-slate-500">rates, credit and markets, past 7 days</span>
-          </h3>
-          {finance.items ? <span className="text-xs text-slate-500">{visibleFinance.length} stories</span> : null}
-        </div>
-        {renderList(visibleFinance, showAllFinance, () => setShowAllFinance(true), "No qualifying finance stories in the past 7 days.", finance.error, finance.items === null)}
-      </section>
+        {section(
+          "Finance news",
+          "rates, credit and markets, past 7 days",
+          finance.items ? visibleFinance.length : null,
+          feedTable(visibleFinance, showAllFinance, () => setShowAllFinance(true), "No qualifying finance stories in the past 7 days.", finance.error, finance.items === null)
+        )}
+      </div>
 
       <NewsBriefDialog target={briefTarget} onClose={() => setBriefTarget(null)} />
       <TrdReadDialog target={readTarget} onClose={() => setReadTarget(null)} />
@@ -366,7 +425,7 @@ export function NewsMorningPage({ initialNews }: { initialNews?: InitialNewsData
         <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>Summarize a link</DialogTitle>
-            <DialogDescription>Paste an article URL or text; the digest is the same tool that sat at the foot of the tab.</DialogDescription>
+            <DialogDescription>Paste an article URL or text, or upload a PDF, for a short digest.</DialogDescription>
           </DialogHeader>
           <ArticleDigest />
         </DialogContent>

@@ -281,17 +281,17 @@ export function IndustryOutlook({ initialText, condensed = false }: { initialTex
   }, [])
 
   return (
-    <Card className="p-6 border-slate-200/80 bg-slate-50/30">
-      <div className="flex items-center gap-2 mb-4">
-        <Newspaper className="h-5 w-5 text-primary" />
-        <h3 className="text-base font-semibold text-slate-800">Industry Outlook</h3>
-        <span className="text-xs text-slate-900 ml-auto">Recent</span>
+    <Card className="rounded-md border border-slate-200 bg-white p-4 shadow-none">
+      <div className="flex items-center gap-2 mb-3">
+        <Newspaper className="h-4 w-4 text-slate-500" />
+        <h2 className="text-sm font-semibold text-foreground">Industry Outlook</h2>
+        <span className="text-[11px] text-slate-500 ml-auto">Generated each morning from FDIC, FRED and the week's reporting</span>
       </div>
 
       {loading ? (
-        <div className="text-sm text-slate-900">Generating industry outlook…</div>
+        <div className="text-sm text-slate-500">Generating this morning's outlook…</div>
       ) : error || !data ? (
-        <div className="text-sm text-slate-900">Unable to generate outlook right now.</div>
+        <div className="text-sm text-slate-500">The outlook could not be generated right now.</div>
       ) : (
         (() => {
           const { body, sources, rawSourceLines } = extractSources(data)
@@ -313,17 +313,15 @@ export function IndustryOutlook({ initialText, condensed = false }: { initialTex
               {/* Key Signals Strip — Executive Summary bullets as callout cards */}
               {execSummary && execSummary.bullets.length > 0 && (
                 <div>
-                  <div className="text-sm font-semibold text-slate-600 uppercase tracking-wide mb-3">Key Signals</div>
-                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  <p className="text-[11px] uppercase tracking-wide text-slate-500 mb-2">Key signals</p>
+                  <ul className="grid gap-x-8 gap-y-2 lg:grid-cols-2">
                     {execSummary.bullets.map((bullet, i) => (
-                      <div key={`sig-${i}`} className="rounded-xl border border-primary/25 bg-primary/8 px-4 py-4 shadow-sm">
-                        <div className="flex items-start gap-3">
-                          <span className="mt-1.5 flex-shrink-0 h-2.5 w-2.5 rounded-full bg-primary" />
-                          <p className="text-sm sm:text-base text-slate-800 leading-snug font-medium">{bullet}</p>
-                        </div>
-                      </div>
+                      <li key={`sig-${i}`} className="flex items-start gap-2 text-sm leading-snug text-slate-800">
+                        <span className="mt-[7px] h-1.5 w-1.5 flex-shrink-0 rounded-full bg-primary" />
+                        <span>{bullet}</span>
+                      </li>
                     ))}
-                  </div>
+                  </ul>
                 </div>
               )}
 
@@ -331,7 +329,7 @@ export function IndustryOutlook({ initialText, condensed = false }: { initialTex
                 <button
                   type="button"
                   onClick={() => setExpanded((v) => !v)}
-                  className="text-sm font-medium text-primary underline-offset-2 hover:underline"
+                  className="text-xs font-medium text-primary underline-offset-2 hover:underline"
                   aria-expanded={expanded}
                 >
                   {expanded ? "Hide the full outlook" : "Read the full outlook"}
