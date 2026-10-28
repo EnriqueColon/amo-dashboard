@@ -17,6 +17,24 @@ export const TRD_BROWSER_UA =
 
 const TIMEOUT_MS = 15_000
 
+/**
+ * Where the request goes. therealdeal.com's CloudFront bot control refuses
+ * the droplet's DigitalOcean address outright (an empty 202 to every request,
+ * browser headers or not — verified 28 Oct 2026), so when TRD_RELAY_URL is
+ * set the request is sent to the relay in tools/trd-relay (one function on
+ * Vercel, whose egress the site accepts) with the target in `url`. The relay
+ * answers with the upstream status and body, so nothing below changes.
+ */
+function viaRelay(url: string): { url: string; headers: Record<string, string> } {
+  const relay = process.env.TRD_RELAY_URL?.trim()
+  const browser = { "User-Agent": TRD_BROWSER_UA, Accept: "application/json, text/plain, */*", "Accept-Language": "en-US,en;q=0.9" }
+  if (!relay) return { url, headers: browser }
+  return {
+    url: `${relay.replace(/\/+$/, "")}?url=${encodeURIComponent(url)}`,
+    headers: { ...browser, "x-relay-key": process.env.TRD_RELAY_KEY?.trim() || "" },
+  }
+}
+
 export type TrdRequestRecord = {
   name: string
   url: string
@@ -37,15 +55,8 @@ async function fetchQuery(name: string, url: string): Promise<{ posts: TrdApiPos
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
   try {
-    const res = await fetch(url, {
-      cache: "no-store",
-      signal: controller.signal,
-      headers: {
-        "User-Agent": TRD_BROWSER_UA,
-        Accept: "application/json, text/plain, */*",
-        "Accept-Language": "en-US,en;q=0.9",
-      },
-    })
+    const target = viaRelay(url)
+    const res = await fetch(target.url, { cache: "no-store", signal: controller.signal, headers: target.headers })
     const ms = Date.now() - started
     if (!res.ok) {
       return { posts: [], record: { name, url, status: res.status, count: 0, ms, error: `HTTP ${res.status}` } }
@@ -75,11 +86,8 @@ export async function fetchTrdPost(id: number): Promise<{ post: TrdApiPost; reco
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
   try {
-    const res = await fetch(url, {
-      cache: "no-store",
-      signal: controller.signal,
-      headers: { "User-Agent": TRD_BROWSER_UA, Accept: "application/json, text/plain, */*", "Accept-Language": "en-US,en;q=0.9" },
-    })
+    const target = viaRelay(url)
+    const res = await fetch(target.url, { cache: "no-store", signal: controller.signal, headers: target.headers })
     if (!res.ok) throw new Error(`The Real Deal API answered HTTP ${res.status} for post ${id}`)
     const body = (await res.json()) as unknown
     if (!body || typeof body !== "object" || typeof (body as TrdApiPost).id !== "number") {

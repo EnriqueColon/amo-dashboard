@@ -1,0 +1,6 @@
+{
+  "name": "trd-relay",
+  "private": true,
+  "description": "Forwards The Real Deal feed requests from an IP its firewall accepts. See api/trd.js.",
+  "engines": { "node": "22.x" }
+}

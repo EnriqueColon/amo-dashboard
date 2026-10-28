@@ -1,0 +1,3 @@
+{
+  "functions": { "api/trd.js": { "maxDuration": 25 } }
+}
