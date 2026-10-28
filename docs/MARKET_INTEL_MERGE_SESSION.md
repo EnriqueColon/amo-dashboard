@@ -133,8 +133,21 @@ off in the old app as it lands. When the last one moves, the old app is turned o
 | 4 | **Market Research** | PDF upload + summaries + search cache; the most Vercel-shaped tab | 5+ days, or leave in the Next app indefinitely |
 
 Each port: Express routes under `/api/intel/...`, data in `miami_dade_amo.db` or its own SQLite file
-(the `bank_stress.db` pattern), page in `client/src/pages/`, nav entry, glossary tooltips. Porting
-stops whenever the remaining tabs aren't worth the cost — the co-hosted app is a valid end state.
+(the `bank_stress.db` pattern), page in `client/src/pages/`, nav entry, glossary tooltips, the
+tool's own unit tests for that tab's logic carried over. **All four tabs are ported (owner, 28 Oct
+2026, §6 row 6); the co-hosted app is a bridge and is retired when the last one lands.**
+
+### The remaining work, phased (28 Oct 2026, after steps 1–3)
+
+| Phase | Work | Effort |
+|---|---|---|
+| **A. Clear the ground** | step 4 (hide Market Analytics, close the analytics API) after the 29 Oct stage 4 check; copy watchlist / reports / bill history from Neon (owner supplies the connection string); decide The Real Deal | ~2 days |
+| **B. Foundation in the dashboard** | OpenAI Responses-API client in Express + cache tables; "Intelligence" sidebar section, page scaffolding, shared article/card components, glossary; **rename to SHCP Intelligence Platform** (title, login, sidebar, email header, Confluence) | ~3 days |
+| **C. Rebuild the tabs** | Peers 1–2 d → News 4–6 d → Legal Landscape 4–6 d → Market Research 5–7 d; each switched off in the bridge app as it lands | 3–4 weeks |
+| **D. Cut over and retire** | DNS + TLS, users get the new name; remove the bridge app, its nginx route, PM2 entry, Postgres and backup job; close the Vercel project | ~2 days |
+
+Total ≈ 5–6 weeks of build. **Design call pending with the owner:** the ported data lives in the
+dashboard's SQLite (recommended: one engine, one backup) or stays in the droplet's Postgres.
 
 ---
 
