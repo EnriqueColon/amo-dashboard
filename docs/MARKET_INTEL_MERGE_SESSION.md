@@ -205,6 +205,22 @@ Steps 1–4: about a week, leaving a usable merged tool. Step 5 is optional per 
 
 ## 7. Log (most recent first)
 
+### 2026-10-28 (later) — News page redesigned in the dashboard's style
+
+Owner: "The design for the news tab is ugly, please revamp it." The tool's layout (oversized
+cards with full-paragraph standfirsts, two rows of topic chips, boxed key signals) was replaced by
+the dashboard's conventions, taken from the Bank Stress page: `h1` with the page icon and a
+description + data-as-of line; a filter bar (Topic select with counts, Region, "Since yesterday
+only", search); four stat tiles (subscriber picks, industry stories, finance stories, since
+yesterday); the Industry Outlook as a compact white section with its key signals as a two-column
+bulleted list; and the three lists as dense `text-xs` tables — Date (with a green "new" mark),
+Headline + one-line snippet, Source, Region, Topic, Actions — with **hover definitions on every
+column header** (`client/src/lib/glossary/news.ts`, the owner's standing convention). Subscriber
+picks keep Read / Open / Brief as small buttons; the ranking reasons sit in a tooltip on the score.
+Same data, caches and dialogs. Verified locally (structure via page text and a zoomed capture; the
+browser pane was 375 px wide at the time, so no full-size screenshot), `tsc` and `npm run build`
+clean; deployed.
+
 ### 2026-10-28 (late night) — NEWS ported and deployed (`f6ae539`); The Real Deal relay (`8afad40`)
 
 Owner: "Yes, News next", then — on seeing "Subscriber sources unavailable" — asked whether adding

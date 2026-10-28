@@ -4,6 +4,10 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-10-28 (later) — News page REDESIGNED in the dashboard's style (owner: "ugly, revamp it")
+
+`client/src/components/intel/news/morning-page.tsx` rewritten to the Bank Stress page's conventions: icon `h1` + data-as-of line, filter bar (Topic/Region/Since yesterday/search), 4 stat tiles, compact Industry Outlook section (key signals as a 2-col list), and three dense tables (picks, industry, finance) with `DefTerm` hover definitions from new `client/src/lib/glossary/news.ts`. Same data/dialogs. Deployed.
+
 ## 2026-10-28 (late night) — NEWS PORTED + DEPLOYED (`f6ae539`, prod 18:47 UTC); THE REAL DEAL RELAY (`8afad40`)
 
 Owner: "Yes, News next"; then chose a relay over adding the firm's Real Deal login (the block is CloudFront bot control on the droplet IP, not a subscription). Full record in `docs/MARKET_INTEL_MERGE_SESSION.md` §7.
