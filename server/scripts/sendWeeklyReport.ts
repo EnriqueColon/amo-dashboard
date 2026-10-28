@@ -74,7 +74,7 @@ async function main() {
 
     console.log('PREVIEW ONLY — nothing was sent.');
     console.log(`Subject: ${subject}`);
-    console.log(`From:    "AOM Dashboard" <${SENDER}>`);
+    console.log(`From:    "SHCP Intelligence Platform" <${SENDER}>`);
     console.log(`To:      ${RECIPIENTS.join(', ')}`);
     console.log(`Data through: ${coverage}`);
     console.log(`Transfers (last 15 days): ${report.cleanCount}`);
@@ -115,7 +115,7 @@ async function main() {
 
   const transport = createReportTransport();
   const info = await transport.sendMail({
-    from: `"AOM Dashboard" <${SENDER}>`,
+    from: `"SHCP Intelligence Platform" <${SENDER}>`,
     to: RECIPIENTS.join(', '),
     subject,
     html: report.html,

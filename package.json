@@ -10,7 +10,8 @@
     "check": "tsc && tsx script/check-metric-directions.ts && tsx script/check-email-exclusions.ts",
     "check:types": "tsc",
     "check:metrics": "tsx script/check-metric-directions.ts",
-    "db:push": "drizzle-kit push"
+    "db:push": "drizzle-kit push",
+    "test:peer-intel": "tsx --test shared/peer-intel/*.test.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

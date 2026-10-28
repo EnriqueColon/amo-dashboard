@@ -55,7 +55,7 @@ const DIRECTION_LABEL: Record<string, string> = {
 
 export function buildActivityWorkbook(rows: any[], meta: ReportMeta): ExcelJS.Workbook {
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'AOM Tracker';
+  wb.creator = 'SHCP Intelligence Platform';
   wb.created = new Date();
 
   buildSummarySheet(wb, rows, meta);
@@ -73,7 +73,7 @@ function buildSummarySheet(wb: ExcelJS.Workbook, rows: any[], meta: ReportMeta) 
 
   // Title block
   const title = ws.getCell('A1');
-  title.value = 'AOM Tracker — Entity Activity Report';
+  title.value = 'SHCP Intelligence Platform — Entity Activity Report';
   title.font = { bold: true, size: 16, color: { argb: NAVY } };
   ws.getCell('A2').value = 'Assignment-of-mortgage filings · public county records';
   ws.getCell('A2').font = { size: 10, color: { argb: MUTED } };

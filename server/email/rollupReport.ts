@@ -203,7 +203,7 @@ export function buildRollupReport(db: Database.Database, sendDate: string): Roll
   // refuses to send on cleanCount === 0.
   if (!counties.length) {
     return {
-      subject: `AOM Market Monitor — ${fmtDay(sendDate)}: no data`,
+      subject: `SHCP Market Monitor — ${fmtDay(sendDate)}: no data`,
       html: '', cleanCsv: '', facilityCsv: '',
       cleanCount: 0, facilityCount: 0, asOf: {},
     };
@@ -634,12 +634,12 @@ export function buildRollupReport(db: Database.Database, sendDate: string): Roll
       </td></tr>
     </table>
   </td></tr>`;
-  const subject = `AOM Market Monitor — ${fmtDay(sendDate)}: ${fmtInt(s15.n)} transfers in 15 days`
+  const subject = `SHCP Market Monitor — ${fmtDay(sendDate)}: ${fmtInt(s15.n)} transfers in 15 days`
     + (s15.change != null ? ` (${s15.change >= 0 ? '+' : '−'}${Math.abs(Math.round(s15.change * 100))}%)` : '');
 
   const html = `<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light only"><title>AOM Market Monitor</title></head>
+<meta name="color-scheme" content="light only"><title>SHCP Market Monitor</title></head>
 <body style="margin:0;padding:0;background:${PLANE};">
 <table width="100%" cellpadding="0" cellspacing="0" bgcolor="${PLANE}" style="background:${PLANE};font-family:${FONT};">
 <tr><td align="center" style="padding:24px 12px;">
@@ -647,7 +647,7 @@ export function buildRollupReport(db: Database.Database, sendDate: string): Roll
 <table width="100%" cellpadding="0" cellspacing="0" style="max-width:680px;background:${PAPER};border-radius:14px;overflow:hidden;border:1px solid ${HAIR};">
 
   <tr><td bgcolor="${NAVY}" style="background:${NAVY};padding:26px 32px 22px 32px;">
-    <div style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:#9ec5f4;font-weight:700;">AOM Market Monitor</div>
+    <div style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:#9ec5f4;font-weight:700;">SHCP Market Monitor</div>
     <div style="font-size:22px;font-weight:700;color:#ffffff;margin:6px 0 4px;line-height:1.25;">Mortgage assignment activity — ${joinAnd(counties.map(c => COUNTY_LABEL[c]))}</div>
     <div style="font-size:12px;color:#cde2fb;">${fmtDayY(sendDate)} &nbsp;·&nbsp; Data ${coverageLine}</div>
   </td></tr>

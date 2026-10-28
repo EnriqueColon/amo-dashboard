@@ -7,6 +7,7 @@ import { createServer } from "http";
 import { registerWeekendStatus } from "./weekend";
 import { warnIfBankStressMissing } from "./bank-stress";
 import { warnIfChatUnconfigured } from "./chat";
+import { schedulePeerIntelWarmup } from "./intel/routes";
 
 const app = express();
 const httpServer = createServer(app);
@@ -149,6 +150,8 @@ app.use((req, res, next) => {
       reusePort: process.platform === "linux",
     },
     () => {
+    // Build the Peers layers in the background so the first visitor after a deploy does not wait on SEC.
+    schedulePeerIntelWarmup();
       log(`serving on ${host}:${port}`);
     },
   );

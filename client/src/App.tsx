@@ -12,6 +12,7 @@ import Assignments from '@/pages/Assignments';
 import CleanEvents from '@/pages/CleanEvents';
 import MarketAnalytics from '@/pages/MarketAnalytics';
 import BankStress from '@/pages/BankStress';
+import Peers from '@/pages/Peers';
 import PrivateCredit from '@/pages/PrivateCredit';
 import CreditFacilities from '@/pages/CreditFacilities';
 import UccFilings from '@/pages/UccFilings';
@@ -38,6 +39,7 @@ export default function App() {
                 <Route path="/clean-events" component={CleanEvents} />
                 <Route path="/market-analytics" component={MarketAnalytics} />
                 <Route path="/bank-stress" component={BankStress} />
+                <Route path="/peers" component={Peers} />
                 <Route path="/assignments" component={Assignments} />
                 <Route path="/private-credit" component={PrivateCredit} />
                 <Route path="/credit-facilities" component={CreditFacilities} />

@@ -149,7 +149,7 @@ function loginPage(error?: string): string {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AOM Tracker — Sign In</title>
+  <title>SHCP Intelligence Platform — Sign In</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -228,7 +228,7 @@ function loginPage(error?: string): string {
         <circle cx="16" cy="19" r="2" fill="#2563eb"/>
       </svg>
       <div>
-        <div class="logo-text">AOM Tracker</div>
+        <div class="logo-text">SHCP Intelligence Platform</div>
         <!-- County-neutral: Broward went live 10 Aug 2026. The 11 Aug copy sweep
              covered the React app but not this server-rendered page, so this was
              still asserting a single county on the first screen anyone sees. -->

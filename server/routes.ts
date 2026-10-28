@@ -3,6 +3,7 @@ import type { Server } from 'http';
 import { getDb } from './db';
 import { registerBankStressRoutes } from './bank-stress';
 import { registerFdicAnalyticsRoutes } from './fdic-analytics';
+import { registerIntelRoutes } from './intel/routes';
 import { registerChatRoutes } from './chat';
 import { queryGroupedFacilities } from './lending/facilities';
 import { buildActivityWorkbook } from './reporting/workbook';
@@ -1451,6 +1452,9 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   registerBankStressRoutes(app);
   registerFdicAnalyticsRoutes(app);
   registerChatRoutes(app);
+
+  // ─── Intelligence section: /api/intel/* (tabs ported from Market Intelligence) ──
+  registerIntelRoutes(app);
 
   // ═══════════════════════════════════════════════════════════════════════════
   // TARGETS (user watchlist of market participants)

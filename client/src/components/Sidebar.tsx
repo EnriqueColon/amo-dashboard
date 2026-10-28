@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'wouter';
-import { BarChart2, FileText, CheckCircle, Shield, Building2, ClipboardList, Menu, X, LineChart, LayoutList, LogOut, Crosshair, Landmark, FileSignature, MessageSquare, Gauge } from 'lucide-react';
+import { BarChart2, FileText, CheckCircle, Shield, Building2, ClipboardList, Menu, X, LineChart, LayoutList, LogOut, Crosshair, Landmark, FileSignature, MessageSquare, Gauge, Users } from 'lucide-react';
 import { useState } from 'react';
 import { useCounty, COUNTY_OPTIONS, type CountyScope } from '@/lib/county';
 import { FilterHint } from '@/components/FilterHint';
@@ -19,6 +19,10 @@ const NAV = [
   { href: '/private-credit',   icon: Shield,       label: 'Private Credit',     group: 'analysis' },
   { href: '/credit-facilities',icon: Landmark,     label: 'Lending Relationships', group: 'analysis' },
   { href: '/ucc',              icon: FileSignature,label: 'UCC Filings',        group: 'analysis' },
+  // Intelligence: the Market Intelligence tool's tabs, rebuilt here one at a time
+  // (docs/MARKET_INTEL_MERGE_SESSION.md). Peers first; News, Legal Landscape and
+  // Market Research follow as each is ported.
+  { href: '/peers',            icon: Users,        label: 'Peers',              group: 'intel', badge: 'New' },
   { href: '/assignments',      icon: FileText,     label: 'Raw Assignments',    group: 'data' },
   { href: '/entities',         icon: Building2,    label: 'Entities',           group: 'data' },
   { href: '/collection-log',   icon: ClipboardList,label: 'Collection Log',     group: 'data' },
@@ -27,6 +31,7 @@ const NAV = [
 const GROUPS: Record<string, string> = {
   main: '',
   analysis: 'Analysis',
+  intel: 'Intelligence',
   data: 'Data',
 };
 
@@ -53,14 +58,14 @@ export default function Sidebar() {
         </button>
         {!collapsed && (
           <div className="flex items-center gap-2 min-w-0">
-            <svg width="22" height="22" viewBox="0 0 32 32" fill="none" aria-label="AOM Tracker">
+            <svg width="22" height="22" viewBox="0 0 32 32" fill="none" aria-label="SHCP Intelligence Platform">
               <rect x="2" y="2" width="28" height="28" rx="4" fill="hsl(38 95% 55% / 0.15)" stroke="hsl(38 95% 55%)" strokeWidth="1.5"/>
               <path d="M7 24 L12 10 L16 19 L20 14 L25 24" stroke="hsl(38 95% 55%)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
               <circle cx="16" cy="19" r="2" fill="hsl(38 95% 55%)"/>
             </svg>
             <div className="min-w-0">
-              <div className="font-semibold text-sm text-foreground truncate">AOM Tracker</div>
-              <div className="text-[9px] text-muted-foreground truncate">Official Records</div>
+              <div className="font-semibold text-sm text-foreground truncate">SHCP Intelligence</div>
+              <div className="text-[9px] text-muted-foreground truncate">Platform · Safe Harbor Capital Partners</div>
             </div>
           </div>
         )}
@@ -145,7 +150,7 @@ export default function Sidebar() {
         </form>
         {!collapsed && (
           <div className="px-1 pt-1">
-            <p className="text-[9px] text-muted-foreground/60">Official Records · AOM</p>
+            <p className="text-[9px] text-muted-foreground/60">SHCP Intelligence Platform</p>
           </div>
         )}
       </div>
