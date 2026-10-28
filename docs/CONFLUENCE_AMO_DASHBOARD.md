@@ -2,7 +2,7 @@
 
 > **Renamed 19 Oct 2026 at the owner's request: the product is "AOM Tracker" (Assignment of Mortgage), formerly "AMO Tracker."** The rename covers everything users see — the sidebar, the sign-in page, the Entity Activity Report heading, the Excel export, the chat assistant, and the weekly email (subject and header "AOM Market Monitor", sender name "AOM Dashboard" — from the 19 Oct 2026 send onward if deployed before 07:00 ET, else from 26 Oct). Code identifiers, the repository name and the county's own document code (`ASSIGNMENT OF MORTGAGE - AMO`) are unchanged.
 
-> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 27 Oct 2026
+> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 28 Oct 2026
 > **Production URL:** `http://165.22.35.75/` (port 80, through nginx; single shared password). **The old `http://165.22.35.75:5000` address stopped working on 26 Oct 2026 17:31 UTC** — Node now listens on loopback only and the host firewall closes everything but 22/80/443 (`docs/ops/close-port-5000.md`)
 > **Repository:** `amo-dashboard` (`origin/main`)
 
@@ -1831,7 +1831,7 @@ endpoints healthy across all three county scopes.
 | AIT (Assignment of Interest) collection | 🟢 **Resolved 11 Sep 2026** — never a timeout. The county rejects the search and returns no results, exactly as it does for a day with no filings, and has done so since the type was added on 16 Jun. Now resolves in about a second and records `EMPTY` rather than a false error. **Kept active on purpose**, so collection begins by itself if the county ever starts using it |
 | UCC financing statements (weekly cron) | 🟢 **New 9–11 Sep 2026** — 32,759 filings collected and read, 2023 to present. Now part of the weekly run |
 | Hillsborough index + extraction | 🟢 Reading restored 26 Oct 2026 on `gpt-5-nano` (down 24–26 Oct, retired model, §7.1; 66 of 70 backlog documents read, 4 blocked by OpenAI's content filter) · 🟡 **LIVE 13 Oct 2026** (`a1265b8`, PM2 restart #68). 65,282 filings since 3 Jan 2023 collected (34,165 `ASG`, 24 `ASGT`, 31,093 `FIN`); daily cron installed. **Backlog being read:** assignments first (~14 docs/min ≈ 40 h, finishing ~Thu 15 Oct), then UCCs (~another 37 h, queued automatically). Deals appear in the analytics as they are read; the weekly email adds Hillsborough at 98% read. **Watch it on the Overview page:** a live progress card (refreshes every minute) turns red if reading stalls for 30 minutes, if downloads start failing, or if the daily job misses a day — the fix for a stall is restarting the backlog command in `SESSION_LOG.md` (13 Oct). **Party fix 14 Oct 2026** (`8627f1a`): the county lists each side's parties alphabetically, so a borrower whose name sorts first could appear as the seller (e.g. 2026400005 showed the property LLC instead of Freddie Mac). Normalize now picks the listed party the document names; about 880 Hillsborough rows are corrected from the 15 Oct nightly run (plus about 1,900 Miami-Dade rows where the clerk indexed only the borrower; see "The Assignor column was showing the borrower"). **15 Oct 2026 — the OpenAI account ran out of credits at ~05:50 UTC, mid-backlog.** Downloads and OCR were fine; every model call failed, and the reader wrote a failure row per document for four hours — **4,773 Hillsborough documents (1,477 assignments, 3,299 UCCs) marked failed**, the card blamed the clerk, and the count showed them as "read". Fixed the same day (`7d12016`): an account-level refusal now **stops the run with nothing written**, the card counts only successful reads and names which stage is failing, and the weekly-email gate counts only successful reads. All 4,773 are being re-read (`collector/hc_reread.sh`, assignments first), after which the UCC backlog resumes. A second finding from that re-read: the model's answer was being cut off on multi-parcel commercial assignments (31 folio numbers on one $7.5M document) — output cap raised 1,024 → 4,096 tokens (`3184713`). **Third assignment code added 15 Oct 2026** (`04946d1`): the county's code table has `ASG`, `ASGT` and `ASINT` (assignment of interest); the last was never collected — 437 documents since 2023 now in, read as they are reached. **Backlog complete 17 Oct 2026:** assignments 34,209 of 34,731 read (98.5%, the rest being the new `ASINT` rows and the newest days, handled by the daily job), UCC filings 31,083 of 31,205 (99.6%). Hillsborough therefore passes the weekly email's 98%-read gate and joins the Monday report from 19 Oct 2026 |
-| Palm Beach | ⚫ **Deferred 13 Oct 2026** — free portal is captcha-gated; paid FTP route undecided (§7.6 item 12) |
+| Palm Beach | ⚫ **Scoped 28 Oct 2026, awaiting the owner's decision** — free portal is captcha-gated, but the county's paid FTP feed now carries document images ($3,600/yr index + images), which makes Palm Beach buildable exactly like Broward. Four decisions open in `docs/PALM_BEACH_EXPANSION_SCOPE.md` §8 (§7.6 item 12) |
 | Broward index + images + extraction (daily cron) | 🟡 Live — 43,795 index rows, but **41,970 have no image and cannot be read** until the bulk image order lands (§7.6) |
 | PDF extraction — Miami-Dade | 🟢 Live on `gpt-5-nano` since 26 Oct 2026 13:32 UTC (reading was down 24–26 Oct after OpenAI retired `gpt-4.1-nano`, §7.1; backlog re-read, 100/101 OK). 107,402+ documents read end to end |
 | PDF extraction — Broward | 🟡 Live **daily**, coverage still thin — blocked on images, not on the extractor |
@@ -2558,13 +2558,21 @@ healthy (640 rows, 57% carrying loan amounts).
    automatically until at least 98% of its 2023-onward assignments have been read (owner, 13 Oct:
    include it once all the data is in); until then the footer reports the percentage read. Without
    the hold, a half-read history would show as growth in every "vs prior" figure.
-   **Palm Beach — deferred (owner, 13 Oct 2026).** Its free portal requires a server-enforced Google
-   reCAPTCHA on every search, including instrument lookup; getting around it would defeat a
-   deliberate access control and is not recommended. Assignments are `ASSIGNMENT` / `ASSIGNMENT
-   TAXABLE`, UCCs `FINANCING STATEMENTS (UCC'S)`. Realistic routes: the paid daily index by FTP
-   ($600/yr, no images) with past years on CD-ROM ($40/yr), a bulk image request, or a person solving
-   one captcha per weekly search (up to 10,000 rows each). Full detail in `SESSION_LOG.md`
-   (13 Oct 2026).
+   **Palm Beach — scoped 28 Oct 2026, decision with the owner** (`docs/PALM_BEACH_EXPANSION_SCOPE.md`).
+   Its free portal requires a server-enforced Google reCAPTCHA on every search, including instrument
+   lookup; getting around it would defeat a deliberate access control and is not recommended.
+   Assignments are `ASSIGNMENT` / `ASSIGNMENT TAXABLE`, UCCs `FINANCING STATEMENTS (UCC'S)`.
+   **What changed on 28 Oct:** the county's paid daily FTP feed now includes **document images**
+   (TIF by file number and page) as well as the index — $1,200/yr index, $2,400/yr images,
+   **$3,600/yr both**, prorated by month, payable each 15 December, files kept at least 45 days. That
+   is the Broward design with a longer safety window and no scraping anywhere, so it is the
+   recommended route; index-only would repeat Broward's unreadable backlog. History before the
+   subscription date is a $40-per-year index on CD-ROM plus, if wanted, a public-records request
+   for the images. Build is the Hillsborough file list with Broward's image handling (about 20
+   files, no database rebuild expected if the file-number format is disjoint — to confirm from the
+   first file). **Open decisions:** subscribe (both / index only / defer); history (index only /
+   with images / none); keep UCCs; start month (November 2026 = $600 to year-end, then $3,600 due
+   15 Dec, or January 2027). Nothing can be built until the first daily file exists.
 
 ---
 
@@ -2604,7 +2612,7 @@ scope and the applied scope cannot drift).
 | Miami-Dade Clerk Official Records | Web portal, automated via Playwright | Login required; 499-record server cap per query, handled by recursive chunk splitting |
 | Broward County Records, Taxes & Treasury | Public SFTP `BCFTP.Broward.org:22` (`crpublic`/`crpublic`) | No login, no captcha, no scraping. Yearly exports 1978→last completed year (index only) + daily files with images (~10-day retention) |
 | Hillsborough Clerk Official Records — **live since 13 Oct 2026** | Daily index `publicrec.hillsclerk.com/OfficialRecords/DailyIndexes/` (HTTPS, public); search API + PDF images under `publicaccess.hillsclerk.com/Public/ORIUtilities/` | No login or captcha. ~2-month feed retention, ~6-day lag. Search capped at 6,000 rows (returns empty + `Truncated` when exceeded). Codes `ASG`/`ASGT`, UCC `FIN` |
-| Palm Beach Clerk Official Records — **scoped, not yet collected** | Landmark Web `erec.mypalmbeachclerk.com` (user agreement + **server-enforced reCAPTCHA on every search**); optional paid FTP index ($600/yr, no images) | Up to 10,000 results per search. Codes `ASSIGNMENT`, `ASSIGNMENT TAXABLE`, UCC `FINANCING STATEMENTS (UCC'S)`. Volume not yet measured |
+| Palm Beach Clerk Official Records — **scoped 28 Oct 2026, not yet collected** | Landmark Web `erec.mypalmbeachclerk.com` (user agreement + **server-enforced reCAPTCHA on every search**); paid daily FTP feed: index $1,200/yr, images $2,400/yr, **both $3,600/yr** (TIF by file number + page, ≥45-day retention); index history on CD-ROM $40/yr | Up to 10,000 results per search on the portal. Codes `ASSIGNMENT`, `ASSIGNMENT TAXABLE`, UCC `FINANCING STATEMENTS (UCC'S)`. Volume not yet measured (~11k assignments/yr estimated). Scope: `docs/PALM_BEACH_EXPANSION_SCOPE.md` |
 | Market Intelligence tool — Market Analytics data API | `https://market-intelligence-tool-gilt.vercel.app/api/analytics/v1/*`, bearer key, contract saved at `docs/market-intelligence-meta.json` | FDIC Call Report screening, scores, balance-sheet signals and per-institution trend/history (since 7 Oct 2026; replaced the direct FDIC BankFind proxy). Refreshes on its own daily job, keyed by FDIC quarter |
 | OpenAI | `gpt-5-nano` (since 26 Oct 2026; `gpt-4.1-nano` retired 23 Oct 2026), Chat Completions + Batch API | Document extraction and entity classification fallback |
 

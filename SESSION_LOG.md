@@ -4,6 +4,19 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-10-28 (later) — Palm Beach expansion SCOPED again (research + doc only, nothing built)
+
+User: "expand the AOM document collection to West Palm Beach — scope process and tool integration." Output: `docs/PALM_BEACH_EXPANSION_SCOPE.md`. No code, production untouched.
+
+- **The fact that changes the 13 Oct recommendation:** the clerk's Electronic Distribution (FTP) page now offers **index $1,200/yr, images $2,400/yr, both $3,600/yr** (prorated $100/$200/$300 per month from the month after the request; payable 15 Dec for the next year). On 13 Oct it read as $600/yr index-only. Daily `YYYYMMDD.dat`, pipe-delimited, up to five record types (Header, Party, Legal, **Linked Document**, cross-footing Trailer); images **TIF by clerk's file number + page**; ≥45-day retention. Read with the built-in browser (the site 403s non-browser fetches). Subscription Agreement PDF `showpublisheddocument/150/…`, FTP Creation Form `…/148/…` — not read. The "File Layout" label on the page links to nothing → reverse-engineer from real files, as Broward's was.
+- **Recommendation: FTP index+images = the Broward design with a 45-day window instead of 10.** Index-only repeats Broward's 41,970 unreadable rows. Captcha on the portal unchanged (13 Oct verification stands; not re-probed, disclaimer not re-accepted).
+- History: CD-ROM index $40/yr (product page 404s on 28 Oct; fee schedule still lists it; 561-355-2932) → $120 for 2023–25; images for history only via a public-records request (`publicrecords@mypalmbeachclerk.com`, 561-355-2983). Volume unmeasured; estimate ~11k assignments/yr from Broward × population ratio.
+- Integration = the Hillsborough 19-file touch list with Broward's local-TIFF image branch; new `palmbeach_collect.py`, `palmbeach_images.py`, `run_palmbeach_daily.sh`; `KEY_PATTERNS` entry must be proven disjoint from the first file (believed 11 digits) or the `UNIQUE(county, cfn)` rebuild is forced. Completeness source = the feed's trailer counts.
+- **Four owner decisions open (§8 of the doc):** subscribe (both / index-only / defer) · history (CD index / +image quote / none) · UCC still yes · start month (Nov 2026 = $600 + $3,600 on 15 Dec, or CY2027 only). Nothing can be built before the first daily file exists.
+- Confluence: §7 status table Palm Beach row, §7.6 item 12 Palm Beach paragraph, data-sources row updated.
+
+---
+
 ## 2026-10-28 — Overnight stage 4 ROLLED ITSELF BACK (verify bug, production fine); CFN lookup on every document table; hover definitions on every column header
 
 **Overnight result (log `collector/stage4_overnight.log`, 06:00:01–06:00:54 UTC):** pulled 6dadd98, removed the
