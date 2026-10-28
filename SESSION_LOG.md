@@ -4,6 +4,15 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-10-28 (evening) — LEGAL LANDSCAPE PORTED + DEPLOYED (`4e46b06`)
+
+Owner: "Continue with Legal Landscape." Record in `docs/MARKET_INTEL_MERGE_SESSION.md` §7.
+
+- `shared/legal/*` (tool's library + 171 passing tests, `npm run test:legal`); `server/intel/legal/`: feed action (daily cache in intel.db), **`bill_status_history` on SQLite**, **applicability on our data** (`screeningUniverse("Florida")` exported from `fdic-analytics.ts`; watchlist = Bank Stress `tier IN ('watchlist','pressure')`), `legal-pdf.ts` via pdftotext; routes `/api/intel/legal`, `/api/intel/legal/applicability`; feed warmed daily with News.
+- Page built dashboard-style from the start (`components/intel/legal/legal-landscape.tsx`, glossary `legal.ts`); sidebar **Legal Landscape**.
+- Env: `LEGISCAN_API_KEY` added to `.env` + PM2 (keep in step).
+- Not verified locally beyond the empty state (no OpenAI key in dev); production feed build + applicability tested after deploy — see the merge doc.
+
 ## 2026-10-28 (later) — News page REDESIGNED in the dashboard's style (owner: "ugly, revamp it")
 
 `client/src/components/intel/news/morning-page.tsx` rewritten to the Bank Stress page's conventions: icon `h1` + data-as-of line, filter bar (Topic/Region/Since yesterday/search), 4 stat tiles, compact Industry Outlook section (key signals as a 2-col list), and three dense tables (picks, industry, finance) with `DefTerm` hover definitions from new `client/src/lib/glossary/news.ts`. Same data/dialogs. Deployed.

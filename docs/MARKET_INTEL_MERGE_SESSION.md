@@ -143,7 +143,7 @@ tool's own unit tests for that tab's logic carried over. **All four tabs are por
 |---|---|---|
 | **A. Clear the ground** | step 4 (hide Market Analytics, close the analytics API) after the 29 Oct stage 4 check; copy watchlist / reports / bill history from Neon (owner supplies the connection string); decide The Real Deal | ~2 days |
 | **B. Foundation in the dashboard** | ✅ **Done 28 Oct**: rename (title, login, sidebar, email subject/header, activity report, workbook, chat prompt); Intelligence sidebar section; OpenAI Responses-API client (`server/intel/openai.ts`); `intel.db` SQLite with the daily cache (`server/intel/db.ts`, `cache-shim.ts`). Still open: glossary entries for the new pages | done |
-| **C. Rebuild the tabs** | ✅ **Peers DONE 28 Oct** · ✅ **News DONE 28 Oct** (+ The Real Deal relay) → Legal Landscape 4–6 d → Market Research 5–7 d; each switched off in the bridge app as it lands | 2–3 weeks left |
+| **C. Rebuild the tabs** | ✅ **Peers DONE 28 Oct** · ✅ **News DONE 28 Oct** (+ The Real Deal relay, redesign) · ✅ **Legal Landscape DONE 28 Oct** → Market Research 5–7 d; each switched off in the bridge app as it lands | ~1 week left |
 | **D. Cut over and retire** | DNS + TLS, users get the new name; remove the bridge app, its nginx route, PM2 entry, Postgres and backup job; close the Vercel project | ~2 days |
 
 Total ≈ 5–6 weeks of build. **Design call pending with the owner:** the ported data lives in the
@@ -204,6 +204,56 @@ Steps 1–4: about a week, leaving a usable merged tool. Step 5 is optional per 
 ---
 
 ## 7. Log (most recent first)
+
+### 2026-10-28 (evening) — LEGAL LANDSCAPE ported and deployed (`4e46b06`)
+
+Owner: "Looks good" on the News redesign, "Continue with Legal Landscape."
+
+**Size, from the code:** ~6,900 lines in `lib/legal-*` (collectors for the Federal Register,
+GovInfo, LegiScan/Florida, Congress; relevance, filter, movement, prompts, sources, pages,
+applicability) with 11 test suites; three actions (feed 621, applicability 139, bill history 144);
+one 595-line component. Pure library again — its only outside imports were a type from the tool's
+analytics layer and `domain-allowlist` (+ `entity-sources`), both copied.
+
+**What landed (amo-dashboard `4e46b06`):**
+- `shared/legal/` — the library + tests (**171 pass**, `npm run test:legal`). `legal-applicability.ts`
+  now declares the five screening-row fields it reads instead of importing the tool's type; the
+  dashboard's `server/fdic-analytics.ts` rows carry the same names (the stage-2 contract).
+  `domain-allowlist.test.ts` not carried (it tests the research feed's query builder — Market
+  Research's problem).
+- `server/intel/legal/fetch-legal-updates.ts` — the tool's action, imports rewritten, cached per
+  ET day in intel.db via the shim. **`bill-status-tracking.ts` rewritten on SQLite**
+  (`bill_status_history` in intel.db, same columns, `ON CONFLICT(bill_key) DO UPDATE`) — the
+  owner's "SQLite for persisted data" applied to the one table here that outlives a day.
+  **`resolve-legal-applicability.ts` rewritten on this dashboard's data:** universe =
+  `screeningUniverse("Florida")` (new export in `fdic-analytics.ts`, same rows as
+  `/api/fdic/screening`), "on the watchlist" = certs in Bank Stress `tier IN ('watchlist','pressure')`
+  for the latest quarter (197 + 4 banks on 28 Oct). `legal-pdf.ts` reads Florida staff analyses
+  with the pdftotext extractor (no `pdf-parse`).
+- Routes `GET /api/intel/legal`, `POST /api/intel/legal/applicability`; the feed is a step of the
+  daily warm-up (`warmNews` → `warmLegal`).
+- `client/src/components/intel/legal/legal-landscape.tsx` + `pages/Legal.tsx` — **built in the
+  dashboard's style from the start** (the rule from the News redesign): icon `h1` + sourced/exposure
+  line, filter bar (Section with counts, Jurisdiction, "Moved since last check", search), five tiles
+  (Regulatory, Legislative, Enforcement, Moved, Touching watchlist banks), one table per section
+  (Date · Development with source + record facts · Jurisdiction · Status with the Moved pill and
+  from → to · Applies to as "N of M" + "k on the stress watchlist"), rows expand to the summary,
+  the points read from the document, Why it matters and the exposure arithmetic; hover definitions
+  on every column (`lib/glossary/legal.ts`). Sidebar: **Legal Landscape** under Intelligence.
+- Env: `LEGISCAN_API_KEY` copied from the bridge copy's env into `/opt/amo-dashboard/.env` **and**
+  PM2 (`--update-env`, that variable only) — without it Florida bills are omitted and the feed says
+  so. `OPENAI_API_KEY` was already there.
+- Verified locally: page renders its empty state and the "Missing OPENAI_API_KEY" note (dev has no
+  key); `tsc`, `npm run build` clean.
+- **Production (deployed ~19:00 UTC):** first feed build 9.9 s → **7 items, no notes** (1 regulatory
+  — the FDIC/OCC real-estate lending escrow rule, effective 2026-06-18; 5 Florida bills, all "Died
+  in …" with the between-sessions context line; 1 enforcement), 2 with points read from the
+  document; **`bill_status_history` holds 5 rows** after the first run, so tomorrow's run can say
+  whether any moved. No item stated a quantitative scope today, so the applicability join was
+  exercised with synthetic tests: "$1bn or more" → **32 of 85 Florida filers, 2 on the stress
+  watchlist** (Seacoast, BayFirst), largest SouthState and EverBank; "CRE ≥ 300% of capital" →
+  13 of 85 (Ocean Bank, U S Century); "all institutions" → 85 of 85, 7 on the watchlist. Universe
+  quarter 2026-06-30. PM2 carries `OPENAI_API_KEY`, `LEGISCAN_API_KEY`, `TRD_RELAY_URL`.
 
 ### 2026-10-28 (later) — News page redesigned in the dashboard's style
 
