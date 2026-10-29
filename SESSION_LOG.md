@@ -4,7 +4,11 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
-## 2026-10-29 (latest) — BRIDGE COPY OFF (step 4)
+## 2026-10-29 (latest) — Sidebar: UCC Filings + Clean Transactions moved to Data
+
+Owner: "Move the UCC filings, clean transaction tabs to the data section." `Sidebar.tsx` NAV only — both now `group: 'data'`, between Raw Assignments and Entities. Routes, pages, glossary untouched. Verified on the local dev server (Data = Raw Assignments, UCC Filings, Clean Transactions, Entities, Collection Log). Confluence §4.3 navigation paragraph updated. Not deployed (owner's rule: ask before any production push). DNS for `intelligence.safeharborcp.com` not yet added by IT; cut-over waits.
+
+## 2026-10-29 — BRIDGE COPY OFF (step 4)
 
 `pm2 delete market-intelligence` + save; `/intel` nginx block removed (backup kept); MI cron lines dropped. Files, `/opt/node24`, Postgres and `run_mi_backup.sh` (it also backs up `research_uploads/`) kept. `/intel` → platform login. Vercel untouched until cut-over. Remaining: DNS/TLS, optional Neon data copy, tell the team, close Vercel except `trd-relay`.
 

@@ -2,7 +2,7 @@
 
 > **Renamed 19 Oct 2026 at the owner's request: the product is "AOM Tracker" (Assignment of Mortgage), formerly "AMO Tracker."** The rename covers everything users see — the sidebar, the sign-in page, the Entity Activity Report heading, the Excel export, the chat assistant, and the weekly email (subject and header "AOM Market Monitor", sender name "AOM Dashboard" — from the 19 Oct 2026 send onward if deployed before 07:00 ET, else from 26 Oct). Code identifiers, the repository name and the county's own document code (`ASSIGNMENT OF MORTGAGE - AMO`) are unchanged.
 
-> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 28 Oct 2026
+> **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 29 Oct 2026
 > **Production URL:** `http://165.22.35.75/` (port 80, through nginx; single shared password). **The old `http://165.22.35.75:5000` address stopped working on 26 Oct 2026 17:31 UTC** — Node now listens on loopback only and the host firewall closes everything but 22/80/443 (`docs/ops/close-port-5000.md`)
 > **Repository:** `amo-dashboard` (`origin/main`)
 
@@ -275,7 +275,11 @@ Counties**. It is global — it applies to every page and persists across naviga
 
 ### 4.3 The pages
 
-Navigation is grouped into **Analysis** and **Data**.
+Navigation is grouped into **Analysis**, **Intelligence** and **Data**. Since 29 Oct 2026 (owner's
+request) **UCC Filings** and **Clean Transactions** sit under Data with Raw Assignments, Entities and
+the Collection Log: they are document views, while Analysis holds the derived pages (Reporting,
+Targets, FDIC Data Analytics, Bank Stress Ranking, Private Credit, Lending Relationships). The pages
+themselves are unchanged; the sections below are still in their original order.
 
 #### Overview (`/overview`)
 Headline counts (total filings, unique entities, market transfers, self-assigns,

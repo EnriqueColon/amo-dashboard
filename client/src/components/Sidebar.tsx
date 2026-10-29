@@ -15,10 +15,8 @@ const NAV = [
   { href: '/targets',          icon: Crosshair,    label: 'Targets',            group: 'analysis' },
   { href: '/market-analytics', icon: LineChart,    label: 'FDIC Data Analytics',group: 'analysis' },
   { href: '/bank-stress',      icon: Gauge,        label: 'Bank Stress Ranking', group: 'analysis', badge: 'New' },
-  { href: '/clean-events',     icon: CheckCircle,  label: 'Clean Transactions', group: 'analysis' },
   { href: '/private-credit',   icon: Shield,       label: 'Private Credit',     group: 'analysis' },
   { href: '/credit-facilities',icon: Landmark,     label: 'Lending Relationships', group: 'analysis' },
-  { href: '/ucc',              icon: FileSignature,label: 'UCC Filings',        group: 'analysis' },
   // Intelligence: the Market Intelligence tool's tabs, rebuilt here one at a time
   // (docs/MARKET_INTEL_MERGE_SESSION.md). Peers first; News, Legal Landscape and
   // Market Research follow as each is ported.
@@ -27,6 +25,10 @@ const NAV = [
   { href: '/research',         icon: BookOpen,     label: 'Market Research',    group: 'intel', badge: 'New' },
   { href: '/peers',            icon: Users,        label: 'Peers',              group: 'intel', badge: 'New' },
   { href: '/assignments',      icon: FileText,     label: 'Raw Assignments',    group: 'data' },
+  // UCC Filings and Clean Transactions moved here from Analysis (owner, 29 Oct 2026):
+  // they are document views, not analyses.
+  { href: '/ucc',              icon: FileSignature,label: 'UCC Filings',        group: 'data' },
+  { href: '/clean-events',     icon: CheckCircle,  label: 'Clean Transactions', group: 'data' },
   { href: '/entities',         icon: Building2,    label: 'Entities',           group: 'data' },
   { href: '/collection-log',   icon: ClipboardList,label: 'Collection Log',     group: 'data' },
 ];
