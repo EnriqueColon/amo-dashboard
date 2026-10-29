@@ -1,6 +1,6 @@
 # Market Intelligence → AMO Dashboard merge — running session doc
 
-> **Status:** ALL FOUR TABS LIVE IN THE PLATFORM (Peers, News, Legal Landscape 28 Oct; Market Research 29 Oct 2026) — the dashboard is **SHCP Intelligence Platform**; what remains is step 4 (switch off the bridge copy's tabs) and cut-over (DNS + TLS, one-time data copy from Vercel's database, close Vercel bar the relay) · **Owner:** Enrique C. · **Started:** 28 Oct 2026 · **Last updated:** 29 Oct 2026
+> **Status:** ALL FOUR TABS LIVE IN THE PLATFORM and **the bridge copy is off** (29 Oct 2026) — the dashboard is **SHCP Intelligence Platform**; what remains is cut-over: DNS + TLS, the one-time data copy from Vercel's database if wanted, tell the team, close Vercel bar the relay · **Owner:** Enrique C. · **Started:** 28 Oct 2026 · **Last updated:** 29 Oct 2026
 >
 > Read this before doing anything on the merge. The state header above and the log at the bottom are the
 > source of truth; update both at the end of every session that touches this work. The plain-English
@@ -144,7 +144,7 @@ tool's own unit tests for that tab's logic carried over. **All four tabs are por
 | **A. Clear the ground** | step 4 (hide Market Analytics, close the analytics API) after the 29 Oct stage 4 check; copy watchlist / reports / bill history from Neon (owner supplies the connection string); decide The Real Deal | ~2 days |
 | **B. Foundation in the dashboard** | ✅ **Done 28 Oct**: rename (title, login, sidebar, email subject/header, activity report, workbook, chat prompt); Intelligence sidebar section; OpenAI Responses-API client (`server/intel/openai.ts`); `intel.db` SQLite with the daily cache (`server/intel/db.ts`, `cache-shim.ts`). Still open: glossary entries for the new pages | done |
 | **C. Rebuild the tabs** | ✅ **ALL FOUR DONE** — Peers 28 Oct · News 28 Oct (+ The Real Deal relay, redesign) · Legal Landscape 28 Oct · Market Research 29 Oct | done |
-| **D. Cut over and retire** | DNS + TLS, users get the new name; remove the bridge app, its nginx route, PM2 entry, Postgres and backup job; close the Vercel project | ~2 days |
+| **D. Cut over and retire** | ✅ bridge app stopped and its nginx route removed (29 Oct); **open:** DNS + TLS, users get the new name, optional data copy from Vercel's Neon DB (watchlist, uploads, bill history — needs the connection string from the Vercel dashboard), close the Vercel project (keep `trd-relay`), then remove `/opt/market-intelligence`, Postgres and `run_mi_backup.sh`'s Postgres half | ~2 days |
 
 Total ≈ 5–6 weeks of build. **Design call pending with the owner:** the ported data lives in the
 dashboard's SQLite (recommended: one engine, one backup) or stays in the droplet's Postgres.
@@ -204,6 +204,19 @@ Steps 1–4: about a week, leaving a usable merged tool. Step 5 is optional per 
 ---
 
 ## 7. Log (most recent first)
+
+### 2026-10-29 — STEP 4: THE BRIDGE COPY IS OFF (owner: "yes switch the bridge copy off")
+
+With all four tabs in the platform there was nothing left for the bridge to bridge. Done on the
+droplet ~17:00 UTC: `pm2 delete market-intelligence` + `pm2 save`; the `/intel` block removed from
+`sites-available/amo-dashboard` (backup `*.before_intel_removal.<ts>`), `nginx -t` + reload; the
+commented MI warm-cron lines dropped from `crontab`. **Kept on disk, deliberately:**
+`/opt/market-intelligence` (1.6 GB incl. node_modules, on MI `dev`), `/opt/market-intelligence.config.cjs`,
+`/opt/node24`, the local Postgres (db `market_intelligence` — held nothing the platform needs; its
+uploads folder was empty) and `run_mi_backup.sh` (which also copies the platform's `research_uploads/`,
+so it stays). Bringing the bridge back = `pm2 start /opt/market-intelligence.config.cjs` + the nginx
+block from the backup. `/intel` now falls through to the platform's own login. **Vercel is untouched
+and remains the team's live copy of the old tool until cut-over.**
 
 ### 2026-10-29 — MARKET RESEARCH DEPLOYED (owner: "Deploy it")
 

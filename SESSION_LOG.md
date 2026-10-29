@@ -4,6 +4,10 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-10-29 (latest) — BRIDGE COPY OFF (step 4)
+
+`pm2 delete market-intelligence` + save; `/intel` nginx block removed (backup kept); MI cron lines dropped. Files, `/opt/node24`, Postgres and `run_mi_backup.sh` (it also backs up `research_uploads/`) kept. `/intel` → platform login. Vercel untouched until cut-over. Remaining: DNS/TLS, optional Neon data copy, tell the team, close Vercel except `trd-relay`.
+
 ## 2026-10-29 (later) — MARKET RESEARCH DEPLOYED (owner: "Deploy it") — ALL FOUR TABS LIVE
 
 Deploy ~16:40 UTC (pull → `npm install` → build → restart). First sweep 15 s → 21 publications from 11 publishers, memo in 11 s (6 sections). Upload → metadata → OpenAI summary → download → delete verified in production (see merge doc §7). Next: step 4 (hide bridge tabs via `ENABLED_TABS` on the `/intel` copy) and cut-over (DNS/TLS, Neon data copy, close Vercel except `trd-relay`).
