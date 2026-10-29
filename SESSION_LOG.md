@@ -4,6 +4,10 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-10-29 (later) — MARKET RESEARCH DEPLOYED (owner: "Deploy it") — ALL FOUR TABS LIVE
+
+Deploy ~16:40 UTC (pull → `npm install` → build → restart). First sweep 15 s → 21 publications from 11 publishers, memo in 11 s (6 sections). Upload → metadata → OpenAI summary → download → delete verified in production (see merge doc §7). Next: step 4 (hide bridge tabs via `ENABLED_TABS` on the `/intel` copy) and cut-over (DNS/TLS, Neon data copy, close Vercel except `trd-relay`).
+
 ## 2026-10-29 — Stage 4 CONFIRMED DONE; MARKET RESEARCH PORTED (built + verified locally, NOT deployed — owner wants to be told first)
 
 - **Overnight:** `stage4_overnight.log` ends `DONE — exit 0`, cron line gone → Confluence §7.3 stage 4 + CFN/definitions rows green (`a118fc5`). Intel warm-up 56 steps / 0 failed; Peers warm. Mac ssh-agent had emptied again (`ssh-add --apple-load-keychain`).

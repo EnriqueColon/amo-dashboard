@@ -1,6 +1,6 @@
 # Market Intelligence → AMO Dashboard merge — running session doc
 
-> **Status:** REBUILD IN PROGRESS — dashboard renamed **SHCP Intelligence Platform**; Intelligence section live with **Peers and News ported and deployed** (28 Oct 2026), The Real Deal reached through a relay; Legal Landscape and Market Research next; bridge copy still at `/intel`; Vercel still production for those two · **Owner:** Enrique C. · **Started:** 28 Oct 2026 · **Last updated:** 28 Oct 2026
+> **Status:** ALL FOUR TABS LIVE IN THE PLATFORM (Peers, News, Legal Landscape 28 Oct; Market Research 29 Oct 2026) — the dashboard is **SHCP Intelligence Platform**; what remains is step 4 (switch off the bridge copy's tabs) and cut-over (DNS + TLS, one-time data copy from Vercel's database, close Vercel bar the relay) · **Owner:** Enrique C. · **Started:** 28 Oct 2026 · **Last updated:** 29 Oct 2026
 >
 > Read this before doing anything on the merge. The state header above and the log at the bottom are the
 > source of truth; update both at the end of every session that touches this work. The plain-English
@@ -143,7 +143,7 @@ tool's own unit tests for that tab's logic carried over. **All four tabs are por
 |---|---|---|
 | **A. Clear the ground** | step 4 (hide Market Analytics, close the analytics API) after the 29 Oct stage 4 check; copy watchlist / reports / bill history from Neon (owner supplies the connection string); decide The Real Deal | ~2 days |
 | **B. Foundation in the dashboard** | ✅ **Done 28 Oct**: rename (title, login, sidebar, email subject/header, activity report, workbook, chat prompt); Intelligence sidebar section; OpenAI Responses-API client (`server/intel/openai.ts`); `intel.db` SQLite with the daily cache (`server/intel/db.ts`, `cache-shim.ts`). Still open: glossary entries for the new pages | done |
-| **C. Rebuild the tabs** | ✅ **Peers DONE 28 Oct** · ✅ **News DONE 28 Oct** (+ The Real Deal relay, redesign) · ✅ **Legal Landscape DONE 28 Oct** · 🟡 **Market Research BUILT 29 Oct, awaiting the owner's go to deploy** | done bar deploy |
+| **C. Rebuild the tabs** | ✅ **ALL FOUR DONE** — Peers 28 Oct · News 28 Oct (+ The Real Deal relay, redesign) · Legal Landscape 28 Oct · Market Research 29 Oct | done |
 | **D. Cut over and retire** | DNS + TLS, users get the new name; remove the bridge app, its nginx route, PM2 entry, Postgres and backup job; close the Vercel project | ~2 days |
 
 Total ≈ 5–6 weeks of build. **Design call pending with the owner:** the ported data lives in the
@@ -204,6 +204,21 @@ Steps 1–4: about a week, leaving a usable merged tool. Step 5 is optional per 
 ---
 
 ## 7. Log (most recent first)
+
+### 2026-10-29 — MARKET RESEARCH DEPLOYED (owner: "Deploy it")
+
+Deployed ~16:40 UTC: `git pull` → `npm install` (docx + 4 deps) → build → `pm2 restart`. **First
+publisher sweep in production: 15 s → 21 publications from 11 of the 14 houses** (Trepp, CBRE, JLL,
+Colliers, Walker & Dunlop, MBA, Moody's, Cushman & Wakefield, Avison Young, CoStar, Green Street;
+Marcus & Millichap, Newmark and NAIOP returned nothing this run), every one with a URL and three
+key findings; topics led by Market Outlook 7, Capital Markets 4, Banking/Lending 4, Distressed/CMBS 2
+(Trepp: special servicing rate 11.49% in September). Archive now holds those 21. **Memo from three
+reports: 11 s, six sections** ("CRE Market Conditions Brief — October 2026"). **Upload round trip
+in production:** a small real-text PDF → `inserted`, producer `cbre` and date `2026-10-01` **read
+from the document** (`metadataStatus: extracted`) → OpenAI summary with five takeaways, no fallback
+warning → `report-file` serves the PDF → delete leaves `research_uploads/` empty. **All four tabs are
+now inside the platform.** Remaining: step 4
+(hide the bridge copy's tabs) and cut-over.
 
 ### 2026-10-29 — MARKET RESEARCH ported (built, verified locally, **NOT deployed — owner asked to be told first**)
 
