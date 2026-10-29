@@ -143,7 +143,7 @@ tool's own unit tests for that tab's logic carried over. **All four tabs are por
 |---|---|---|
 | **A. Clear the ground** | step 4 (hide Market Analytics, close the analytics API) after the 29 Oct stage 4 check; copy watchlist / reports / bill history from Neon (owner supplies the connection string); decide The Real Deal | ~2 days |
 | **B. Foundation in the dashboard** | ✅ **Done 28 Oct**: rename (title, login, sidebar, email subject/header, activity report, workbook, chat prompt); Intelligence sidebar section; OpenAI Responses-API client (`server/intel/openai.ts`); `intel.db` SQLite with the daily cache (`server/intel/db.ts`, `cache-shim.ts`). Still open: glossary entries for the new pages | done |
-| **C. Rebuild the tabs** | ✅ **Peers DONE 28 Oct** · ✅ **News DONE 28 Oct** (+ The Real Deal relay, redesign) · ✅ **Legal Landscape DONE 28 Oct** → Market Research 5–7 d; each switched off in the bridge app as it lands | ~1 week left |
+| **C. Rebuild the tabs** | ✅ **Peers DONE 28 Oct** · ✅ **News DONE 28 Oct** (+ The Real Deal relay, redesign) · ✅ **Legal Landscape DONE 28 Oct** · 🟡 **Market Research BUILT 29 Oct, awaiting the owner's go to deploy** | done bar deploy |
 | **D. Cut over and retire** | DNS + TLS, users get the new name; remove the bridge app, its nginx route, PM2 entry, Postgres and backup job; close the Vercel project | ~2 days |
 
 Total ≈ 5–6 weeks of build. **Design call pending with the owner:** the ported data lives in the
@@ -204,6 +204,53 @@ Steps 1–4: about a week, leaving a usable merged tool. Step 5 is optional per 
 ---
 
 ## 7. Log (most recent first)
+
+### 2026-10-29 — MARKET RESEARCH ported (built, verified locally, **NOT deployed — owner asked to be told first**)
+
+Owner: "continue with market research integration… but let me know before it is pushed to
+production." Overnight checks first: stage 4 `DONE — exit 0`, warm-up 56/0, Peers warm.
+
+**What production MI actually shows under "Market Research"** is `MarketResearchFeed` — the daily
+OpenAI web-search sweep of 14 publishers with an archive and a market memo — not the upload
+library (`market-research-library.tsx`, which no tab rendered). The owner had asked for uploads
+without a token ("the reports for market research will just upload"), so both halves are ported:
+the feed as production has it, and the library as the owner wants it. **Not ported, deliberately:**
+producer ingestion (`app/ingestion/*`: sitemaps, Playwright + cheerio scraping of CBRE/JLL/… sites,
+plus a Python half for FFIEC/UCC/foreclosure that the dashboard already covers) — nothing in the
+tab used it; `fetch-market-research.ts` (the Miami industrial report inside the Market Analytics
+lens); the research-feed action `research-feed.ts` (unused by the tab).
+
+**What landed (amo-dashboard, this commit):**
+- `server/intel/research/db.ts` — `research_reports`, `research_summaries`, `research_feed_cache`
+  as SQLite tables on intel.db behind functions (`upsertResearchReport` keeps the tool's rules:
+  keyed on the document URL's hash, longer title wins, tags merge; feed archive purged after a
+  year).
+- `feed.ts` — the tool's `fetch-research-feed.ts`, cache shim, archive via `db.ts` instead of an
+  HTTP round trip to itself. `memo.ts` — the tool's memo prompt (its own `gpt-4o` chat call).
+  `summarizer.ts` verbatim. `register-helpers.ts` — the producer/title/period/date/property-type
+  detection from the tool's `register-upload` route. `storage.ts` — disk storage under
+  `research_uploads/` beside the AMO DB (`REPORT_STORAGE_DIR` to override), `local-report://` URLs.
+  `summarize.ts` — pdftotext/OCR text → summariser, file fallback when thin.
+- `routes.ts` — `/api/intel/research/{feed, feed/refresh, memo, reports, upload, summarize, summary,
+  report-file, delete}`; uploads are base64 JSON → **global `express.json` limit raised to 40 MB**
+  in `server/index.ts` (routes cap at 25 MB / 15 MB); the feed joins the daily warm-up.
+- `client/src/components/intel/research/market-research.tsx` + `pages/Research.tsx` — dashboard
+  style: icon `h1`, Refresh / Upload buttons, filter bar (Topic with counts, Publisher, include
+  archive, search), four tiles, "Latest publications" table (checkbox · Date · Report with
+  expandable key findings · Publisher · Topic), Archive table with Found, "Firm library" with a drop
+  zone, upload progress, and a table (Date · Report + filename · Producer · Summary badge · Open /
+  Download / Summarise-View / Delete); selection tray → memo; summary dialog. `research-memo-modal.tsx`
+  carried over with its Word export (**`docx` added to package.json** — `npm install` on deploy).
+  Glossary `lib/glossary/research.ts`. Sidebar: **Market Research** under Intelligence.
+- `collector/run_mi_backup.sh` now also copies `research_uploads/` to the Space; `.gitignore` covers
+  `research_uploads/` and `intel.db*`.
+- **Verified locally** (dev server, no OpenAI key): page renders every state; API: upload →
+  `inserted`, producer `cbre` from the filename, metadata `fallback` (test PDF too short for the
+  extractor) → listed → `report-file` returns `%PDF` → summarise fails cleanly without a key → delete
+  → folder empty. Browser: library row with its buttons. `tsc` + `npm run build` clean. No new tests
+  (the tool had none for this tab).
+- **Deploy needs:** `git pull` → `npm install` (docx) → build → `pm2 restart`; first feed build at
+  the next request or 05:00 UTC (14 OpenAI web searches, ~1–2 min). Nothing else to configure.
 
 ### 2026-10-28 (evening) — LEGAL LANDSCAPE ported and deployed (`4e46b06`)
 

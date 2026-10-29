@@ -4,6 +4,12 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-10-29 — Stage 4 CONFIRMED DONE; MARKET RESEARCH PORTED (built + verified locally, NOT deployed — owner wants to be told first)
+
+- **Overnight:** `stage4_overnight.log` ends `DONE — exit 0`, cron line gone → Confluence §7.3 stage 4 + CFN/definitions rows green (`a118fc5`). Intel warm-up 56 steps / 0 failed; Peers warm. Mac ssh-agent had emptied again (`ssh-add --apple-load-keychain`).
+- **Market Research** (`server/intel/research/*`, `client/src/components/intel/research/*`, `pages/Research.tsx`): publisher feed (14 OpenAI web searches/day, archive a year) + memo (+ Word export, **`docx` dep added → `npm install` on deploy**) + the firm's upload library on disk (`research_uploads/` beside the DB) with metadata + summaries; tables on intel.db behind `db.ts`; routes `/api/intel/research/*`; **`express.json` limit 40 MB**; feed in the daily warm-up; `run_mi_backup.sh` copies `research_uploads/`. Not ported: producer ingestion (Playwright scraping), the Market Analytics lens report. Details in the merge doc §7.
+- **Deploy when the owner says go:** pull → `npm install` → build → `pm2 restart amo-dashboard`.
+
 ## 2026-10-28 (evening) — LEGAL LANDSCAPE PORTED + DEPLOYED (`4e46b06`)
 
 Owner: "Continue with Legal Landscape." Record in `docs/MARKET_INTEL_MERGE_SESSION.md` §7.
