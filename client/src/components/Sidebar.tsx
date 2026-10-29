@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'wouter';
-import { BarChart2, FileText, CheckCircle, Shield, Building2, ClipboardList, Menu, X, LineChart, LayoutList, LogOut, Crosshair, Landmark, FileSignature, MessageSquare, Gauge, Users, Newspaper, Scale } from 'lucide-react';
+import { BarChart2, FileText, CheckCircle, Shield, Building2, ClipboardList, Menu, X, LineChart, LayoutList, LogOut, Crosshair, Landmark, FileSignature, MessageSquare, Gauge, Users, Newspaper, Scale, BookOpen } from 'lucide-react';
 import { useState } from 'react';
 import { useCounty, COUNTY_OPTIONS, type CountyScope } from '@/lib/county';
 import { FilterHint } from '@/components/FilterHint';
@@ -24,6 +24,7 @@ const NAV = [
   // Market Research follow as each is ported.
   { href: '/news',             icon: Newspaper,    label: 'News',               group: 'intel', badge: 'New' },
   { href: '/legal',            icon: Scale,        label: 'Legal Landscape',    group: 'intel', badge: 'New' },
+  { href: '/research',         icon: BookOpen,     label: 'Market Research',    group: 'intel', badge: 'New' },
   { href: '/peers',            icon: Users,        label: 'Peers',              group: 'intel', badge: 'New' },
   { href: '/assignments',      icon: FileText,     label: 'Raw Assignments',    group: 'data' },
   { href: '/entities',         icon: Building2,    label: 'Entities',           group: 'data' },

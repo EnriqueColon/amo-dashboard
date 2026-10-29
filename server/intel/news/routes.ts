@@ -17,6 +17,7 @@ import { digestFromFile, digestFromText, digestFromUrl } from "./fetch-article-d
 import { getCachedIndustryOutlook } from "./industry-outlook/getCachedOutlook"
 import { sweepExpired } from "../cache-shim"
 import { warmLegal } from "../legal/routes"
+import { warmResearch } from "../research/routes"
 
 type Level = "national" | "florida" | "miami"
 const LEVELS: readonly Level[] = ["national", "florida", "miami"]
@@ -142,6 +143,7 @@ export async function warmNews(): Promise<Record<string, string>> {
   for (const level of LEVELS) await step(`investingNews:${level}`, () => fetchInvestingNews(level))
   await step("subscriberSources", () => fetchSubscriberSources())
   await step("legal", () => warmLegal())
+  await step("research", () => warmResearch())
 
   // Briefs for what the page shows first: the tool warmed the top rows of
   // each feed per level; the morning page shows eight per list, so eight.

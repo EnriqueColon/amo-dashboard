@@ -48,3 +48,9 @@ competitor-analysis/
 
 # Local dev-server launch config for the Claude desktop app (holds local-only test credentials)
 .claude/launch.json
+
+# Market Research library: PDFs uploaded through the dashboard (backed up by run_mi_backup.sh)
+research_uploads/
+intel.db
+intel.db-shm
+intel.db-wal

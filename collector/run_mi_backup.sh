@@ -21,6 +21,7 @@ APP_DIR="${APP_DIR:-/opt/amo-dashboard}"
 BACKUP_DIR="${BACKUP_DIR:-$APP_DIR/backups}"
 MI_DB="${MI_DB:-market_intelligence}"
 MI_UPLOADS="${MI_UPLOADS:-/opt/market-intelligence-uploads}"
+RESEARCH_UPLOADS="${RESEARCH_UPLOADS:-$APP_DIR/research_uploads}"
 KEEP_LOCAL="${KEEP_LOCAL:-7}"
 
 # shellcheck disable=SC1091
@@ -78,6 +79,15 @@ else
             echo "copied uploads → $BACKUP_REMOTE/mi_uploads/ ($(find "$MI_UPLOADS" -type f | wc -l) files)"
         else
             status=local_only; echo "WARNING: rclone copy of uploads failed"
+        fi
+    fi
+    # The platform's own Market Research library (uploaded through the dashboard
+    # since the tab was ported, 29 Oct 2026): same rule, copy never sync.
+    if [ -d "$RESEARCH_UPLOADS" ]; then
+        if rclone copy $RCLONE_OPTS "$RESEARCH_UPLOADS" "$BACKUP_REMOTE/research_uploads/"; then
+            echo "copied research library → $BACKUP_REMOTE/research_uploads/ ($(find "$RESEARCH_UPLOADS" -type f | wc -l) files)"
+        else
+            status=local_only; echo "WARNING: rclone copy of the research library failed"
         fi
     fi
 fi

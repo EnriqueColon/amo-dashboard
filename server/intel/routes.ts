@@ -22,6 +22,7 @@ import { buildLayerAdv, buildPeerIntelPayload, type PeerIntelPayload } from "./p
 import type { PeerLayer } from "@shared/peer-intel/edgar-contract"
 import { registerNewsRoutes, scheduleNewsWarmup } from "./news/routes"
 import { registerLegalRoutes } from "./legal/routes"
+import { registerResearchRoutes } from "./research/routes"
 
 const LAYERS: readonly PeerLayer[] = ["miami-dade", "florida", "national"]
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000
@@ -61,6 +62,7 @@ function isLayer(value: unknown): value is PeerLayer {
 export function registerIntelRoutes(app: Express): void {
   registerNewsRoutes(app)
   registerLegalRoutes(app)
+  registerResearchRoutes(app)
 
   app.get("/api/intel/peers", async (req: Request, res: Response) => {
     const layer = req.query.layer ?? "miami-dade"

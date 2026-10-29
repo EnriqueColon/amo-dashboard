@@ -15,6 +15,7 @@ import BankStress from '@/pages/BankStress';
 import Peers from '@/pages/Peers';
 import News from '@/pages/News';
 import Legal from '@/pages/Legal';
+import Research from '@/pages/Research';
 import PrivateCredit from '@/pages/PrivateCredit';
 import CreditFacilities from '@/pages/CreditFacilities';
 import UccFilings from '@/pages/UccFilings';
@@ -44,6 +45,7 @@ export default function App() {
                 <Route path="/peers" component={Peers} />
                 <Route path="/news" component={News} />
                 <Route path="/legal" component={Legal} />
+                <Route path="/research" component={Research} />
                 <Route path="/assignments" component={Assignments} />
                 <Route path="/private-credit" component={PrivateCredit} />
                 <Route path="/credit-facilities" component={CreditFacilities} />

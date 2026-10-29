@@ -48,6 +48,9 @@ declare module "http" {
 
 app.use(
   express.json({
+    // Research uploads and article-digest files arrive as base64 JSON (25 MB / 15 MB caps
+    // enforced by their routes); everything else is small. Auth-gated, so the size is safe.
+    limit: "40mb",
     verify: (req, _res, buf) => {
       req.rawBody = buf;
     },
