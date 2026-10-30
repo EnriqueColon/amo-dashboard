@@ -615,41 +615,135 @@ export function buildRollupReport(db: Database.Database, sendDate: string): Roll
   // Filings by watchlist names that collector/watchlist_hits.py first saw in the
   // last 7 days. Dated by when WE collected them, so a county that publishes late
   // does not drop a filing between two reports; the recorded date is shown on each
-  // line. rec_date is also bounded to 45 days so a backfill that re-collects old
-  // months is not reported as news. Self-assignments are left out, as on Reporting.
-  // Same-day, same-pair filings collapse to one line with a count: one servicer
-  // transfer can file hundreds.
+  // line. rec_date is bounded to 45 days so a backfill that re-collects old months
+  // is not reported as news.
+  //
+  // WHAT THE LINE SAYS comes from the document, not the county index. The index
+  // names are only who the clerk typed: Miami-Dade sometimes lists the pair in
+  // reverse (document_direction.py), and a borrower is often the only grantor. So
+  // each line takes the instrument type and parties from aom_events_clean when the
+  // filing is there (direction already settled), else from the AI reading of the
+  // document in pdf_extractions, marked "preliminary" for loan transfers because
+  // the reversal check has not run yet. The four types mean different things:
+  //   LOAN_TRANSFER  a loan changing hands
+  //   COLLATERAL     a loan pledged as security (e.g. a bank's credit line)
+  //   RENTS_LEASES   a borrower pledging rents to its lender: the lender LENT, it did not buy
+  //   OTHER          anything else
+  // MERS is only a registry: "MERS as nominee for X" means the counterparty is X, and
+  // when X is the watchlist firm itself the filing is internal paperwork and is not shown.
   const hasWatchlist = !!db.prepare(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='watchlist_hits'`).get();
-  const watchRows: Array<{ target_entity: string; role: string; county: string; rec_date: string; grantor: string; grantee: string; n: number; cfn: string }> =
-    hasWatchlist ? db.prepare(`
-      SELECT target_entity, role, county, rec_date, grantor, grantee, COUNT(*) AS n, MIN(cfn) AS cfn
-      FROM watchlist_hits
-      WHERE is_self = 0
-        AND first_seen_at >= date(?, '-7 days')
-        AND rec_date >= date(?, '-45 days')
-      GROUP BY target_entity, county, rec_date, grantor, grantee, role
-      ORDER BY rec_date DESC, n DESC, target_entity
-    `).all(sendDate, sendDate) as any[] : [];
+  type WatchRow = {
+    cfn: string; target_entity: string; county: string; rec_date: string; grantor: string; grantee: string;
+    address: string | null; role: string; doc_category: string | null; pdf_assignor: string | null; pdf_assignee: string | null;
+    pdf_amount: number | null; pdf_address: string | null; c_assignor: string | null; c_assignee: string | null;
+    c_assignor_canon: string | null; c_assignee_canon: string | null; txn_type: string | null;
+    c_amount: number | null; c_address: string | null; c_category: string | null;
+  };
+  const hasClean = !!db.prepare(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='aom_events_clean'`).get();
+  const hasPdf = !!db.prepare(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='pdf_extractions'`).get();
+  const watchRaw: WatchRow[] = hasWatchlist ? db.prepare(`
+      SELECT h.cfn, h.target_entity, h.county, h.rec_date, h.grantor, h.grantee, h.address, h.role,
+             ${hasPdf ? 'e.doc_category, e.assignor_name AS pdf_assignor, e.assignee_name AS pdf_assignee, e.loan_amount AS pdf_amount, e.property_address AS pdf_address,'
+                      : 'NULL AS doc_category, NULL AS pdf_assignor, NULL AS pdf_assignee, NULL AS pdf_amount, NULL AS pdf_address,'}
+             ${hasClean ? 'c.assignor AS c_assignor, c.assignee AS c_assignee, c.assignor_canon AS c_assignor_canon, c.assignee_canon AS c_assignee_canon, c.txn_type, c.loan_amount AS c_amount, c.property_address AS c_address, c.doc_category AS c_category'
+                        : 'NULL AS c_assignor, NULL AS c_assignee, NULL AS c_assignor_canon, NULL AS c_assignee_canon, NULL AS txn_type, NULL AS c_amount, NULL AS c_address, NULL AS c_category'}
+      FROM watchlist_hits h
+      ${hasPdf ? 'LEFT JOIN pdf_extractions e ON e.cfn = h.cfn' : ''}
+      ${hasClean ? 'LEFT JOIN aom_events_clean c ON c.cfn = h.cfn' : ''}
+      WHERE h.is_self = 0
+        AND h.first_seen_at >= date(?, '-7 days')
+        AND h.rec_date >= date(?, '-45 days')
+      GROUP BY h.cfn, h.target_entity
+      ORDER BY h.rec_date DESC, h.cfn
+    `).all(sendDate, sendDate) as WatchRow[] : [];
+
+  const squashName = (v: string) => v.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const isMers = (v: string) => /MORTGAGE ELECTRONIC REGISTRATION|\bMERS\b/i.test(v);
+  // "MERS ... as nominee for X, its successors" -> X; null when the document does not say.
+  const mersNominee = (v: string): string | null => {
+    const m = v.match(/nominee\s+for\s+(.+?)(?:,?\s+its\s+successors|,?\s+(?:its\s+)?successors|\(|$)/i);
+    return m ? m[1].replace(/[,\s]+$/, '').trim() : null;
+  };
+  const sameFirm = (a: string, b: string) => {
+    const x = squashName(a), y = squashName(b);
+    return !!x && !!y && (x.includes(y) || y.includes(x));
+  };
+  const partyLabel = (v: string | null | undefined): string => {
+    const t = (v || '').trim();
+    if (!t) return 'an unnamed party';
+    if (isMers(t)) { const n = mersNominee(t); return n ? `${n} (via MERS)` : 'MERS (registry)'; }
+    return t.replace(/\s*\((?:assignor|assignee)\)\s*/gi, ' ').replace(/\s+/g, ' ').trim();
+  };
+
+  type WatchLine = {
+    target: string; county: string; rec_date: string; category: string; role: 'assignor' | 'assignee';
+    other: string; verb: string; prelim: boolean; amount: number | null; address: string; n: number; cfn: string; origination: boolean;
+  };
+  const lineMap = new Map<string, WatchLine>();
+  let internalHidden = 0;
+  for (const r of watchRaw) {
+    const inClean = r.c_assignor != null || r.c_assignee != null;
+    const category = (inClean ? r.c_category : null) || r.doc_category || 'UNREAD';
+    const assignor = inClean ? r.c_assignor : (r.pdf_assignor || r.grantor);
+    const assignee = inClean ? r.c_assignee : (r.pdf_assignee || r.grantee);
+    const role: 'assignor' | 'assignee' = inClean
+      ? (r.c_assignor_canon === r.target_entity ? 'assignor' : r.c_assignee_canon === r.target_entity ? 'assignee' : (r.role === 'assignee' ? 'assignee' : 'assignor'))
+      : (r.role === 'assignee' ? 'assignee' : 'assignor');
+    const otherRaw = role === 'assignee' ? assignor : assignee;
+    const other = partyLabel(otherRaw);
+    // MERS nominee for the watchlist firm itself, or any party that is the firm: internal paperwork.
+    const otherFirm = otherRaw && isMers(otherRaw) ? (mersNominee(otherRaw) || '') : (otherRaw || '');
+    if (otherFirm && sameFirm(otherFirm, r.target_entity)) { internalHidden++; continue; }
+
+    const T = r.target_entity;
+    const origination = inClean && r.txn_type === 'ORIGINATION';
+    let verb: string;
+    if (category === 'LOAN_TRANSFER') {
+      verb = origination
+        ? (role === 'assignee' ? 'received the mortgage from' : 'assigned the mortgage to')
+        : (role === 'assignee' ? 'took over a loan from' : 'transferred a loan to');
+    } else if (category === 'COLLATERAL') {
+      verb = role === 'assignee' ? 'received a loan as collateral from' : 'pledged a loan as collateral to';
+    } else if (category === 'RENTS_LEASES') {
+      verb = role === 'assignee' ? 'received an assignment of rents/leases (loan security) from' : 'assigned rents/leases to';
+    } else if (category === 'UNREAD') {
+      verb = 'is named with';
+    } else {
+      verb = role === 'assignee' ? 'received another type of assignment from' : 'made another type of assignment to';
+    }
+    const prelim = category === 'LOAN_TRANSFER' && !inClean;
+    const amount = (inClean ? r.c_amount : r.pdf_amount) ?? r.pdf_amount ?? null;
+    const addrRaw = (inClean ? r.c_address : null) || r.pdf_address || r.address || '';
+    const address = addrRaw.split(';')[0].trim() + (addrRaw.includes(';') ? ' + more' : '');
+    const key = [T, r.county, r.rec_date, category, role, other, verb].join('|');
+    const ex = lineMap.get(key);
+    if (ex) { ex.n++; if (!ex.amount && amount) ex.amount = amount; }
+    else lineMap.set(key, { target: T, county: r.county, rec_date: r.rec_date, category, role, other, verb, prelim, amount: amount || null, address, n: 1, cfn: r.cfn, origination });
+  }
+  const watchLines = Array.from(lineMap.values());
   const WATCH_SHOWN = 25;
-  const watchFilings = watchRows.reduce((a, r) => a + r.n, 0);
-  const watchTargets = new Set(watchRows.map(r => r.target_entity)).size;
-  const watchTable = !hasWatchlist ? '' : watchRows.length ? `
+  const watchFilings = watchLines.reduce((a, l) => a + l.n, 0);
+  const watchTargets = new Set(watchLines.map(l => l.target)).size;
+  const CATEGORY_TAG: Record<string, string> = {
+    LOAN_TRANSFER: 'Loan transfer', COLLATERAL: 'Collateral assignment', RENTS_LEASES: 'Rents / leases', OTHER: 'Other assignment', UNREAD: 'Not yet read',
+  };
+  const watchTable = !hasWatchlist ? '' : watchLines.length ? `
     <table width="100%" cellpadding="0" cellspacing="0" style="font-size:12px;${NUM}">
-      ${watchRows.slice(0, WATCH_SHOWN).map(r => `<tr>
-        <td style="padding:7px 0;border-bottom:1px solid ${HAIR};color:${INK};">
-          <b>${esc(trunc(r.target_entity, 30))}</b>
-          <span style="color:${MUTED};">${r.role === 'assignee' ? 'acquired from' : r.role === 'assignor' ? 'assigned to' : 'on both sides with'}</span>
-          ${esc(trunc(r.role === 'assignee' ? r.grantor : r.grantee, 34))}
-          ${r.n > 1 ? `<span style="color:${MUTED};"> · ${fmtInt(r.n)} filings</span>` : `<span style="color:${MUTED};"> · ${esc(r.cfn)}</span>`}</td>
-        <td align="right" style="padding:7px 0 7px 8px;border-bottom:1px solid ${HAIR};color:${MUTED};white-space:nowrap;">${fmtDay(r.rec_date)} · ${COUNTY_LABEL[r.county] || esc(r.county)}</td>
+      ${watchLines.slice(0, WATCH_SHOWN).map(l => `<tr>
+        <td style="padding:8px 0;border-bottom:1px solid ${HAIR};color:${INK};line-height:1.5;">
+          <b>${trunc(l.target, 30)}</b> <span style="color:${MUTED};">${esc(l.verb)}</span> ${trunc(l.other, 46)}
+          ${l.n > 1 ? `<span style="color:${MUTED};"> · ${fmtInt(l.n)} filings</span>` : ''}
+          <div style="font-size:11px;color:${MUTED};">${esc(l.origination ? 'Assigned by a non-lender (usually the borrower), not a loan trade' : (CATEGORY_TAG[l.category] || l.category))}${l.prelim ? ' · preliminary, direction not yet checked' : ''}${l.amount ? ` · ${fmtMoney(l.amount)}` : ''}${l.address ? ` · ${trunc(l.address, 48)}` : ''}${l.n === 1 ? ` · ${esc(l.cfn)}` : ''}</div></td>
+        <td align="right" valign="top" style="padding:8px 0 8px 8px;border-bottom:1px solid ${HAIR};color:${MUTED};white-space:nowrap;">${fmtDay(l.rec_date)} · ${COUNTY_LABEL[l.county] || esc(l.county)}</td>
       </tr>`).join('')}
     </table>
-    ${watchRows.length > WATCH_SHOWN ? `<div style="font-size:12px;color:${MUTED};margin:8px 0 0;">${fmtInt(watchRows.length - WATCH_SHOWN)} more lines not shown; open the dashboard's Reporting tab with <b>Targets only</b> on.</div>` : ''}`
+    ${watchLines.length > WATCH_SHOWN ? `<div style="font-size:12px;color:${MUTED};margin:8px 0 0;">${fmtInt(watchLines.length - WATCH_SHOWN)} more lines not shown; open the dashboard's Reporting tab with <b>Targets only</b> on.</div>` : ''}
+    ${internalHidden ? `<div style="font-size:11px;color:${MUTED};margin:8px 0 0;">${fmtInt(internalHidden)} internal registry filing${internalHidden === 1 ? '' : 's'} (MERS acting for the firm itself) not shown.</div>` : ''}`
     : `<div style="font-size:12px;color:${MUTED};">No new filing by a watchlist name was collected in the last 7 days.</div>`;
   const watchSection = !hasWatchlist ? '' : section(
     'Watchlist activity',
-    watchRows.length
-      ? `${fmtInt(watchFilings)} newly collected filing${watchFilings === 1 ? '' : 's'} naming ${fmtInt(watchTargets)} watchlist firm${watchTargets === 1 ? '' : 's'}, last 7 days. Dates are when the county recorded them.`
+    watchLines.length
+      ? `${fmtInt(watchFilings)} newly collected filing${watchFilings === 1 ? '' : 's'} naming ${fmtInt(watchTargets)} watchlist firm${watchTargets === 1 ? '' : 's'}, last 7 days. Each line follows the recorded document, not just the county index. Dates are when the county recorded them.`
       : 'Newly collected assignments naming a firm on the watchlist.',
     watchTable);
 

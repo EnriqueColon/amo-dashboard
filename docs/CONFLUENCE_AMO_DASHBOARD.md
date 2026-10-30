@@ -265,7 +265,7 @@ cleanly a few times.
 **Watchlist activity section (built 30 Oct 2026, not yet deployed).** Near the top of the email, a list of
 filings by names on the Targets watchlist that were first collected in the last 7 days — ordered by recording
 date, with the county and a count when one transfer filed many times. Self-assignments are left out. It is
-filled by `collector/watchlist_hits.py` (§6), and shows nothing until that job has run on the droplet.
+filled by `collector/watchlist_hits.py` (§6), and shows nothing until that job has run on the droplet. Each line describes the **recorded document**, not the county index (which can list the pair in reverse or name the borrower): it states the instrument type (loan transfer, collateral assignment, rents/leases = the firm *lent*, other), the parties as resolved by the pipeline, and the amount and property where read. Loan transfers not yet through the overnight direction check are marked *preliminary*. MERS is shown as the lender it acts for, and MERS filings made for the firm itself are counted and not listed.
 This is "Stream 1" of the lender/case watchlist request from an executive; the court-docket stream
 ("Stream 2") is deferred until the data side is configured.
 
