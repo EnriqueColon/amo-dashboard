@@ -611,6 +611,48 @@ export function buildRollupReport(db: Database.Database, sendDate: string): Roll
     </tr>`).join('')}
   </table>`;
 
+  // ── Watchlist activity (Stream 1) ─────────────────────────────────────────
+  // Filings by watchlist names that collector/watchlist_hits.py first saw in the
+  // last 7 days. Dated by when WE collected them, so a county that publishes late
+  // does not drop a filing between two reports; the recorded date is shown on each
+  // line. rec_date is also bounded to 45 days so a backfill that re-collects old
+  // months is not reported as news. Self-assignments are left out, as on Reporting.
+  // Same-day, same-pair filings collapse to one line with a count: one servicer
+  // transfer can file hundreds.
+  const hasWatchlist = !!db.prepare(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='watchlist_hits'`).get();
+  const watchRows: Array<{ target_entity: string; role: string; county: string; rec_date: string; grantor: string; grantee: string; n: number; cfn: string }> =
+    hasWatchlist ? db.prepare(`
+      SELECT target_entity, role, county, rec_date, grantor, grantee, COUNT(*) AS n, MIN(cfn) AS cfn
+      FROM watchlist_hits
+      WHERE is_self = 0
+        AND first_seen_at >= date(?, '-7 days')
+        AND rec_date >= date(?, '-45 days')
+      GROUP BY target_entity, county, rec_date, grantor, grantee, role
+      ORDER BY rec_date DESC, n DESC, target_entity
+    `).all(sendDate, sendDate) as any[] : [];
+  const WATCH_SHOWN = 25;
+  const watchFilings = watchRows.reduce((a, r) => a + r.n, 0);
+  const watchTargets = new Set(watchRows.map(r => r.target_entity)).size;
+  const watchTable = !hasWatchlist ? '' : watchRows.length ? `
+    <table width="100%" cellpadding="0" cellspacing="0" style="font-size:12px;${NUM}">
+      ${watchRows.slice(0, WATCH_SHOWN).map(r => `<tr>
+        <td style="padding:7px 0;border-bottom:1px solid ${HAIR};color:${INK};">
+          <b>${esc(trunc(r.target_entity, 30))}</b>
+          <span style="color:${MUTED};">${r.role === 'assignee' ? 'acquired from' : r.role === 'assignor' ? 'assigned to' : 'on both sides with'}</span>
+          ${esc(trunc(r.role === 'assignee' ? r.grantor : r.grantee, 34))}
+          ${r.n > 1 ? `<span style="color:${MUTED};"> · ${fmtInt(r.n)} filings</span>` : `<span style="color:${MUTED};"> · ${esc(r.cfn)}</span>`}</td>
+        <td align="right" style="padding:7px 0 7px 8px;border-bottom:1px solid ${HAIR};color:${MUTED};white-space:nowrap;">${fmtDay(r.rec_date)} · ${COUNTY_LABEL[r.county] || esc(r.county)}</td>
+      </tr>`).join('')}
+    </table>
+    ${watchRows.length > WATCH_SHOWN ? `<div style="font-size:12px;color:${MUTED};margin:8px 0 0;">${fmtInt(watchRows.length - WATCH_SHOWN)} more lines not shown; open the dashboard's Reporting tab with <b>Targets only</b> on.</div>` : ''}`
+    : `<div style="font-size:12px;color:${MUTED};">No new filing by a watchlist name was collected in the last 7 days.</div>`;
+  const watchSection = !hasWatchlist ? '' : section(
+    'Watchlist activity',
+    watchRows.length
+      ? `${fmtInt(watchFilings)} newly collected filing${watchFilings === 1 ? '' : 's'} naming ${fmtInt(watchTargets)} watchlist firm${watchTargets === 1 ? '' : 's'}, last 7 days. Dates are when the county recorded them.`
+      : 'Newly collected assignments naming a firm on the watchlist.',
+    watchTable);
+
   const coverageLine = counties.map(c => `${COUNTY_LABEL[c]} through ${fmtDay(asOf[c])}`).join(' · ');
 
   // ── Stale-county notice ───────────────────────────────────────────────────
@@ -665,6 +707,8 @@ export function buildRollupReport(db: Database.Database, sendDate: string): Roll
   <tr><td style="padding:18px 27px 0 27px;">
     <table width="100%" cellpadding="0" cellspacing="0"><tr>${stats.map(tile).join('')}</tr></table>
   </td></tr>
+
+  ${watchSection}
 
   ${section('52-week trend', 'Loan transfers per week, both counties. The darker the column, the more recent the window it belongs to.', trendChart)}
 
