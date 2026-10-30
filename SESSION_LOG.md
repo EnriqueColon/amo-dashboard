@@ -6,7 +6,7 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ## 2026-10-29 (latest) — Sidebar: UCC Filings + Clean Transactions moved to Data
 
-Owner: "Move the UCC filings, clean transaction tabs to the data section." `Sidebar.tsx` NAV only — both now `group: 'data'`, between Raw Assignments and Entities. Routes, pages, glossary untouched. Verified on the local dev server (Data = Raw Assignments, UCC Filings, Clean Transactions, Entities, Collection Log). Confluence §4.3 navigation paragraph updated. Not deployed (owner's rule: ask before any production push). DNS for `intelligence.safeharborcp.com` not yet added by IT; cut-over waits.
+Owner: "Move the UCC filings, clean transaction tabs to the data section." `Sidebar.tsx` NAV only — both now `group: 'data'`, between Raw Assignments and Entities. Routes, pages, glossary untouched. Verified on the local dev server (Data = Raw Assignments, UCC Filings, Clean Transactions, Entities, Collection Log). Confluence §4.3 navigation paragraph updated. **Deployed 22:02 UTC on the owner's "Yes, deploy"** (`a00d356`: pull → build → `pm2 restart`; no package.json change; deployed bundle checked for the new grouping, `/` 302, `/login` 200). The 9 `ENOENT dist/public/index.html` lines in the PM2 error log are from build windows (dist deleted while the old process still serves) — benign. DNS for `intelligence.safeharborcp.com` not yet added by IT; cut-over waits.
 
 ## 2026-10-29 — BRIDGE COPY OFF (step 4)
 

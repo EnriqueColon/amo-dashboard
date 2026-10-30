@@ -279,7 +279,8 @@ Navigation is grouped into **Analysis**, **Intelligence** and **Data**. Since 29
 request) **UCC Filings** and **Clean Transactions** sit under Data with Raw Assignments, Entities and
 the Collection Log: they are document views, while Analysis holds the derived pages (Reporting,
 Targets, FDIC Data Analytics, Bank Stress Ranking, Private Credit, Lending Relationships). The pages
-themselves are unchanged; the sections below are still in their original order.
+themselves are unchanged; the sections below are still in their original order. Live in production
+since 29 Oct 2026 22:02 UTC (`a00d356`).
 
 #### Overview (`/overview`)
 Headline counts (total filings, unique entities, market transfers, self-assigns,
