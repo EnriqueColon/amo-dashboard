@@ -73,6 +73,7 @@ JSON SHAPE:
 {
  "is_mortgage_foreclosure": bool, "foreclosure_reason": str,
  "date_filed": "YYYY-MM-DD from the 'E-Filed' stamp or null",
+ "document_title": "the complaint's title exactly as printed on its first page (e.g. VERIFIED COMPLAINT TO FORECLOSE MORTGAGE)",
  "county_court": str, "plaintiff": str, "defendants": [str],
  "attorney": {"name": str, "firm": str, "phone": str, "emails": [str]},
  "guarantors": [str],
@@ -94,7 +95,8 @@ JSON SHAPE:
    "address_body": str, "address_missing_reason": str,
    "legal_description": str, "property_county": str
  } ],
- "lien_priority_quote": str
+ "lien_priority_quote": str, "lien_priority_page": int,
+ "lien_priority_number": "1 if the complaint says every other defendant's interest is subordinate to the Plaintiff's lien (Plaintiff is first lienholder); 2 or higher if the complaint says a lien ranks ahead of Plaintiff's (count them); null if not stated"
 }"""
 
 
@@ -287,6 +289,7 @@ def extract(read: dict, model: str, api_key: str) -> dict:
     raw, usage = call_model(page_text(read), model, api_key)
     out = postprocess(raw)
     out["_model"], out["_usage"], out["_file"] = model, usage, read.get("file")
+    out["_pages"], out["_ocr_pages"] = read.get("page_count"), read.get("ocr_pages")
     return out
 
 

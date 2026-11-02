@@ -60,6 +60,71 @@ const BASE_SQL = `
   LEFT JOIN foreclosure_extractions e ON e.case_id = c.case_id AND e.model = ?
   LEFT JOIN foreclosure_reviews r ON r.case_id = c.case_id`
 
+
+// ─── The old collector's spreadsheet, column for column ───────────────────────────────────────────
+// Order and names follow the "Complaints" tab of the Lido workbook (docs/MIAMI_DADE_COMPLAINTS_REVERSE_ENGINEERING.md §2),
+// then the extra fields this pipeline reads that the sheet does not carry. Several notes or properties
+// appear joined with "; " as in the sheet. Nothing here is an extra judgement: every value is what the
+// complaint said, or is computed in code from it.
+const join = (xs: any[]) => { const v = xs.filter(x => x != null && x !== ''); return v.length ? v.join('; ') : null }
+const usd = (v: any) => (v == null ? null : Number(v).toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 }))
+const yn = (v: any) => (v === true ? 'Yes' : v === false ? 'No' : null)
+
+export type SheetField = { key: string; label: string; value: string | null; group: string; wide?: boolean }
+
+function sheetFields(row: Row, res: any, address: string | null): SheetField[] {
+  const notes: any[] = res?.notes ?? []
+  const props: any[] = res?.properties ?? []
+  const att = res?.attorney ?? {}
+  const f = (group: string, key: string, label: string, value: any, wide = false): SheetField =>
+    ({ group, key, label, value: value == null || value === '' ? null : String(value), wide })
+  const sumUnpaid = notes.filter(n => n.unpaid_principal != null).reduce((a, n) => a + Number(n.unpaid_principal), 0)
+  return [
+    f('Case', 'case_number', 'Case Number', row.case_number),
+    f('Case', 'case_type', 'Clerk Case Type', row.case_type),
+    f('Case', 'document_title', 'Document Title', res?.document_title, true),
+    f('Case', 'county', 'County', res?.county_court),
+    f('Case', 'date_filed', 'Date Filed', res?.date_filed ?? row.filing_date),
+    f('Case', 'clerk_filing_date', 'Clerk Filing Date', row.filing_date),
+    f('Parties', 'plaintiff', 'Plaintiff', res?.plaintiff, true),
+    f('Parties', 'attorney_name', 'Plaintiff Attorney Name', att.name),
+    f('Parties', 'attorney_email', 'Plaintiff Attorney Email', (att.emails ?? []).join('; ')),
+    f('Parties', 'attorney_phone', 'Plaintiff Attorney Phone', att.phone),
+    f('Parties', 'attorney_firm', 'Plaintiff Attorney Firm', att.firm),
+    f('Parties', 'defendants', 'Defendant', join(res?.defendants ?? []), true),
+    f('Property', 'address', 'Property Address', address ?? join(props.map(p => p.property_address)), true),
+    f('Property', 'address_source', 'Address Source', join(props.map(p => p.address_source)), true),
+    f('Property', 'address_body', 'Address Printed in Complaint Body', join(props.map(p => p.address_body)), true),
+    f('Property', 'legal', 'Property Legal Description', join(props.map(p => p.legal_description)), true),
+    f('Property', 'property_county', 'Property County', join(props.map(p => p.property_county))),
+    f('Loan', 'orig_amount', 'Original Loan Amount', join(notes.map(n => usd(n.original_principal)))),
+    f('Loan', 'orig_date', 'Original Loan Date', join(notes.map(n => n.note_date))),
+    f('Loan', 'note_rate', 'Original Loan Note Rate', join(notes.map(n => n.note_rate_text)), true),
+    f('Loan', 'maturity', 'Maturity Date', join(notes.map(n => n.maturity_date))),
+    f('Loan', 'ext_maturity', 'Latest Extended Maturity', join(notes.map(n => n.latest_extended_maturity))),
+    f('Loan', 'guarantor', 'Guarantor', join(res?.guarantors ?? []), true),
+    f('Default', 'default_reason', 'Default Reason', join(notes.map(n => n.default_reason)), true),
+    f('Default', 'default_date', 'Default Date', join(notes.map(n => n.default_date))),
+    f('Default', 'other_default_dates', 'Other Default Dates Mentioned', join(notes.flatMap(n => n.other_default_dates ?? []))),
+    f('Amounts', 'unpaid', 'Unpaid Balance(s)', join(notes.map(n => usd(n.unpaid_principal)))),
+    f('Amounts', 'unpaid_sum', 'Sum of Unpaid Balance(s)', notes.length ? usd(sumUnpaid) : null),
+    f('Amounts', 'deferred', 'Deferred Principal', join(notes.map(n => usd(n.deferred_principal)))),
+    f('Amounts', 'test_principal', 'Principal Used for the $500,000 Test', join(notes.map(n => usd(n.test_principal)))),
+    f('Amounts', 'default_rate', 'Default Rate (default interest)', join(notes.map(n => n.default_interest_text)), true),
+    f('Amounts', 'late_fee', 'Late Fee', join(notes.map(n => n.late_fee_text)), true),
+    f('Criteria', 'reinstate', 'Right To Reinstate', join(notes.map(n => yn(n.right_to_reinstate_clause)))),
+    f('Criteria', 'fannie', 'Fannie Mae / Freddie Mac Incl.?', join(notes.map(n => yn(n.fannie_freddie_form)))),
+    f('Criteria', 'sba', 'SBA?', join(notes.map(n => yn(n.sba_mentioned)))),
+    f('Criteria', 'meets', 'Meets Criteria?', res == null ? null : res.is_mortgage_foreclosure === false ? 'Not a mortgage foreclosure'
+      : res.computed_meets_criteria === true ? 'Meets criteria' : res.computed_meets_criteria === false ? 'Does not meet criteria' : 'Cannot tell'),
+    f('Criteria', 'priority_number', 'Priority # of the Plaintiff as Lender', res?.lien_priority_number),
+    f('Criteria', 'priority_source', 'Priority # Source', res?.lien_priority_quote ? `p.${res.lien_priority_page ?? '?'}: ${res.lien_priority_quote}` : null, true),
+    f('Source', 'pdf', 'PDF Link', row.complaint_pdf ? `/api/complaints/${row.case_id}/pdf` : null),
+    f('Source', 'pages', 'Pages Processed', res?._pages),
+    f('Source', 'flags', 'Review Flags', join(res?.review_flags ?? [])),
+  ]
+}
+
 function shape(row: Row, detail = false) {
   const res = row.result_json ? JSON.parse(row.result_json) : null
   const notes: any[] = res?.notes ?? []
@@ -86,6 +151,7 @@ function shape(row: Row, detail = false) {
     review_reasons: res?.review_reasons ?? [],
     review: reviewed ? { decision: row.decision, address: row.review_address, note: row.review_note } : null,
     extracted_at: row.extracted_at,
+    sheet: sheetFields(row, res, address),
   }
   if (detail && res) {
     out.result = {
@@ -119,6 +185,32 @@ export function registerComplaintsRoutes(app: Express) {
       not_foreclosures: count(r => r.is_foreclosure === false),
       review_open: count(r => r.needs_review),
     })
+  })
+
+
+  app.get('/api/complaints/export.csv', (req: Request, res: Response) => {
+    if (!tablesExist()) return res.status(503).json({ error: 'not set up' })
+    const view = String(req.query.view ?? 'all')
+    let rows = (getDb().prepare(BASE_SQL + ' ORDER BY c.filing_date DESC, c.case_number DESC').all(MODEL) as Row[]).map(r => shape(r))
+    if (view === 'qualifying') rows = rows.filter(r => r.verdict === 'qualifies' || r.verdict === 'unclear')
+    else if (view === 'review') rows = rows.filter(r => r.needs_review)
+    const withData = rows.filter(r => r.sheet.some((f: SheetField) => f.key === 'plaintiff' && f.value))
+    const cols: SheetField[] = (withData[0] ?? rows[0])?.sheet ?? []
+    const esc = (v: string | null) => { const t = v ?? ''; return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t }
+    const lines = [cols.map(c => esc(c.label)).join(',')]
+    for (const r of rows) lines.push(r.sheet.map((f: SheetField) => esc(f.value)).join(','))
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8')
+    res.setHeader('Content-Disposition', `attachment; filename="complaints-${view}-${new Date().toISOString().slice(0, 10)}.csv"`)
+    res.send('﻿' + lines.join('\n'))
+  })
+
+  app.get('/api/complaints/:caseId/pdf', (req: Request, res: Response) => {
+    const row = getDb().prepare(`SELECT complaint_pdf FROM foreclosure_cases WHERE case_id = ?`)
+      .get(req.params.caseId) as { complaint_pdf: string | null } | undefined
+    if (!row?.complaint_pdf || !fs.existsSync(row.complaint_pdf)) return res.status(404).json({ error: 'no document' })
+    res.setHeader('Content-Type', 'application/pdf')
+    res.setHeader('Content-Disposition', 'inline')
+    fs.createReadStream(row.complaint_pdf).pipe(res)
   })
 
   app.get('/api/complaints', (req: Request, res: Response) => {
