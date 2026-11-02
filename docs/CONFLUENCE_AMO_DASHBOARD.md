@@ -494,89 +494,26 @@ Your watchlist of market participants. Search the canonical entity list, add a f
 tracks its filing activity. Each row links straight through to that firm's filings in Reporting.
 Seeded in bulk from `collector/targets_seed.csv`.
 
-#### FDIC Data Analytics (`/market-analytics`)
+#### FDIC Data Analytics (`/market-analytics`) — merged into Bank Stress & FDIC Analytics, 2 Nov 2026
 
-> **Re-sourced again 27 Oct 2026, DEPLOYED 14:42 UTC (stage 2 of the Bank Stress work — see
-> §7.3).** The page now reads **this dashboard's own FDIC tables**
-> (`bank_stress.db`, pulled weekly from the FDIC BankFind API) instead of the Market Intelligence
-> tool. Between 7 and 27 Oct 2026 it read Market Intelligence; before 7 Oct it queried the FDIC API
-> itself. See the end of this section for what changed each time.
+The two pages read the same `bank_stress.db` and showed the same scores, so on 2 Nov 2026 (owner's
+request) they became **one page at `/bank-stress`**, described in the next section. The old address
+`/market-analytics` redirects there and the menu has one entry, **Bank Stress & FDIC**. Nothing was
+dropped: every FDIC column, the cohort figures, the balance-sheet signals, the institution detail
+(trend verdict, quarter table, acquisitions, balance-sheet actions, roll-forward) and the compare /
+peer-positioning view with Copy Snapshot are on the merged page.
 
-Bank screening and stress scores from FDIC Call Report data, **computed by this dashboard** from the
-same raw Call Report rows that drive the Bank Stress Ranking page. The header states the quarter the
-figures describe ("Data as of Q2 2026") and the line **"Source: FDIC Call Reports, pulled directly
-from the FDIC BankFind API"**.
+*History:* until 7 Oct 2026 the page queried the FDIC BankFind API itself (national screen capped at
+the ~1,113 largest banks, score columns hardcoded to 0). From 7 to 27 Oct it read the Market
+Intelligence tool. From 27 Oct (stage 2, deployed 14:42 UTC) it read our own weekly FDIC pull with the
+Bank Stress scores; behaviour signals returned with stage 3 (16:31 UTC); the OpenAI "Generate
+narrative" button went for good. CRE everywhere is the interagency definition (construction +
+multifamily + non-owner-occupied nonfarm nonresidential).
 
-What is on the page, top to bottom:
-
-- **Scope selector** — United States or any state (every state and territory with a filing bank in
-  the latest quarter). United States is **every FDIC-reporting bank with a Call Report for the
-  quarter, about 4,300** — not the ~1,100-bank large-bank screen the Market Intelligence version
-  showed.
-- **NPL & Loans** — total loans, nonaccrual dollars and ratio, CRE loans, CRE/assets, total assets
-  for the scope.
-- **Cohort Summary** — institutions screened and the average NPL, noncurrent, reserve-coverage and
-  CRE-concentration ratios.
-- **Target Screening List** — one row per bank, ranked by the **Bank Stress composite** by default,
-  with its **Condition**, **Deterioration** and **CRE Exposure** sub-scores and a **Flags** column
-  (flag count, tier, and the red *CRE seller* badge) beside it — the same scores as the Bank Stress
-  Ranking page, defined there and in `collector/bank_stress/README.md`. The scores are **percentile
-  ranks within the bank's asset-size peer band nationally** (0–100, higher = more stress), so they do
-  not change when the scope does; banks established in the last three years show a dash. The
-  glossary (hover any underlined header) explains each column. Every column from before (CRE mix,
-  NPL, noncurrent, past due, reserve, capital, the earnings set) is still there and the **Columns**
-  menu still chooses which show. **CRE is now the interagency definition** — construction +
-  multifamily + non-owner-occupied nonfarm nonresidential — on this page as on the ranking page;
-  CRE Concentration here is CRE ÷ net loans, whereas the ranking page's "CRE / T1" is CRE ÷ Tier 1
-  capital.
-- **Institution drawer** (click a row) — the structural, earnings and peer-positioning panels as
-  before, an **eight-quarter Trend** with a one-line verdict built from the bank's stress score,
-  flags and top drivers, four trend charts (asset quality; capital; CRE exposure against the
-  300% / 100% interagency guidance lines; earnings) above the quarter table, and **Acquisition
-  History** (fetched live from the FDIC structure-history endpoint and cached for a week; if the
-  FDIC does not answer the card says so instead of showing "none on record"), and — since stage 3,
-  27 Oct 2026 — **Balance-Sheet Actions**: the behaviour signals that fired this quarter, a
-  plain-English reading of what the bank did with its CRE book, the **CRE problem-asset balances**
-  chart (nonaccrual, modifications, OREO, held-for-sale by quarter) and the nonaccrual
-  **roll-forward** (prior → new proxy → charge-offs → to OREO → unexplained exit → current, nine
-  quarters and the latest quarter by CRE category). All of it is now computed by this dashboard
-  (`collector/bank_stress/behavior.py`, a port of the Market Intelligence rules, thresholds in
-  `config.json`) from the same weekly pull. The **Generate narrative** button (an OpenAI call in
-  the other tool) is gone for good.
-- **Signals column** (back since stage 3) — the balance-sheet signals that fired for the bank in
-  the latest quarter as chips: *HFS transfer*, *Realized sale*, *CRE charge-off spike*, *Unexplained
-  nonaccrual exit*, *Foreclosure route*, *Modification build*, *CRE runoff*; hover a chip for the
-  meaning and the rule. A signal fires on absolute floors and the bank's own history, never on the
-  cohort, so the same bank fires the same way in any scope; a signal whose inputs the bank does not
-  report is left unjudged rather than read as clear. The line under the table says how many banks in
-  the scope fired at least one (Florida, Q2 2026: 25 of 83).
-
-**Read the cohort line under the screening list.** It says how many institutions are screened in
-the scope and how many of them are shown but not ranked. Peer percentiles in the drawer are relative
-to whichever cohort is loaded, not to all US banks.
-
-**When do the numbers change?** Each Sunday 03:00 UTC the bank-stress job re-pulls the FDIC and
-recomputes (§6.5); a new quarter appears as soon as the FDIC publishes it, about two months after
-quarter-end, so "latest" is typically one to two quarters behind today. The server keys its cache on
-the compute time, so no restart or cache bust is needed.
-
-**If the page says "FDIC data not available"**, `bank_stress.db` is missing on that machine (the
-weekly job has never run there). The page deliberately shows **no figures at all** in that state
-rather than a stale set — every card reads `—` and the table is empty — so nothing on screen can be
-mistaken for current data.
-
-*What changed each time:* until 7 Oct 2026 the page queried the FDIC BankFind API itself; its national
-screen was the ~1,113 largest banks because of FDIC's 10,000-row response cap and the score columns
-were hardcoded to 0. From 7 to 27 Oct it read the Market Intelligence tool: real Opportunity /
-Earnings / Vulnerability percentiles, balance-sheet signal chips, and trend / acquisition /
-roll-forward drawer sections, refreshed by that tool's daily job plus up to seven days of local
-cache. Since 27 Oct (stage 2) it reads our own weekly FDIC pull: every bank nationally, the Bank
-Stress scores in place of the three upstream ones, no signals until stage 3, no narrative.
-
-#### Bank Stress Ranking (`/bank-stress`) — DEPLOYED 27 Oct 2026 14:05 UTC
+#### Bank Stress & FDIC Analytics (`/bank-stress`) — ranking DEPLOYED 27 Oct 2026; FDIC page merged in 2 Nov 2026
 
 Which banks are under enough earnings, credit and commercial-real-estate pressure that they are
-likely to sell distressed CRE loans. Unlike FDIC Data Analytics, this page reads **our own copy of the
+likely to sell distressed CRE loans, with their FDIC figures beside the score. The page reads **our own copy of the
 FDIC Call Reports**: the weekly job `collector/run_bank_stress.sh` pulls the full universe (≈4,300
 banks, 20 quarters) straight from the FDIC BankFind API into `bank_stress.db`, computes the metrics
 and scores, and the page shows the newest eight quarters. Nothing on it comes from Market Intelligence.
@@ -612,11 +549,28 @@ appears as soon as the FDIC publishes it (about two months after quarter-end). N
 bust is needed — the server keys its cache on the compute time. If the page says the ranking "has not
 been computed yet", the weekly job has not produced `bank_stress.db` on that machine.
 
-**Why it exists alongside FDIC Data Analytics, and what comes next.** The owner decided on 27 Oct
-2026 to stop depending on the Market Intelligence API altogether: stage 1 (this page, on our own
-pull) is built; stage 2 re-points FDIC Data Analytics to the same raw tables; stage 3 rebuilds the
-balance-sheet behaviour signals here; then the Market Intelligence client, proxy and keys are removed.
-Until stage 2 lands, FDIC Data Analytics still reads Market Intelligence (previous section).
+**What the FDIC Data Analytics merge added (2 Nov 2026).** The ranking's filters decide which banks
+are on screen; the FDIC figures are joined onto those same rows by cert, so everything follows every
+filter.
+- **Cohort tiles** (second row) — total assets, total loans, CRE loans and CRE/assets, NPL dollars
+  and ratio, average noncurrent/loans, reserve coverage and CRE/loans, summed or averaged over **the
+  banks in the table** (the old page averaged the whole state regardless of filters).
+- **Balance-sheet signals column** and tile, plus a **"Balance-sheet signal fired only"** filter and
+  sort — the seven behaviour signals (HFS transfer, realized sale, CRE charge-off spike, unexplained
+  nonaccrual exit, foreclosure route, modification build, CRE runoff).
+- **Columns** menu with four FDIC groups — Credit quality (on by default), Capital, Earnings, Loan
+  book — remembered per browser. Noncurrent/loans and Tier 1 leverage were not repeated: the ranking
+  already shows them. "CRE / loans" (CRE ÷ net loans) is a different ratio from "CRE / T1".
+- **Compare** — tick banks in the first column (up to 10), then *Compare* opens the side-by-side
+  table, peer-positioning chart and Copy Snapshot. Peer percentiles there are relative to the banks
+  in the table.
+- **Drawer** — the ranking drawer now ends with the FDIC detail: trend verdict and eight-quarter
+  table (CET1, NPL, NIM, reserve, capital category), acquisition history, balance-sheet actions with
+  the plain-language reading and the nonaccrual roll-forward. Its own trend charts are not repeated.
+- The FDIC screening exists for the **latest quarter only**; on an older quarter the tiles, extra
+  columns, signals and compare switch off and a line says so.
+- Server: `/api/fdic/screening` and `/api/fdic/behavior-signals` now also take a comma-separated
+  list of state codes (`scope=FL,GA,AL`) so the multi-state regions load in one call.
 
 #### Clean Transactions (`/clean-events`)
 The verified `LOAN_TRANSFER` dataset, one row per confirmed transfer, with document-derived names,
@@ -680,7 +634,7 @@ health page** — gaps or `FAILED` rows here mean the pipeline missed a window.
 | Track a specific firm | Entities → find the canonical name → add via Targets |
 | Pull a list for a memo | Reporting → filter → **Export CSV** |
 | Find who finances a non-bank lender | Lending Relationships → search the borrower |
-| Check a bank counterparty's health | FDIC Data Analytics → search the institution |
+| Check a bank counterparty's health | Bank Stress & FDIC → search the institution → click the row |
 | Verify a specific document | Raw Assignments → search CFN → follow the document link |
 | Confirm the data is current | Collection Log, plus the date range on Overview |
 | Fix a wrong company name or type | Entities → Duplicate Manager / reclassify |
@@ -1877,6 +1831,7 @@ endpoints healthy across all three county scopes.
 | FDIC analytics — **stage 3, behaviour signals** | 🟢 **DEPLOYED 27 Oct 2026 16:31 UTC** (`920b552`; droplet at `d51e65e`). Deploy order as documented: pull → `run_bank_stress.sh` by hand (16:26–16:30 UTC, exit 0, 59,016 behaviour bank-quarters, 4,308 judged, 1,352 fired) → build (dist 1,060,857 B) → `pm2 restart` (#5, online, no warnings). **Verified live through nginx with a real sign-in:** meta carries the 7 signal definitions; Florida signals 83 judged / 25 fired, 7 KB gzipped; National `lt1b` band 244 KB in 0.4 s; BCB 35541 → HFS transfer + Realized sale with 9 points, 9 roll-forward steps and the reading; Ocean Bank 24156 → Modification build; `/` 200. `collector/bank_stress/behavior.py` ports the Market Intelligence behaviour rules onto our pull (38 more Call Report fields, 18 measures, 7 signals, per-category roll-forward, 12 quarters in `bank_behavior`); `server/fdic-analytics.ts` serves `/api/fdic/behavior-signals` and the drawer's `behavior` object with the ported reading; the Signals column and the Balance-Sheet Actions card are back. Verified locally: Q2 2026 nationally 4,308 judged, 1,352 fired at least one signal (HFS 66 / sale 118 / spike 125 / exit 352 / foreclosure 131 / modification 338 / runoff 515); **BCB Community Bank 35541 fires HFS transfer + Realized sale — the same two chips the page showed from Market Intelligence on 7 Oct**, its Q2 2024 HFS parking and loss are in its history; Ocean Bank 24156 fires Modification build; 76 offline checks pass; no console errors. **Deploy:** pull → `run_bank_stress.sh` by hand (fills the 38 new columns) → build → restart. Not ported: the Seller Likelihood four-state score (the ranking's CRE seller signal covers the question) |
 | FDIC analytics — **stage 2, own data** | 🟢 **DEPLOYED 27 Oct 2026 14:42 UTC** (`967bec9`; droplet at `4f180ab`). Deploy went in the documented order: pull → `run_bank_stress.sh` by hand (14:37–14:41 UTC, exit 0, the 16 new columns filled — Amerant `STNAME FLORIDA`, `CITY CORAL GABLES`, `NALNLS 168,838`, `UCLN 1,376,906`, `RBCT1CER 12.91`) → build (dist 1,052,796 B) → `pm2 restart` (#4, online, no warnings). **Verified live through nginx with a real sign-in:** Florida screening 85 rows, 32 KB gzipped, Amerant row identical to the local check (assets $10,274,427,000, loans $6,780,128,000, CRE $2,383,007,000, CRE/loans 35.15%, noncurrent 2.49%, UC $1,376,906,000, CET1 12.91, NIM 3.317, composite 66.8); top three Interamerican 67.4 / Amerant 66.8 / BayFirst 64.0; National 1.67 MB gzipped in 0.98 s; BCB 35541 drawer 8 points + 3 acquisitions; `/` 200. `server/fdic-analytics.ts` serves `/api/fdic/{meta,screening,institution}` from `bank_stress.db` in the shapes the page already rendered; the client moved its paths, swapped Opportunity / Earnings / Vulnerability for the Bank Stress composite and sub-scores plus a Flags column, dropped the signals column (stage 3) and the narrative button. Verified on the local dev server against real data: Florida 85 banks, Amerant's screening row recomputed by hand from the raw table matches to the dollar (assets $10.27B, CRE $2.38B, CRE/loans 35.15%, noncurrent 2.49%, UC $1.38B), BCB Community Bank's three acquisitions match the previous source, drawer trend 8 quarters, no console errors; National screening 1.7 MB gzipped. **Deploy:** `git pull`, then run `run_bank_stress.sh` once (it fills 16 new raw columns the page needs), then `npm run build && pm2 restart` — in that order, so the page never serves a half-filled table. Rollback = branch revert; the Market Intelligence proxy is untouched until stage 4 |
 | FDIC analytics — Market Intelligence source (7–27 Oct 2026) | 🟢 **Re-sourced to Market Intelligence — deployed 7 Oct 2026 16:56 UTC** (`dfd42f8`); *superseded by the row above once stage 2 is deployed*; **trend charts added to the bank drawer 17:33 UTC** (`4e0f5f4`), owner-confirmed. The page reads the Market Intelligence tool's Market Analytics API via `/api/mi/*` instead of querying FDIC itself: real Opportunity/Earnings/Vulnerability percentile scores (previously hardcoded `0` and hidden), balance-sheet signal chips, and trend / acquisition / roll-forward sections in the drawer; `server/fdic.ts`, the FDIC window and its guardrail are removed. Verified locally: Florida top-3 by Opportunity matches the API in order (35430, 24156, 59278); CERT 35541 chips equal `behavior.latest.fired`; a wrong key shows "Market Intelligence unavailable" and no figures; National loads signals in seven sub-1 MB band calls. Verified live after restart: `/api/mi/meta` `ok:true`, quarter 20260630, same Florida top-3. **Miss, closed 27 Oct 2026:** national screening was one 1.47 MB uncompressed response (no band parameter upstream, no gzip here — §7.4 item −9); since `546b4e0` every JSON response is gzipped (238 KB on the wire). Figures now move only when Market Intelligence's daily job refreshes (+ up to 7 days of local cache). **Next:** stage 2 of the Bank Stress work re-points this page to our own FDIC tables and retires the Market Intelligence dependency (§7.6 item 4c) |
+| Bank Stress & FDIC Analytics merge | 🟡 **Built and checked locally 2 Nov 2026, NOT deployed** — FDIC Data Analytics folded into `/bank-stress` (§4.3); `/market-analytics` redirects; FDIC routes accept multi-state scopes. Deploy = pull → build → restart (no `npm install`, no data job). |
 | Bank Stress Ranking (`/bank-stress`) | 🟢 **DEPLOYED 27 Oct 2026 14:05 UTC** (`0885853` → `19b2a92`, shipped with `546b4e0`). Own FDIC pull (`collector/bank_stress/`, 20 quarters, 92,924 bank-quarters, field assertion on every row), percentile scoring within asset bands, eight rule flags, tiers, CRE seller signal, failure backtest, 61 offline checks; read-only API `server/bank-stress.ts`; page + drawer. **First production run 14:05–14:09 UTC, exit 0:** Q2 2026 4,286 banks ranked (27 de novo unranked), tiers normal 4,089 / watchlist 193 / pressure 4, CRE seller signal 4 (Banc of California, Pinnacle Bank CA, Seacoast National, Zions); Florida + Southeast 649, deal-sourcing view 273; backtest 4 of 9 failures in the top decile four quarters out, 2 of 7 eight quarters out; 3,594 cert ↔ county-name links. Live through nginx: `/api/bank-stress/meta` `ok:true`, Southeast ranking 120 KB gzipped in 0.14 s, National 773 KB in 0.81 s. Cron installed (§6.5). `bank_stress.db` (122 MB) is **deliberately not in the backup job** — every table is rebuilt from the public FDIC API by the weekly run in four minutes; restoring it is re-running `run_bank_stress.sh` |
 | Response compression | 🟢 **DEPLOYED 27 Oct 2026 14:04 UTC** (`546b4e0`) — `compression` middleware gzips every compressible response over 1 KB; `/api/chat*` and `text/event-stream` excluded so streamed answers are not buffered. The droplet's nginx only ever gzipped HTML (`gzip_types` unset, `gzip_proxied` off). Verified live through nginx: Market Intelligence national screening 1,467,717 → 238,367 B; `/api/mi/meta` 4,702 → 2,186; the page 2,037 → 768; chat config unchanged. Closes the "miss" in item −9 |
 | Deal Intelligence page | ⚫ **Retired 11 Aug 2026** — page and its 8 endpoints removed together |

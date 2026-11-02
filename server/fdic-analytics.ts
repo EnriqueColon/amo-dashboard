@@ -129,14 +129,30 @@ function stateScopes(db: Database.Database, quarter: string): Record<string, str
   return out
 }
 
-/** "Florida" | "FL" | "National" → { stalp | null, display } or null when unknown. */
-function resolveScope(states: Record<string, string>, scope: string): { stalp: string | null; display: string } | null {
+/**
+ * "Florida" | "FL" | "National" | "FL,GA,AL" → { stalps | null, display } or
+ * null when any part is unknown. A list is how the merged Bank Stress page asks
+ * for its multi-state regions (Florida + Southeast) in one call.
+ */
+function resolveScope(states: Record<string, string>, scope: string): { stalps: string[] | null; display: string } | null {
   const s = scope.trim()
-  if (!s || s.toLowerCase() === NATIONAL.toLowerCase() || s === 'United States') return { stalp: null, display: NATIONAL }
-  const upper = s.toUpperCase()
-  if (states[upper]) return { stalp: upper, display: states[upper] }
-  for (const [code, name] of Object.entries(states)) if (name.toUpperCase() === upper) return { stalp: code, display: name }
-  return null
+  if (!s || s.toLowerCase() === NATIONAL.toLowerCase() || s === 'United States') return { stalps: null, display: NATIONAL }
+  const one = (part: string): string | null => {
+    const upper = part.trim().toUpperCase()
+    if (states[upper]) return upper
+    for (const [code, name] of Object.entries(states)) if (name.toUpperCase() === upper) return code
+    return null
+  }
+  const parts = s.split(',').map((p) => p.trim()).filter(Boolean)
+  const codes = parts.map(one)
+  if (codes.some((c) => c == null)) return null
+  const stalps = Array.from(new Set(codes as string[])).sort()
+  return { stalps, display: stalps.length === 1 ? states[stalps[0]] : stalps.join(', ') }
+}
+
+/** `r.STALP IN (...)` for a resolved scope; empty for National. */
+function stateFilter(stalps: string[] | null): { sql: string; params: string[] } {
+  return stalps ? { sql: `r.STALP IN (${stalps.map(() => '?').join(',')})`, params: stalps } : { sql: '', params: [] }
 }
 
 const RAW_COLS = `r.CERT, r.NAME, r.CITY, r.STNAME, r.STALP, r.REPDTE, r.ASSET, r.LNLSNET, r.LNLSGR, r.DEP, r.EQ, r.LNATRES, r.NCLNLS,
@@ -228,12 +244,13 @@ function quartersBack(latest: string, n: number): string[] {
 
 // ── screening payload ───────────────────────────────────────────────────────
 
-function buildScreening(db: Database.Database, meta: Meta, stalp: string | null) {
+function buildScreening(db: Database.Database, meta: Meta, stalps: string[] | null) {
   const latest = meta.latest_quarter
   const quarters = quartersBack(latest, 8)
   const displayQuarters = quarters.slice(0, 4)
-  const where = stalp ? 'r.REPDTE = ? AND r.STALP = ?' : 'r.REPDTE = ?'
-  const params = stalp ? [latest, stalp] : [latest]
+  const st = stateFilter(stalps)
+  const where = st.sql ? `r.REPDTE = ? AND ${st.sql}` : 'r.REPDTE = ?'
+  const params = [latest, ...st.params]
   const raws = db.prepare(`SELECT ${RAW_COLS} FROM fdic_financials_raw r JOIN bank_scores s ON s.cert = r.CERT AND s.repdte = r.REPDTE WHERE ${where} ORDER BY r.CERT`).all(...params) as Row[]
   const certs = raws.map((r) => r.CERT as number)
   const certSet = new Set(certs)
@@ -526,7 +543,7 @@ export function screeningUniverse(scope: string): { rows: ReturnType<typeof scre
   if (!db || !meta) return null
   const resolved = resolveScope(stateScopes(db, meta.latest_quarter), scope)
   if (!resolved) return null
-  const payload = buildScreening(db, meta, resolved.stalp)
+  const payload = buildScreening(db, meta, resolved.stalps)
   return { rows: payload.rows, rawRowCount: payload.rawRowCount, quarter: meta.latest_quarter }
 }
 
@@ -539,13 +556,13 @@ export function registerFdicAnalyticsRoutes(app: Express) {
     const band = typeof req.query.band === 'string' && req.query.band ? req.query.band : null
     const resolved = resolveScope(stateScopes(db, meta.latest_quarter), scope)
     if (!resolved) return fail(res, 400, `Unknown scope "${scope}"`)
-    const key = makeCacheKey('fdic:behavior', { scope: resolved.stalp ?? NATIONAL, band: band ?? '', v: meta.computed_at })
+    const key = makeCacheKey('fdic:behavior', { scope: resolved.stalps?.join(',') ?? NATIONAL, band: band ?? '', v: meta.computed_at })
     const hit = getCached(key)
     if (hit) { res.setHeader('X-FDIC-Cache', 'HIT'); return res.json(hit) }
     const latest = meta.latest_quarter
     const where = ['b.repdte = @q']
     const params: Row = { q: latest }
-    if (resolved.stalp) { where.push('r.STALP = @st'); params.st = resolved.stalp }
+    if (resolved.stalps) { where.push(`r.STALP IN (${resolved.stalps.map((_s, i) => `@st${i}`).join(',')})`); resolved.stalps.forEach((s, i) => { params[`st${i}`] = s }) }
     // counts are scope-wide in every band response (the client reads them once, from the first part)
     const counts = db.prepare(`SELECT SUM(b.judged = 1) AS judged, SUM(b.judged = 0) AS unjudged FROM bank_behavior b JOIN fdic_financials_raw r ON r.CERT = b.cert AND r.REPDTE = b.repdte WHERE ${where.join(' AND ')}`).get(params) as { judged: number; unjudged: number }
     if (band) { where.push('b.band = @band'); params.band = band }
@@ -593,10 +610,10 @@ export function registerFdicAnalyticsRoutes(app: Express) {
     const scope = typeof req.query.scope === 'string' && req.query.scope ? req.query.scope : NATIONAL
     const resolved = resolveScope(stateScopes(db, meta.latest_quarter), scope)
     if (!resolved) return fail(res, 400, `Unknown scope "${scope}" — use National, a state name or a two-letter state code`)
-    const key = makeCacheKey('fdic:screening', { scope: resolved.stalp ?? NATIONAL, v: meta.computed_at })
+    const key = makeCacheKey('fdic:screening', { scope: resolved.stalps?.join(',') ?? NATIONAL, v: meta.computed_at })
     const hit = getCached(key)
     if (hit) { res.setHeader('X-FDIC-Cache', 'HIT'); return res.json(hit) }
-    const payload = buildScreening(db, meta, resolved.stalp)
+    const payload = buildScreening(db, meta, resolved.stalps)
     const body = { ok: true, meta: stamp(meta, meta.latest_quarter, resolved.display), payload }
     setCached(key, body, DEFAULT_TTL_MS)
     res.setHeader('X-FDIC-Cache', 'MISS')

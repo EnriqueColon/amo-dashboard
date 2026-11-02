@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { CartesianGrid, Legend, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import { InstitutionDetailSections } from '@/components/InstitutionProfileDrawer'
 import {
   loadBsBank, formatQuarter, formatThousands, formatPct, formatScore, stressTone, TIER_LABEL, TIER_TONE,
   type BsBankDetail, type BsDefinitions, type BsHistoryRow,
@@ -257,6 +258,12 @@ export function BankStressDrawer({ cert, name, onClose, definitions }: { cert: n
                   })}
                 </tbody>
               </table>
+            </div>
+
+            {/* From the former FDIC Data Analytics drawer: capital/earnings verdict, quarter table, acquisitions, balance-sheet actions. */}
+            <div className="space-y-3">
+              <p className="text-xs font-semibold text-slate-700">FDIC detail — capital, acquisitions and balance-sheet actions</p>
+              <InstitutionDetailSections cert={String(detail.bank.cert)} hideTrendCharts />
             </div>
 
             {detail.aom_canonical_names.length > 0 && (

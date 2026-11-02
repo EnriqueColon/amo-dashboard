@@ -10,7 +10,6 @@ import Dashboard from '@/pages/Dashboard';
 import Chat from '@/pages/Chat';
 import Assignments from '@/pages/Assignments';
 import CleanEvents from '@/pages/CleanEvents';
-import MarketAnalytics from '@/pages/MarketAnalytics';
 import BankStress from '@/pages/BankStress';
 import Peers from '@/pages/Peers';
 import News from '@/pages/News';
@@ -41,7 +40,8 @@ export default function App() {
                 <Route path="/ask" component={Chat} />
                 <Route path="/overview" component={Dashboard} />
                 <Route path="/clean-events" component={CleanEvents} />
-                <Route path="/market-analytics" component={MarketAnalytics} />
+                {/* FDIC Data Analytics merged into Bank Stress (2 Nov 2026); old links land there. */}
+                <Route path="/market-analytics">{() => <Redirect to="/bank-stress" replace />}</Route>
                 <Route path="/bank-stress" component={BankStress} />
                 <Route path="/peers" component={Peers} />
                 <Route path="/news" component={News} />

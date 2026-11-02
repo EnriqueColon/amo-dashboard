@@ -1,6 +1,6 @@
 import { Link, useLocation } from 'wouter';
 import {
-  BarChart2, FileText, CheckCircle, Shield, Building2, ClipboardList, LineChart, LayoutList, LogOut, Crosshair,
+  BarChart2, FileText, CheckCircle, Shield, Building2, ClipboardList, LayoutList, LogOut, Crosshair,
   Landmark, FileSignature, MessageSquare, Gauge, Users, Newspaper, Scale, BookOpen, Gavel, ChevronDown, Menu, X,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
@@ -27,8 +27,7 @@ const MENUS: Menu[] = [
     key: 'analysis', label: 'Analysis', items: [
       { href: '/reporting', icon: LayoutList, label: 'Reporting' },
       { href: '/targets', icon: Crosshair, label: 'Targets' },
-      { href: '/market-analytics', icon: LineChart, label: 'FDIC Data Analytics' },
-      { href: '/bank-stress', icon: Gauge, label: 'Bank Stress Ranking', badge: 'New' },
+      { href: '/bank-stress', icon: Gauge, label: 'Bank Stress & FDIC', badge: 'New' },
       { href: '/private-credit', icon: Shield, label: 'Private Credit' },
       { href: '/credit-facilities', icon: Landmark, label: 'Lending Relationships' },
     ],

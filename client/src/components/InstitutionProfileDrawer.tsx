@@ -832,7 +832,8 @@ function RollForwardHeader() {
   )
 }
 
-export function InstitutionDetailSections({ cert }: { cert: string }) {
+/** `hideTrendCharts`: the Bank Stress drawer already charts these series, so it shows only the verdict and the quarter table. */
+export function InstitutionDetailSections({ cert, hideTrendCharts = false }: { cert: string; hideTrendCharts?: boolean }) {
   const [meta, setMeta] = useState<FdicMeta | null>(null)
   const [detail, setDetail] = useState<FdicInstitution | null>(null)
   const [error, setError] = useState<{ title: string; detail: string } | null>(null)
@@ -891,7 +892,7 @@ export function InstitutionDetailSections({ cert }: { cert: string }) {
             <div className={`rounded-md border px-3 py-2 text-xs ${verdictTone}`}>
               <span className="font-semibold">{trend.verdict.heading}.</span> {trend.verdict.text}
             </div>
-            <TrendCharts points={trend.points} leverageOnly={trend.leverageOnly} />
+            {!hideTrendCharts && <TrendCharts points={trend.points} leverageOnly={trend.leverageOnly} />}
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
