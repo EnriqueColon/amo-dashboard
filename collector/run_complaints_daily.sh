@@ -19,7 +19,10 @@ COLLECTOR_DIR="/opt/amo-dashboard/collector"
 VENV="$COLLECTOR_DIR/.venv"
 
 # shellcheck disable=SC1091
+# set -a exports every variable the file sets; some lines there carry no "export" (the Clerk pair)
+set -a
 [ -f /opt/amo-dashboard/.env ] && . /opt/amo-dashboard/.env
+set +a
 
 cd "$COLLECTOR_DIR" || exit 1
 
