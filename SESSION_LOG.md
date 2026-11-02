@@ -4227,3 +4227,4 @@ Owner wants a new pipeline: Miami-Dade Clerk circuit-civil foreclosure complaint
 ## 2 Nov 2026 (rules approved, build plan proposed)
 - Owner approved all nine extraction rules (doc §17). Added §18 build plan (6 stages: discovery, fetch, OCR, extraction, check against the 33 matched filings, valuation/display). Nothing built.
 - Open before Stage 1: Clerk login for unattended droplet use, extraction model choice (test on reviewed filings), PropertyRadar key/budget, DB placement.
+- Build plan APPROVED by owner. Started Stage 3 only (needs no Clerk login): `collector/complaints_reader.py` (page-by-page text, OCR for unreadable pages, no page cap). Tried on 2 reviewed complaints (140 pp: 95 OCR'd; 21 pp: 7 OCR'd). Stages 1-2 blocked on an unattended Clerk login (owner to answer).
