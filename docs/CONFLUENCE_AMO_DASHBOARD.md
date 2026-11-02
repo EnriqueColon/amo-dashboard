@@ -1,5 +1,7 @@
 # AOM Tracker — Mortgage Assignment Intelligence Dashboard
 
+> **Navigation changed 2 Nov 2026 (owner's request):** the left sidebar is replaced by a top bar with four menus (Home, Analysis, Intelligence, Data); hovering a menu opens a dropdown of its pages (on a phone, the menu button opens the same list). The page list and badges are unchanged; the county selector and Sign out sit at the right of the bar. Older text on this page that says "sidebar" means this bar.
+>
 > **Renamed 19 Oct 2026 at the owner's request: the product is "AOM Tracker" (Assignment of Mortgage), formerly "AMO Tracker."** The rename covers everything users see — the sidebar, the sign-in page, the Entity Activity Report heading, the Excel export, the chat assistant, and the weekly email (subject and header "AOM Market Monitor", sender name "AOM Dashboard" — from the 19 Oct 2026 send onward if deployed before 07:00 ET, else from 26 Oct). Code identifiers, the repository name and the county's own document code (`ASSIGNMENT OF MORTGAGE - AMO`) are unchanged.
 
 > **Status:** Live in production · **Owner:** Enrique C. · **Last reviewed:** 2 Nov 2026
@@ -271,7 +273,7 @@ This is "Stream 1" of the lender/case watchlist request from an executive; the c
 
 ### 4.2 The county selector
 
-Top of the left sidebar, above the navigation. Three options: **Miami-Dade**, **Broward**, **All
+Top right of the page, in the top navigation bar. Three options: **Miami-Dade**, **Broward**, **All
 Counties**. It is global — it applies to every page and persists across navigation.
 
 > Changing the county **clears the client-side query cache** and refetches. A brief loading state is
@@ -300,7 +302,7 @@ request), and Overview is the second entry in the sidebar.
 #### Ask the Data (`/ask`) — the landing page since 7 Oct 2026; in **Beta** (badge on the tab and the page header)
 The Beta badge is the owner's marker that the page is live for evaluation, not yet a
 supported part of the tool (it first shipped as "TESTING/NOTDEPLOYED", renamed the same day). Drop it
-(`badge` field in `client/src/components/Sidebar.tsx`, header span in `pages/Chat.tsx`) once the
+(`badge` field in `client/src/components/TopNav.tsx`, header span in `pages/Chat.tsx`) once the
 first round of real questions has been reviewed. A chat box. Type a question in plain English — *"who were the top acquirers in 2025 and how does that
 compare to 2024?"*, *"which banks provide warehouse lines, and to whom?"*, *"what does CFN 2025R123456
 say?"* — and a language model (OpenAI **GPT-6 Astra** by default) answers from this database, the way

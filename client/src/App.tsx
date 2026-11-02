@@ -5,7 +5,7 @@ import { queryClient } from '@/lib/queryClient';
 import { CountyProvider } from '@/lib/county';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
-import Sidebar from '@/components/Sidebar';
+import TopNav from '@/components/TopNav';
 import Dashboard from '@/pages/Dashboard';
 import Chat from '@/pages/Chat';
 import Assignments from '@/pages/Assignments';
@@ -32,8 +32,8 @@ export default function App() {
       <CountyProvider>
        <TooltipProvider>
         <Router hook={useHashLocation}>
-          <div className="flex h-screen overflow-hidden bg-background print:h-auto print:overflow-visible">
-            <Sidebar />
+          <div className="flex flex-col h-screen overflow-hidden bg-background print:h-auto print:overflow-visible">
+            <TopNav />
             <main className="flex-1 overflow-y-auto flex flex-col print:overflow-visible">
               <Switch>
                 {/* Landing page is Ask the Data (owner's request, 7 Oct 2026). Overview lives at /overview. */}
