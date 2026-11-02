@@ -270,3 +270,38 @@ Clerk list for 1–8 Sep 2025, case types RPMF-Commercial + RPMF-Non-Homestead: 
 - Visually read the Mortgage pages of C2 and C3 to confirm there really is no reinstatement clause.
 - Read the three filings the sheet missed, and 2–3 filings from another week (different law firms: only Padgett, Burr & Forman, RAS, Daneri Diez, Kass Shuler so far).
 - A bulk automated download of the whole week was attempted and **blocked by the session's permission check**; it needs the owner's explicit go-ahead (see below). Until then the sample stays at 5 complaints.
+
+## 15. Full week reviewed: 20 complaints filed 1–8 Sep 2025 (owner-authorised scripted pull, 2 Nov 2026)
+All 20 commercial + non-homestead complaints of that week were downloaded through the signed-in OCS session (about 1 per second) and OCR'd (first 60 pages of the 130-page one). 18 of the 20 have a sheet row; 2 do not. Local copies are in the scratchpad (`pdfs/`, `wk1/`), not the repo.
+
+### 15.1 The sheet missed the two biggest qualifying filings of the week
+| Case | Loan | Owed (principal) | Reinstatement language | Would meet criteria (>= $500k, no reinstatement)? | In the sheet? |
+|---|---|---|---|---|---|
+| 2025-017446-CA-01 FC Miami Ave Land v. Elevate 13th St | $8,360,926 | $8,238,725.61 | none found | **Yes** | **No** |
+| 2025-017268-CA-01 Financial Business Investments v. Borque Group Realty | $670,000 | $686,379.79 (principal + interest + fees) | none found | **Yes** | **No** |
+| 2025-017183-CA-01 Tryon Street | $2,982,000 | $2,944,880.30 | none | Yes | Yes |
+| 2025-017351-CA-01 IBI-EJ Falcon | $660,000 | $660,000 | none | Yes | Yes |
+Also not in the sheet: 2025-017282-CA-01 Selene v. Knezevic ($351,980 residential — would not qualify). So in this week there were **4 qualifying filings and the sheet caught 2**; the two it missed are $8.4M and $0.7M private-lender loans. Cause not known (not collected, or failed during processing). The new pipeline's discovery must come from the Clerk list by case type, not from a keyword search.
+
+### 15.2 Two families of complaint behave very differently
+- **Residential servicer filings** (Selene, Freedom, Citibank, Regions, Bank of America, Data Mortgage, MassMutual, Wilmington/Scherman: 9 of 20). Short (18–52 pages), template wording, the Note and Mortgage are Fannie Mae/Freddie Mac uniform instruments with `[Property Address]` printed on the Note and "which currently has the address of…" in the Mortgage. **The sheet matched the PDF on every field I checked**: loan amount, rate, principal, default date (= first missed payment), address (from the Note/Mortgage), maturity.
+- **Private-lender / commercial filings** (Tryon, UMB, Millecento, IBI-EJ, FC Miami Ave, Financial Business Investments, Principal Lenders, Buritica: 8 of 20). Longer (21–140 pages), custom wording, guarantors, no uniform-instrument form, usually no reinstatement language. These are the ones that qualify, and the ones the sheet is least reliable on (misses, judgment calls, §14).
+- **Not mortgage foreclosures at all (3):** Solara (timeshare week lien, 7 pages), Polo Associates (lender suing under a reinstatement agreement, but a mortgage foreclosure), and association-lien suits generally. Filter on the complaint's own wording ("foreclose a mortgage" vs "claim of lien").
+
+### 15.3 What the check showed about specific sheet columns
+1. **Right to Reinstate / Fannie-Freddie** follow the **form**: 7 of the 8 uniform-instrument residential complaints show the §19 "Right to Reinstate" clause and the Fannie/Freddie footer, and the sheet says Yes/Yes. (Menezes' OCR showed the form footer but no §19 text; the sheet still says Yes — consistent with inference from the form.) Private-lender complaints have no such text and the sheet says No — **except UMB and Millecento, where it says Yes with no supporting text** (§14). Polo's complaint contains the word "reinstate" only in the title "Breach of Reinstatement Agreement"; the sheet correctly says No for the right.
+2. **Default Rate**: where a Note has both a default-interest rate and a late fee, the sheet takes the default interest (IBI-EJ: 25%, with a 7% late fee ignored). Where only a late fee exists (residential), it records the late fee ("5.000% of overdue payment"), in inconsistent formats ("4,000% per month", "5,000%"). New design: two fields, `default_interest_rate` and `late_fee`.
+3. **Date Filed**: the e-filing stamp, the Clerk's filing date and the sheet agree on 17 of 18; the sheet shows 04 Sep for Citibank v. Tomas, whose stamp and Clerk date are both **05 Sep** (a one-day error in the sheet).
+4. **Address printed vs sheet** — a second example of the Tryon pattern: IBI-EJ's complaint body prints "475 Brickell Avenue, Unit 4107, Miami, Florida **33193**", the sheet shows **33131** (the correct Brickell ZIP; 33131 appears elsewhere in the PDF only for other addresses). The model silently corrected a typo. Under the approved rule the as-printed ZIP is stored, the conflict is flagged, and any correction is a separate, labelled field.
+5. **Unpaid balance** is whatever the complaint calls principal owed (Principal Lenders: $315,000 although the Note is $350,000; Financial Business Investments: $686,379.79 includes interest and fees). The "principal vs principal + interest" rule is still open.
+6. **Complaint length** ranges from 7 to 140 pages (FC Miami Ave: 130). The sheet's cap of 50 pages applies to the long ones, which are exactly the high-value commercial loans.
+
+### 15.4 Attorney data comes free from the Clerk
+The case record lists, per party, `leadAttName` and `leadAttBarnumber` (e.g. Ronald B Cohn, 599786; Arie Mrejen, 907219; Lawren Adrian Zann, 42997). Plaintiff attorney name and bar number do not need the PDF; email/phone/firm still come from the signature block. One filing (Regions v. Raval) shows no lead attorney in the Clerk record.
+
+### 15.5 What to settle next (decisions, not more reading)
+- The default-date rule (earliest missed payment; maturity for balloon loans).
+- Principal definition for "Unpaid balance".
+- Whether Right to Reinstate = presence of the uniform-instrument §19 clause, and "No" otherwise (my recommendation), instead of the old tool's judgment.
+- Which non-mortgage lien suits to drop.
+- A second week from a different period and from 2026 to confirm the patterns hold (not done).
