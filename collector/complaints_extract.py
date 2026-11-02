@@ -158,7 +158,7 @@ def normalize_address(a):
     unit markers unified, leading directional moved to a fixed place so '3038 7th St SW' == '3038 SW 7TH ST'."""
     if not a:
         return None
-    s = a.upper().replace(".", "").replace(",", " ")
+    s = re.sub(r"\b(\d{5})-\d{4}\b", r"\1", a.upper().replace(".", "").replace(",", " "))
     s = re.sub(r"\b(APT|UNIT|STE|SUITE|NO)\b\.?\s*#?", "#", s)
     s = re.sub(r"#\s+", "#", s)
     toks = [_DIR.get(t, _SUFFIX.get(t, t)) for t in s.split()]
@@ -271,6 +271,8 @@ def process_pending(conn, model: str, api_key: str, limit: int | None = None) ->
     for r in rows:
         try:
             res = extract(complaints_reader.read_complaint(r["complaint_pdf"]), model, api_key)
+            import complaints_address  # repairs scan-misread addresses by voting between page-image readings
+            res = complaints_address.repair_result(r["complaint_pdf"], res, model, api_key)
             u = res.get("_usage", {})
             conn.execute("INSERT OR REPLACE INTO foreclosure_extractions VALUES (?,?,?,?,?,?,?)",
                          (r["case_id"], model, datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
