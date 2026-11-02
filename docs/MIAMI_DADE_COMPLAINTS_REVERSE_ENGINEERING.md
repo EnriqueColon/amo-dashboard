@@ -237,3 +237,36 @@ The address must be the property **this complaint is foreclosing**, taken from t
 1. **Address rule approved** (§12.4): the Mortgage exhibit attached to the complaint is authoritative; the Note exhibit is the fallback; a differing body address is stored separately with `address_conflict = true`; NULL with a reason code when nothing is readable; never filled from outside data.
 2. **Case-type approach approved:** the Clerk case type (RPMF-Commercial 27185, RPMF-Non-Homestead 27187) is the first filter; the PDF-derived criteria (no right to reinstate, principal >= $500,000) are applied afterwards and computed in code, never stored as a label.
 3. Still open before build: Default Date rule when a complaint gives several dates; original vs extended maturity; whether "unpaid balance" includes deferred principal; cost per image view; PropertyRadar key and cost.
+
+## 14. Field-by-field check of the five complaints against the sheet, and coverage of one week (2 Nov 2026)
+Scope: the 5 PDFs read in §12 (C1 Tryon, C2 UMB, C3 Millecento, N1 Buritica; N2's own row is not in the sheet — see 14.3) matched to their workbook rows. OCR covered every page of C2 (35 exhibit pages) and C3 (55), the full 21 pages of N1, and pp.11–85 of C1. This is still a **small sample (4 matched rows)**; the findings below are patterns to test on more, not conclusions.
+
+### 14.1 What the old sheet got right (verified against the PDF text)
+| Field | C1 Tryon | C2 UMB | C3 Millecento | N1 Buritica |
+|---|---|---|---|---|
+| Loan amount / date | ✓ / ✓ | ✓ / ✓ | ✓ / ✓ | ✓ / ✓ |
+| Note rate | 10% ✓ | 9.125% ✓ (Note) | 6.90% ✓ (adjustable; the Note allows 6.90–12.90%, sheet takes the initial rate) | 9% ✓ (interest-only, 24 months) |
+| Default rate | 20% ✓ | 14.125% ✓ | 18% ✓ | **sheet "5% per annum" — see 14.2** |
+| Maturity | 2025-07-01 = latest extension ✓ | 2053-11-01 ✓ (Note) | 2050-02-01 ✓ (Note) | 2024-03-01 ✓ (complaint says the Note matured then) |
+| Unpaid principal | ✓ | ✓ 877,934.75 | ✓ 192,129.86 | ✓ 300,000 |
+| Property address | exhibits say NE ✓ (§12.4) | 1459 NW 2nd St ✓ (Mortgage) | 1100 South Miami Ave ✓ (Note "Property Address") | 8788 West 35th Ct ✓ (body ¶11) |
+| Guarantors | ✓ | NA (none in the PDF) ✓ | NA ✓ | ✓ |
+
+### 14.2 What the old sheet does that we must NOT copy blindly
+1. **"Default Rate" mixes two different things.** Where the Note has a default *interest* rate the sheet records it (C1 20%, C2 14.125%, C3 18%). Where the Note only has a *late charge* the sheet records that instead: N1's Note says "late charge of 5% of the payment due", and the sheet shows "5% per annum"; other rows read "5.000% of overdue payment", and one row has a typo "5,000%". **Late fee and default interest are separate fields in the new design.**
+2. **"Right To Reinstate" is not grounded in the document text in two of the four.** The one clear grounded case is the residential servicer complaint N2 (`2025-017282-CA-01`): its Mortgage contains Uniform Covenant 19 "Borrower's Right to Reinstate After Acceleration" (p.22). But C2 (UMB) and C3 (Millecento) contain **no** "reinstate" clause anywhere in the body or in 35 / 55 OCR'd exhibit pages, yet the sheet says **Yes** for both. C1 and N1, also without such a clause, say **No**. So the old tool's Yes/No follows something other than the text (likely the model's guess about residential vs commercial). Needs a written definition. Caveat: OCR can miss words; before relying on this, read the Mortgage pages of C2/C3 by eye.
+3. **"Fannie Mae / Freddie Mac" means "uses the Fannie/Freddie uniform instrument form", not "owned by Fannie/Freddie".** N2's Note and Mortgage print "Fannie Mae/Freddie Mac UNIFORM INSTRUMENT" in every page footer; that is the visible signal. No such wording exists in C1, C2, C3 or N1, consistent with their "No".
+4. **Default Date is one of several.** C2's complaint gives 1 Mar 2025 (mortgage count) and 1 Dec 2024 (note count); the sheet took the first. C1 gives 1 May and 1 Jun 2025 (missed payments) and 1 Jul 2025 (balloon); the sheet took the balloon. Rule to write: earliest uncured missed payment (or the maturity default for balloon loans).
+5. **Date Filed vs Clerk filing date can differ by a day** (the sheet's Citibank row is 04 Sep, the Clerk lists 05 Sep). The e-filing stamp and the Clerk's filing date should both be stored.
+6. **Maturity**: sheet uses the Note's original maturity for amortizing loans (C2 2053, C3 2050) and the latest extension for C1. Both are defensible; we need one rule (store both).
+
+### 14.3 Coverage — one week, Clerk list vs sheet
+Clerk list for 1–8 Sep 2025, case types RPMF-Commercial + RPMF-Non-Homestead: **20 filings** (5 commercial, 15 non-homestead). Sheet rows for Miami-Dade filed 1–8 Sep 2025: **17**.
+- **In the Clerk list but NOT in the sheet (3):** FC Miami Ave Land LLC v. Elevate 13th St LLC (commercial, 2025-017446-CA-01); Financial Business Investments LLC v. Borque Group Realty LLC (2025-017268-CA-01); Selene Finance v. Knezevic (2025-017282-CA-01 — the sheet has a *different* Selene case that day). Two of the three are private/hard-money lenders — the most relevant kind for this tool. **15% of the week was missed.** Reason unknown (not collected, or failed processing).
+- **Sheet rows that are not mortgage foreclosures:** the Clerk's "non-homestead" bucket also holds association-lien foreclosures (a timeshare week lien — Solara; an association lien — Polo Associates). The sheet includes them; the criteria then reject them.
+- The old sheet is therefore not a complete or exact "answer key": it misses cases, and some columns are judgment calls.
+
+### 14.4 What remains unverified (do before building)
+- Visually read the Mortgage pages of C2 and C3 to confirm there really is no reinstatement clause.
+- Read the three filings the sheet missed, and 2–3 filings from another week (different law firms: only Padgett, Burr & Forman, RAS, Daneri Diez, Kass Shuler so far).
+- A bulk automated download of the whole week was attempted and **blocked by the session's permission check**; it needs the owner's explicit go-ahead (see below). Until then the sample stays at 5 complaints.
