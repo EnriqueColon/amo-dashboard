@@ -4,6 +4,16 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-11-02 — F1 FIX BUILT (entity types survive the nightly rebuild); REHEARSING; NOT DEPLOYED
+
+Owner: "Yes, fix it" then "Okay lets get started" (after being told: ~3 h wall-clock, no outage during the rebuild, two ~seconds restarts). Rule kept: nothing on the droplet changes until the owner has seen the rehearsal figures and says go.
+
+- **Code:** `normalize.py` `load_preserved_types()` + `resolve_entity_type(..., preserved)` — a dashboard override (`user_override`, or the old UI shape `manual_override` with `sub_category=''`) wins over everything; a prior non-OTHER `llm` verdict fills in only where no rule answers (same order Friday's job produced); an AI `OTHER` is not kept (stays retryable). `routes.ts` PATCH `/api/entity/:name/type` now writes `user_override`. `enrich_entities.py` treats `user_override` as high-confidence. Side effect: Friday no longer re-asks the AI about ~10,000 entities each week.
+- **Tests:** `collector/tests/check_type_persistence.py` (precedence, AI never beats a rule, AI OTHER dropped, idempotent across rebuilds, negative control reproduces the old erase); canonicalize baseline guardrail and `tsc` pass.
+- **Re-seed script:** `collector/reseed_entity_types.py` (dry-run default) restores erased `llm` verdicts from a pre-wipe backup into rows that are currently OTHER/default only. Tested on a scratch DB (restores 3 of 8, leaves FDIC/user/code/newer-AI rows, second run no-op).
+- **Rehearsal (droplet `/tmp/rehearse`, throwaway copies, production untouched):** the 31 Oct 03:15 backup (Friday-restored state) rebuilt with OLD code (control) and NEW code in parallel; `compare.py` runs automatically when both finish -> `/tmp/rehearse/compare.out`. Nightly runs take ~2h40m (08:30->11:10 UTC).
+- **Deploy plan (after approval):** pre-deploy backup -> `git pull` -> `npm run build` -> `pm2 restart amo-dashboard` (seconds) -> `reseed_entity_types.py --backup <31 Oct backup> --apply` -> `normalize.py` (nohup, ~2h40m, dashboard stays live: staged tables swap in one short transaction) -> `pm2 restart` after the swap to clear the 7-day cache -> compare live figures with the rehearsal. Never restart PM2 between the deploy restart and the swap. Run in daytime (nightly is 08:30 UTC).
+
 ## 2026-10-31 — DEEP ACCURACY AUDIT (read-only; nothing in production changed). Full report: `docs/audit_2026-10-31/ACCURACY_AUDIT.md`
 
 Trigger: a watchlist email sample showed a rents instrument counted as a loan transfer. Harness `collector/audit/accuracy_audit.py` (read-only, 10 sections) + `fetch_sample_texts.py`; 194 documents hand-read against stored verdicts (`hand_read_verdicts.csv`; sample is enriched for suspect strata, not a population rate).

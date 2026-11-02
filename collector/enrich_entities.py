@@ -34,7 +34,7 @@ BATCH_SIZE = 60     # names per request
 VALID_TYPES = {'BANK', 'SERVICER', 'PRIVATE_CREDIT', 'GSE', 'MERS', 'TRUST', 'OTHER'}
 
 # High-confidence sources that the LLM should NOT override
-HIGH_CONFIDENCE_SOURCES = {'manual_override', 'fdic_match', 'suffix_gse', 'suffix_banking', 'suffix_trust_name'}
+HIGH_CONFIDENCE_SOURCES = {'user_override', 'manual_override', 'fdic_match', 'suffix_gse', 'suffix_banking', 'suffix_trust_name'}
 
 MERS_PATTERN = re.compile(r'^MERS$|MORTGAGE ELECTRONIC', re.IGNORECASE)
 GSE_PATTERN = re.compile(

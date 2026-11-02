@@ -966,6 +966,7 @@ def behavioral_classify(entity: str, conn) -> str | None:
 # ── Confidence waterfall resolver ─────────────────────────────────────────────
 
 CONFIDENCE_ORDER = [
+    'user_override',
     'manual_override',
     'fdic_match',
     'suffix_gse',
@@ -973,14 +974,69 @@ CONFIDENCE_ORDER = [
     'suffix_trust_name',
     'behavioral',
     'regex_rule',
+    'llm',
     'default',
 ]
 
 
+# ── Types that must survive a rebuild ─────────────────────────────────────
+# entity_classifications is both an output of this script and the only place two
+# kinds of decision are kept:
+#   · 'llm'            the AI verdict enrich_entities.py wrote for an entity the
+#                      rules below could not place
+#   · 'user_override'  a type chosen on the dashboard's Entities page
+# Until 31 Oct 2026 the upsert further down replaced every row with this
+# script's own rule result, so the nightly rebuild (08:30 UTC) erased what the
+# Friday job had just written. Measured on the 31 Oct run: 10,785 llm-typed
+# entities fell to 59, 7,089 of 12,992 entities changed type, and 21% of
+# aom_events_clean changed txn_type overnight (Private Credit 12,181 -> 6,838
+# rows). docs/audit_2026-10-31/ACCURACY_AUDIT.md, finding F1.
+#
+# Order is unchanged from what Friday's run produced: every deterministic and
+# behavioural signal still goes first, and the AI verdict only fills in what
+# they leave as OTHER. An AI verdict of OTHER is NOT kept, so those entities
+# keep being retried by enrich_entities.py as their volume grows.
+VALID_ENTITY_TYPES = {'BANK', 'SERVICER', 'PRIVATE_CREDIT', 'GSE', 'MERS', 'TRUST', 'OTHER'}
+
+
+def load_preserved_types(conn) -> dict:
+    """{'user': {name: type}, 'llm': {name: type}} read from the previous run.
+
+    A row written by the dashboard's PATCH /api/entity/:name/type before it
+    learned the 'user_override' label carries confidence_source='manual_override'
+    with sub_category='' (the code-defined overrides leave sub_category NULL), so
+    that shape is recognised as a user decision too.
+    """
+    user: dict = {}
+    llm: dict = {}
+    try:
+        rows = conn.execute(
+            "SELECT name, category, confidence_source, sub_category FROM entity_classifications").fetchall()
+    except sqlite3.OperationalError:
+        return {'user': user, 'llm': llm}
+    for name, cat, src, sub in rows:
+        if not name or cat not in VALID_ENTITY_TYPES:
+            continue
+        if src == 'user_override' or (src == 'manual_override' and sub == ''):
+            user[name] = cat
+        elif src == 'llm' and cat != 'OTHER':
+            llm[name] = cat
+    return {'user': user, 'llm': llm}
+
+
 def resolve_entity_type(entity: str, suffix_signals: dict,
-                        fdic_set: set, conn) -> tuple:
+                        fdic_set: set, conn, preserved: dict | None = None) -> tuple:
     """Classify an entity using all available signals.
-    Returns (entity_type, confidence_source)."""
+    Returns (entity_type, confidence_source).
+
+    `preserved` is load_preserved_types(): a user's choice from the dashboard wins
+    over everything; an earlier AI verdict is used only where no rule below has an
+    answer."""
+
+    if preserved:
+        chosen = preserved['user'].get(entity)
+        if chosen:
+            return chosen, 'user_override'
 
     # 0. MERS is a registry, never a bank. Until 2026-09-18 it reached step 6
     #    below, where its volume and spread of counterparties look exactly like
@@ -1022,6 +1078,12 @@ def resolve_entity_type(entity: str, suffix_signals: dict,
     t = classify_canonical(entity)
     if t != 'OTHER':
         return t, 'regex_rule'
+
+    # 8. The AI's earlier answer, for entities nothing above could place.
+    if preserved:
+        kept = preserved['llm'].get(entity)
+        if kept:
+            return kept, 'llm'
 
     return 'OTHER', 'default'
 
@@ -2323,6 +2385,10 @@ def build_normalized_tables():
     except Exception:
         pass
 
+    preserved = load_preserved_types(conn)
+    print(f"  Preserved from the previous run: {len(preserved['llm']):,} AI verdicts, "
+          f"{len(preserved['user']):,} dashboard overrides")
+
     all_nodes = conn.execute("SELECT entity FROM entity_nodes").fetchall()
     type_updates = []
     classification_upserts = []
@@ -2333,7 +2399,7 @@ def build_normalized_tables():
             'has_banking_suffix': False, 'has_trustee_role': False,
             'has_trust_name': False, 'has_gse_suffix': False,
         })
-        etype, source = resolve_entity_type(entity, signals, fdic_set, conn)
+        etype, source = resolve_entity_type(entity, signals, fdic_set, conn, preserved)
         source_counts[source] += 1
         type_updates.append((etype, entity))
         classification_upserts.append((entity, etype, source))

@@ -807,12 +807,15 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     // Update entity_nodes immediately
     db.prepare(`UPDATE entity_nodes SET entity_type = ? WHERE entity = ?`).run(type, name);
 
-    // Upsert into entity_classifications with manual_override confidence
+    // Upsert into entity_classifications as a user decision. 'user_override' (not
+    // 'manual_override', which the rebuild also uses for the overrides written in
+    // code) is what collector/normalize.py reads back and keeps: before 31 Oct
+    // 2026 the nightly rebuild replaced this row with its own rule result.
     db.prepare(`
       INSERT INTO entity_classifications (name, category, sub_category, confidence_source)
-      VALUES (?, ?, '', 'manual_override')
+      VALUES (?, ?, '', 'user_override')
       ON CONFLICT(name) DO UPDATE SET category = excluded.category,
-                                      confidence_source = 'manual_override'
+                                      confidence_source = 'user_override'
     `).run(name, type);
 
     // Cascade into aom_events_clean
