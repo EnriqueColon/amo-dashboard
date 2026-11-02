@@ -1,3 +1,56 @@
+# Rollback — transaction-type labels renamed (2 Nov 2026)
+
+`ORIGINATION` -> `INTO_INSTITUTION`, `INSTITUTIONAL_OUT` -> `OUT_OF_INSTITUTION`, `PRIVATE` -> `NON_INSTITUTIONAL` in `txn_type`.
+Labels only; no counts change. Stored values were updated once in `aom_events_clean` and `aom_events_nonloan` (see the deploy
+commit). **Revert:** `git revert <rename commit>`, `npm run build`, then reverse the UPDATE (swap the three names back in both
+tables) and `pm2 restart amo-dashboard`. A rebuild with the reverted code also restores the old values by itself.
+
+---
+
+# Rollback — AI and dashboard entity types survive the rebuild (audit finding F1; DEPLOYED 2 Nov 2026)
+
+**State:** `collector/normalize.py` reads the previous run's AI entity types (`confidence_source='llm'`, non-OTHER) and any
+dashboard override (`user_override`) before it rewrites `entity_classifications`, and keeps them. A dashboard Reclassify
+(`PATCH /api/entity/:name/type`) now saves as `user_override`. `enrich_entities.py` treats `user_override` as high-confidence.
+Code commit `38d7ad4` (live on `main`; the droplet was pulled to `1caf4df`, which carries it). Rehearsed on throwaway copies
+first: the old code reproduced the nightly wipe exactly (18,230 filings and 7,089 entities re-typed), the new code left
+23 of 12,992 entities and ~1% of filings different from the pre-wipe state.
+
+| Piece | Touches prod data? | Revert |
+|---|---|---|
+| `normalize.py`, `enrich_entities.py`, `routes.ts`, `tests/check_type_persistence.py` | Only derived tables, rebuilt from raw data | `git revert 38d7ad4`, `npm run build`, `pm2 restart amo-dashboard` |
+| `collector/reseed_entity_types.py` (run once, 2 Nov 16:19 UTC) | Added 7,091 `llm` rows to `entity_classifications` where the row was OTHER/default; nothing else | Nothing to undo: the old code simply overwrites them at the next rebuild (which is the old behaviour) |
+| Rebuild (`normalize.py`, started 2 Nov 16:20 UTC, log `collector/batch/normalize_f1_fix.log`) | Replaces the derived tables in one short transaction at the end | Re-run the old `normalize.py`, or restore `backup_pre_type_persist.db` (below) |
+
+**Backup:** `/opt/amo-dashboard/backup_pre_type_persist.db` (taken 2 Nov 2026 16:18 UTC, integrity-checked, 578 MB; counts equal to live:
+222,533 assignments, 88,391 clean events, 30,741 classifications, 180,563 extractions). It holds the WIPED entity types
+(the state the nightly rebuild leaves), so restoring it returns the dashboard to the pre-fix figures.
+
+**Reverting after the deploy**
+
+```bash
+cd /opt/amo-dashboard
+git revert 38d7ad4                      # or: git checkout <sha before 38d7ad4> -- collector/normalize.py collector/enrich_entities.py server/routes.ts
+npm run build && pm2 restart amo-dashboard     # build BEFORE restart
+# data: only if you want the pre-fix derived tables back immediately
+cd collector && set -a && . /opt/amo-dashboard/.env && set +a
+nohup ./.venv/bin/python3 -u normalize.py > batch/normalize_revert.log 2>&1 & disown
+# after it finishes: pm2 restart amo-dashboard   (clears the 7-day API cache)
+```
+
+Reverting the code means the next nightly rebuild (08:30 UTC) erases the AI types again, exactly as before 2 Nov.
+A dashboard override saved as `user_override` while the fix was live is read back by the OLD code as an unrecognised source and
+is then overwritten; nothing is lost beyond that row.
+
+**Guardrail:** `collector/.venv/bin/python3 collector/tests/check_type_persistence.py` (offline; includes a negative control that
+reproduces the old erase).
+
+**Known gaps left on purpose (follow-up change):** (1) `enrich_entities.py`'s own SQL derives `txn_type` without the "assignee is MERS"
+rule `normalize.py` has, so Friday's AI step leaves ~940 filings as PRIVATE that should be MERS_RELEASE until the next nightly corrects
+them; (2) the ~14 entities its GSE/MERS rules type (FDIC receivership accounts, Department of Veterans Affairs) fall back to OTHER at each rebuild.
+
+---
+
 # Rollback — Bank Stress Ranking + FDIC Data Analytics on our own FDIC pull (stages 1–4, 27 Oct 2026)
 
 **State:** the dashboard's two bank pages (`/bank-stress`, `/market-analytics`) read

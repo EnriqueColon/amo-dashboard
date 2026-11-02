@@ -52,7 +52,7 @@ export const GLOSSARY: Record<string, MetricDef> = {
   },
   'private-credit:Type': {
     definition:
-      'What kind of transfer this is. Market Transfer: institution to institution, the real signal that debt changed hands. Origination: paper entering institutional hands. Inst. Out: paper leaving them. MERS Release: the registry handing over or taking the nominee interest it holds, record-keeping rather than a trade. Private: neither side is an institution.',
+      'What kind of transfer this is. Market Transfer: institution to institution, the real signal that debt changed hands. Into Institution: paper entering institutional hands from a party we could not identify as an institution. Out of Institution: paper leaving them. MERS Release: the registry handing over or taking the nominee interest it holds, record-keeping rather than a trade. Non-Institutional: neither side is an identified institution.',
     howCalculated:
       'Derived from the entity types of the two parties when the clean event table is built. Self-assignments, where both sides resolve to the same company, are excluded from this page entirely.',
     whyValuable:

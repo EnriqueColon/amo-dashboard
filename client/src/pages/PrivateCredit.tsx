@@ -13,10 +13,10 @@ import { DefTerm } from '@/components/DefTerm';
 // Transaction type badge — compact version for this table
 const TXN_META: Record<string, { label: string; color: string }> = {
   MARKET_TRANSFER:   { label: 'Market Transfer',  color: 'text-emerald-700 bg-emerald-100 border-emerald-300' },
-  ORIGINATION:       { label: 'Origination',       color: 'text-blue-700 bg-blue-100 border-blue-300' },
+  INTO_INSTITUTION:       { label: 'Into Institution',       color: 'text-blue-700 bg-blue-100 border-blue-300' },
   MERS_RELEASE:      { label: 'MERS Release',      color: 'text-purple-700 bg-purple-100 border-purple-300' },
-  INSTITUTIONAL_OUT: { label: 'Inst. Out',          color: 'text-amber-700 bg-amber-100 border-amber-300' },
-  PRIVATE:           { label: 'Private',            color: 'text-slate-600 bg-slate-100 border-slate-300' },
+  OUT_OF_INSTITUTION: { label: 'Out of Institution',          color: 'text-amber-700 bg-amber-100 border-amber-300' },
+  NON_INSTITUTIONAL:           { label: 'Non-Institutional',            color: 'text-slate-600 bg-slate-100 border-slate-300' },
 };
 
 function TxnBadge({ type }: { type: string }) {

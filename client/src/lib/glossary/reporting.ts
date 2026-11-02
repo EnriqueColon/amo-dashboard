@@ -25,7 +25,7 @@ export const GLOSSARY: Record<string, MetricDef> = {
   'reporting:Type': {
     definition: 'The category of the party in the column immediately to its left — the assignor\'s type after the Assignor column, the assignee\'s type after the Assignee column. Values are BANK, SERVICER, PRIVATE_CREDIT, GSE (Fannie Mae / Freddie Mac), TRUST, MERS, or OTHER.',
     howCalculated: 'Assigned by the normalizer from the cleaned name: a list of known institutions and name patterns (e.g. "BANK", "N.A.", "CAPITAL", "TRUST") decides the type. OTHER covers individuals, shell LLCs and anything unrecognised.',
-    whyValuable: 'Together the two types say which way the loan moved — bank → private credit is a sale out of the regulated system; OTHER → bank is an origination being booked. They also drive the Class column.',
+    whyValuable: 'Together the two types say which way the loan moved — bank → private credit is a sale out of the regulated system; OTHER → bank is a loan assigned into an institution by a party we could not classify. They also drive the Class column.',
   },
   'reporting:Assignee': {
     definition: 'The party receiving the loan — the buyer or transferee of the mortgage. Cleaned, merged name; the amber line underneath, when present, is the beneficial owner or parent the document names.',

@@ -30,9 +30,9 @@ const COUNTIES = ['MIAMI-DADE', 'BROWARD'];
 // TXN_TYPES), so a reader moving from the email to the screen sees one vocabulary.
 const TXN_META: Record<string, { label: string; desc: string }> = {
   MARKET_TRANSFER:   { label: 'Market Transfer', desc: 'Institution → institution (secondary market)' },
-  ORIGINATION:       { label: 'Origination',     desc: 'Individual / private → institution (new supply)' },
-  INSTITUTIONAL_OUT: { label: 'Inst. Out',       desc: 'Institution → individual (payoff, REO, distressed)' },
-  PRIVATE:           { label: 'Private',         desc: 'Individual → individual' },
+  INTO_INSTITUTION:       { label: 'Into Institution',     desc: 'Non-institution → institution' },
+  OUT_OF_INSTITUTION: { label: 'Out of Institution',       desc: 'Institution → individual (payoff, REO, distressed)' },
+  NON_INSTITUTIONAL:           { label: 'Non-Institutional',         desc: 'Individual → individual' },
   MERS_RELEASE:      { label: 'MERS Release',    desc: 'Registry housekeeping' },
 };
 const ACTIVE_WINDOW_DAYS = 90;
@@ -114,7 +114,7 @@ function cleanField(v: string | null | undefined, isAddress = false): string | n
 function deriveClassification(row: any): string {
   if (row.classification) return row.classification;
   if (row.txn_type === 'MERS_RELEASE') return 'WarehouseRelease';
-  if (['MARKET_TRANSFER', 'ORIGINATION', 'INSTITUTIONAL_OUT'].includes(row.txn_type)) return 'LoanSale';
+  if (['MARKET_TRANSFER', 'INTO_INSTITUTION', 'OUT_OF_INSTITUTION'].includes(row.txn_type)) return 'LoanSale';
   return 'NeedsReview';
 }
 

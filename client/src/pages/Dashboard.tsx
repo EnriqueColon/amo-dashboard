@@ -312,7 +312,7 @@ export default function Dashboard() {
             value={raw?.total?.toLocaleString()}
             icon={Database}
             sub={`${raw?.min_date} → ${raw?.max_date}`}
-            tooltip={`Every recorded assignment of mortgage in ${countyLabel(county)} for this period. An assignment filing is the public document created each time a mortgage note (the debt instrument) changes hands — not when the property sells. This count includes all transaction types: market transfers between institutions, new loan originations, MERS registry moves, and private transfers. It is the raw pulse of debt-market activity in this county.`}
+            tooltip={`Every recorded assignment of mortgage in ${countyLabel(county)} for this period. An assignment filing is the public document created each time a mortgage note (the debt instrument) changes hands — not when the property sells. This count includes all transaction types: market transfers between institutions, new loan into_institution, MERS registry moves, and private transfers. It is the raw pulse of debt-market activity in this county.`}
           />
           <StatCard
             label="Unique Entities"
@@ -332,7 +332,7 @@ export default function Dashboard() {
               ? UNPROCESSED_NOTE
               : `${raw?.total ? Math.round((raw.market_transfers / raw.total) * 100) : 0}% of all filings — institution-to-institution only`}
             color="text-emerald-500"
-            tooltip={`A Market Transfer is an assignment where BOTH the seller and buyer are recognized institutional entities — banks, servicers, GSEs (Fannie/Freddie/HUD), private credit funds, or securitization trusts. This filters out originations (borrower → lender) and MERS registry moves (which are not real sales). Market Transfers represent genuine secondary-market activity: one professional participant selling a debt position to another. Rising Market Transfer volume signals an active trading environment; a shift in which entity types are buying vs. selling reveals capital flows and distress.`}
+            tooltip={`A Market Transfer is an assignment where BOTH the seller and buyer are recognized institutional entities — banks, servicers, GSEs (Fannie/Freddie/HUD), private credit funds, or securitization trusts. This filters out into_institution (borrower → lender) and MERS registry moves (which are not real sales). Market Transfers represent genuine secondary-market activity: one professional participant selling a debt position to another. Rising Market Transfer volume signals an active trading environment; a shift in which entity types are buying vs. selling reveals capital flows and distress.`}
           />
           <StatCard
             label="Private Credit Txns"
@@ -354,12 +354,12 @@ export default function Dashboard() {
             <h2 className="text-sm font-semibold text-foreground">Monthly Assignment Volume</h2>
             <p className="text-[10px] text-muted-foreground mt-0.5">
               Each bar = total recorded filings that month, broken down by transaction type.
-              Market Transfers are institution-to-institution trades; Originations are new loans entering the system.
+              Market Transfers are institution-to-institution trades; Into Institution is a non-institution assigning a loan to an institution (the document does not say who made the loan).
             </p>
           </div>
           <div className="flex items-center gap-3 text-[10px] text-muted-foreground shrink-0 ml-4">
             <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-emerald-500 inline-block" />Market Transfers</span>
-            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-blue-400 inline-block" />Originations</span>
+            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-blue-400 inline-block" />Into Institution</span>
             <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-slate-400 inline-block" />Other (MERS, self-assigns, private)</span>
           </div>
         </div>
@@ -367,7 +367,7 @@ export default function Dashboard() {
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={(monthly || []).map((m: any) => ({
               ...m,
-              other: m.total - (m.market_transfers || 0) - (m.originations || 0),
+              other: m.total - (m.market_transfers || 0) - (m.into_institution || 0),
             }))} margin={{ top: 0, right: 8, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
               <XAxis dataKey="month" tickFormatter={fmtMonth}
@@ -377,10 +377,10 @@ export default function Dashboard() {
               <Tooltip
                 contentStyle={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 6, fontSize: 11 }}
                 labelFormatter={fmtMonth}
-                formatter={(v: any, name: string) => [v.toLocaleString(), name === 'market_transfers' ? 'Market Transfers' : name === 'originations' ? 'Originations' : 'Other']}
+                formatter={(v: any, name: string) => [v.toLocaleString(), name === 'market_transfers' ? 'Market Transfers' : name === 'into_institution' ? 'Into Institution' : 'Other']}
               />
               <Bar dataKey="market_transfers" stackId="a" fill="#10b981" radius={[0,0,0,0]} maxBarSize={36} />
-              <Bar dataKey="originations"     stackId="a" fill="#60a5fa" radius={[0,0,0,0]} maxBarSize={36} />
+              <Bar dataKey="into_institution"     stackId="a" fill="#60a5fa" radius={[0,0,0,0]} maxBarSize={36} />
               <Bar dataKey="other"            stackId="a" fill="#94a3b8" radius={[2,2,0,0]} maxBarSize={36} />
             </BarChart>
           </ResponsiveContainer>

@@ -251,7 +251,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       SELECT strftime('%Y-%m', rec_date) as month,
         COUNT(*) as total,
         SUM(CASE WHEN txn_type='MARKET_TRANSFER' THEN 1 ELSE 0 END) as market_transfers,
-        SUM(CASE WHEN txn_type='ORIGINATION'     THEN 1 ELSE 0 END) as originations,
+        SUM(CASE WHEN txn_type='INTO_INSTITUTION'     THEN 1 ELSE 0 END) as into_institution,
         COUNT(DISTINCT assignor_canon) as unique_assignors,
         COUNT(DISTINCT assignee_canon) as unique_assignees
       FROM aom_events_clean WHERE ${countyPredicate()} GROUP BY month ORDER BY month
@@ -832,10 +832,10 @@ export async function registerRoutes(httpServer: Server, app: Express) {
         WHEN assignor_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST')
          AND assignee_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST') THEN 'MARKET_TRANSFER'
         WHEN assignor_type NOT IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST','MERS')
-         AND assignee_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST') THEN 'ORIGINATION'
+         AND assignee_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST') THEN 'INTO_INSTITUTION'
         WHEN assignor_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST')
-         AND assignee_type NOT IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST','MERS') THEN 'INSTITUTIONAL_OUT'
-        ELSE 'PRIVATE'
+         AND assignee_type NOT IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST','MERS') THEN 'OUT_OF_INSTITUTION'
+        ELSE 'NON_INSTITUTIONAL'
       END
       WHERE assignor_canon = ? OR assignee_canon = ?
     `).run(name, name);
@@ -1627,10 +1627,10 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       WHEN assignor_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST')
        AND assignee_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST') THEN 'MARKET_TRANSFER'
       WHEN assignor_type NOT IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST','MERS')
-       AND assignee_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST') THEN 'ORIGINATION'
+       AND assignee_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST') THEN 'INTO_INSTITUTION'
       WHEN assignor_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST')
-       AND assignee_type NOT IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST','MERS') THEN 'INSTITUTIONAL_OUT'
-      ELSE 'PRIVATE'
+       AND assignee_type NOT IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST','MERS') THEN 'OUT_OF_INSTITUTION'
+      ELSE 'NON_INSTITUTIONAL'
     END`;
 
   function clearMergeCaches() {

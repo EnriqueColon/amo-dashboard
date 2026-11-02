@@ -613,7 +613,7 @@ def pick_listed_party(index_name: str | None, listed: list | None,
     Hillsborough's search API returns each side's parties in alphabetical order,
     and the collector keeps the first, so a borrower that sorts early takes the
     Assignor column: "BMF V FL GRAND PAVILION LLC" over "FEDERAL HOME LOAN
-    MORTGAGE CORPORATION" on 2026400005, which then read as an ORIGINATION. 2,684
+    MORTGAGE CORPORATION" on 2026400005, which then read as an INTO_INSTITUTION. 2,684
     assignors and 1,747 assignees across 12,804 Hillsborough rows (14 Oct 2026).
     prefer_document_party cannot catch these: the borrower is a company, not a
     person. Only a name the index itself lists on the same side qualifies, and
@@ -656,7 +656,7 @@ def prefer_document_seller(index_name: str | None, pdf_name: str | None,
 
     The Miami-Dade clerk sometimes indexes the borrower as the only grantor:
     2026R695675 read "SUITE HOMES RENOVATION LLC -> ICE LENDER HOLDINGS" and
-    counted as an ORIGINATION, while the document's assignor is Debt Closing
+    counted as an INTO_INSTITUTION, while the document's assignor is Debt Closing
     Services. With one listed name pick_listed_party has nothing to choose
     from, and prefer_document_party only replaces people. About 2,200 of 55,726
     Miami-Dade rows had this shape (14 Oct 2026).
@@ -702,7 +702,7 @@ def prefer_known_spelling(index_name: str | None, pdf_name: str | None,
     COMPANY" while the document reads "PACIFIC LIFE INSURANCE COMPANY"; the
     typo became its own two-row entity typed OTHER beside the real one (248
     rows, BANK), the owner could not find the document under the lender's name,
-    and the deal type flipped to INSTITUTIONAL_OUT. Measured 14 Oct 2026: 552
+    and the deal type flipped to OUT_OF_INSTITUTION. Measured 14 Oct 2026: 552
     such orphan names holding 677 rows, 310 of them also mistyped.
 
     This fires only when every one of these holds, each one measured against
@@ -1276,10 +1276,10 @@ def get_txn_type(assignor_canon: str, assignee_canon: str,
     if a_inst and b_inst:
         return 'MARKET_TRANSFER'
     if not a_inst and b_inst:
-        return 'ORIGINATION'
+        return 'INTO_INSTITUTION'
     if a_inst and not b_inst:
-        return 'INSTITUTIONAL_OUT'
-    return 'PRIVATE'
+        return 'OUT_OF_INSTITUTION'
+    return 'NON_INSTITUTIONAL'
 
 
 # ── User-managed entity aliases (entity_aliases table) ─────────────────────
@@ -2473,17 +2473,17 @@ def build_normalized_tables():
         CASE
             WHEN assignor_canon = assignee_canon THEN 'SELF_ASSIGN'
             -- MERS on EITHER side is record-keeping, not a sale. Before
-            -- 2026-09-18 a loan assigned TO MERS fell through to PRIVATE here
-            -- (and to INSTITUTIONAL_OUT in get_txn_type), because MERS was typed
+            -- 2026-09-18 a loan assigned TO MERS fell through to NON_INSTITUTIONAL here
+            -- (and to OUT_OF_INSTITUTION in get_txn_type), because MERS was typed
             -- BANK and neither path had ever seen it on the buying side.
             WHEN assignor_type  = 'MERS' OR assignee_type = 'MERS' THEN 'MERS_RELEASE'
             WHEN assignor_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST')
              AND assignee_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST') THEN 'MARKET_TRANSFER'
             WHEN assignor_type NOT IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST','MERS')
-             AND assignee_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST') THEN 'ORIGINATION'
+             AND assignee_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST') THEN 'INTO_INSTITUTION'
             WHEN assignor_type IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST')
-             AND assignee_type NOT IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST','MERS') THEN 'INSTITUTIONAL_OUT'
-            ELSE 'PRIVATE'
+             AND assignee_type NOT IN ('BANK','SERVICER','PRIVATE_CREDIT','GSE','TRUST','MERS') THEN 'OUT_OF_INSTITUTION'
+            ELSE 'NON_INSTITUTIONAL'
         END
     """)
     conn.commit()

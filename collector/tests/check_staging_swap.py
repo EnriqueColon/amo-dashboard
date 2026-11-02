@@ -52,7 +52,7 @@ def main() -> int:
         CREATE TABLE aom_events_clean (cfn TEXT PRIMARY KEY, assignor_canon TEXT, txn_type TEXT);
         CREATE INDEX idx_clean_assignor ON aom_events_clean(assignor_canon);
         CREATE TABLE entity_nodes (entity TEXT PRIMARY KEY, total_vol INTEGER);
-        INSERT INTO aom_events_clean VALUES ('OLD1','ACME BANK','MARKET_TRANSFER'),('OLD2','ACME BANK','ORIGINATION');
+        INSERT INTO aom_events_clean VALUES ('OLD1','ACME BANK','MARKET_TRANSFER'),('OLD2','ACME BANK','INTO_INSTITUTION');
         INSERT INTO entity_nodes VALUES ('ACME BANK', 2);
     """)
     live.commit()
@@ -75,8 +75,8 @@ def main() -> int:
     check('  reader: old clean rows still there after the build created its temp tables', rows(reader, 'aom_events_clean'), 2)
     # Unqualified names inside the build resolve to the temp copies.
     builder.execute("INSERT INTO aom_events_clean VALUES ('NEW1','ACME BANK','MARKET_TRANSFER','MIAMI-DADE')")
-    builder.execute("INSERT INTO aom_events_clean VALUES ('NEW2','BETA TRUST','ORIGINATION','BROWARD')")
-    builder.execute("INSERT INTO aom_events_clean VALUES ('NEW3','BETA TRUST','ORIGINATION','BROWARD')")
+    builder.execute("INSERT INTO aom_events_clean VALUES ('NEW2','BETA TRUST','INTO_INSTITUTION','BROWARD')")
+    builder.execute("INSERT INTO aom_events_clean VALUES ('NEW3','BETA TRUST','INTO_INSTITUTION','BROWARD')")
     builder.execute("INSERT INTO entity_nodes SELECT assignor_canon, COUNT(*) FROM aom_events_clean GROUP BY 1")
     builder.commit()
     check('  builder: unqualified name is the temp copy (3 new rows)', builder.execute('SELECT COUNT(*) FROM aom_events_clean').fetchone()[0], 3)

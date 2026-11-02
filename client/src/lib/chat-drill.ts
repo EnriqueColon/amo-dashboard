@@ -31,7 +31,7 @@ export type Drill =
   | { kind: 'facility_filings'; params: Record<string, string>; label: string; exact: boolean }
   | { kind: 'record'; record: Record<string, unknown>; recordType: 'filing' | 'facility_filing'; label: string; exact: true };
 
-const TXN_TYPES = new Set(['MARKET_TRANSFER', 'ORIGINATION', 'INSTITUTIONAL_OUT', 'PRIVATE', 'SELF_ASSIGN', 'MERS_RELEASE']);
+const TXN_TYPES = new Set(['MARKET_TRANSFER', 'INTO_INSTITUTION', 'OUT_OF_INSTITUTION', 'NON_INSTITUTIONAL', 'SELF_ASSIGN', 'MERS_RELEASE']);
 
 // ── text normalisation ───────────────────────────────────────────────────────
 

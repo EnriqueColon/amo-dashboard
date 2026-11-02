@@ -13,7 +13,7 @@ began, and assert:
   1. rows under a late variant are re-pointed to the canonical, in both tables;
   2. a chain (A → B recorded, then B → C recorded) resolves to C;
   3. the canonical's classification is applied and txn_type is re-derived —
-     a borrower LLC merged into a BANK stops reading as an ORIGINATION;
+     a borrower LLC merged into a BANK stops reading as an INTO_INSTITUTION;
   4. an alias recorded BEFORE the run began is left alone (load_aliases() owns
      those), and a facility-scoped alias is ignored.
 
@@ -76,15 +76,15 @@ def main() -> int:
     rows = [
         # cfn, assignor, assignee, assignor_canon, assignee_canon, a_type, b_type, txn
         ('R1', 'BANK-OF AMERICA', 'WELLS FARGO', 'BANK-OF AMERICA', 'WELLS FARGO',
-         'OTHER', 'BANK', 'ORIGINATION'),            # late variant on the assignor side
+         'OTHER', 'BANK', 'INTO_INSTITUTION'),            # late variant on the assignor side
         ('R2', 'WELLS FARGO', 'BANK-OF AMERICA', 'WELLS FARGO', 'BANK-OF AMERICA',
-         'BANK', 'OTHER', 'INSTITUTIONAL_OUT'),      # late variant on the assignee side
+         'BANK', 'OTHER', 'OUT_OF_INSTITUTION'),      # late variant on the assignee side
         ('R3', 'ALTO CAP', 'WELLS FARGO', 'ALTO CAP', 'WELLS FARGO',
-         'OTHER', 'BANK', 'ORIGINATION'),            # chain: ALTO CAP → ALTO CAPITAL GRP → ALTO CAPITAL
+         'OTHER', 'BANK', 'INTO_INSTITUTION'),            # chain: ALTO CAP → ALTO CAPITAL GRP → ALTO CAPITAL
         ('R4', 'OLD VARIANT', 'WELLS FARGO', 'OLD VARIANT', 'WELLS FARGO',
-         'OTHER', 'BANK', 'ORIGINATION'),            # alias recorded BEFORE the run: not ours to touch
+         'OTHER', 'BANK', 'INTO_INSTITUTION'),            # alias recorded BEFORE the run: not ours to touch
         ('R5', 'FAC VARIANT', 'WELLS FARGO', 'FAC VARIANT', 'WELLS FARGO',
-         'OTHER', 'BANK', 'ORIGINATION'),            # facility-scoped alias: ignored
+         'OTHER', 'BANK', 'INTO_INSTITUTION'),            # facility-scoped alias: ignored
     ]
     conn.executemany("INSERT INTO aom_events_clean VALUES (?,?,?,?,?,?,?,?)", rows)
     conn.executemany("INSERT INTO aom_events_nonloan VALUES (?,?,?,?,?,?,?,?)", rows[:1])
@@ -114,7 +114,7 @@ def main() -> int:
     print('3. type and txn_type follow the canonical')
     r1 = get('aom_events_clean', 'R1')
     check('  assignor_type becomes BANK', r1[2], 'BANK')
-    check('  bank → bank is a MARKET_TRANSFER, not an ORIGINATION', r1[4], 'MARKET_TRANSFER')
+    check('  bank → bank is a MARKET_TRANSFER, not an INTO_INSTITUTION', r1[4], 'MARKET_TRANSFER')
     r3 = get('aom_events_clean', 'R3')
     check('  ALTO CAPITAL typed PRIVATE_CREDIT', r3[2], 'PRIVATE_CREDIT')
     check('  private credit → bank is a MARKET_TRANSFER', r3[4], 'MARKET_TRANSFER')

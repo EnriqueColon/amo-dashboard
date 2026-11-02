@@ -50,10 +50,10 @@ function cleanField(v: string | null | undefined, isAddress = false): string | n
 // else — every row was a loan transfer by construction.
 //
 // Adding the Shows filter broke it. A collateral assignment has a txn_type like
-// PRIVATE or ORIGINATION, which this function happily rendered as "LoanSale":
+// NON_INSTITUTIONAL or INTO_INSTITUTION, which this function happily rendered as "LoanSale":
 // CFN 2026R626049 is an ASSIGNMENT OF RENTS, categorised COLLATERAL, and the
-// column read LoanSale. 13,721 collateral rows carry txn_type PRIVATE and 3,399
-// ORIGINATION, so the label was wrong on every one of them.
+// column read LoanSale. 13,721 collateral rows carry txn_type NON_INSTITUTIONAL and 3,399
+// INTO_INSTITUTION, so the label was wrong on every one of them.
 //
 // A row that is not a loan transfer now says what it actually is. txn_type is
 // still computed for these rows and still visible in its own column — this only
@@ -70,7 +70,7 @@ function deriveClassification(row: any): string {
   const nonLoan = NON_LOAN_LABEL[row.doc_category];
   if (nonLoan) return nonLoan;
   if (row.txn_type === 'MERS_RELEASE') return 'WarehouseRelease';
-  if (['MARKET_TRANSFER', 'ORIGINATION', 'INSTITUTIONAL_OUT'].includes(row.txn_type)) return 'LoanSale';
+  if (['MARKET_TRANSFER', 'INTO_INSTITUTION', 'OUT_OF_INSTITUTION'].includes(row.txn_type)) return 'LoanSale';
   return 'NeedsReview';
 }
 

@@ -24,9 +24,9 @@ aom_events_clean — the analytical table: loan-transfer assignments with RESOLV
   assignor_type, assignee_type ∈ BANK | SERVICER | PRIVATE_CREDIT | GSE | TRUST | MERS | OTHER (OTHER is mostly individuals/borrowers),
   txn_type ∈
     MARKET_TRANSFER   institution → institution (a loan sale/transfer between lenders/servicers/trusts),
-    ORIGINATION       non-institution (usually the borrower/individual) → institution; i.e. a newly originated mortgage being assigned to a lender,
-    INSTITUTIONAL_OUT institution → non-institution,
-    PRIVATE           neither side classified as an institution,
+    INTO_INSTITUTION   party not identified as an institution → institution (the document does NOT say who originated the loan; never call these originations),
+    OUT_OF_INSTITUTION institution → non-institution,
+    NON_INSTITUTIONAL  neither side classified as an institution,
     SELF_ASSIGN       same canonical entity on both sides (internal/record-keeping),
     MERS_RELEASE      MERS on either side (record-keeping, not a sale),
   property_address, loan_amount, consideration_amount, folio_parcel (ONLY populated when the PDF was read; NULL = unknown, not zero),

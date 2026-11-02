@@ -4,6 +4,14 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-11-02 (evening) — F1 DEPLOYED + VERIFIED; TRANSACTION-TYPE LABELS RENAMED (owner-approved)
+
+- **F1 live.** Backup `backup_pre_type_persist.db` -> pull `1caf4df` -> build -> restart -> `reseed_entity_types.py` (7,091 rows) -> `normalize.py` 16:20-~19:00 UTC ("Preserved 7,095 AI verdicts, 2 overrides") -> cache-clearing restart (env intact, /login 200). Live vs rehearsal: entity_nodes OTHER 3,687 / TRUST 3,347 / PC 2,366 / BANK 2,154 / SERVICER 1,329, no NULL types; MARKET_TRANSFER 63,017 ($247.9B) vs 63,001; old INTO_INSTITUTION 2,677 ($13.77B vs $13.74B); PC filings 12,255 / 2,366 names. Small count drift = new documents since the rehearsal copy. Before (wiped, what the dashboard showed): 47,209 / $184.2B, 12,168 / $35.6B, 6,838 / 92.
+- **Rename (owner: "go with what is presented in the table").** `ORIGINATION` -> `INTO_INSTITUTION`, `INSTITUTIONAL_OUT` -> `OUT_OF_INSTITUTION`, `PRIVATE` -> `NON_INSTITUTIONAL`; MARKET_TRANSFER / MERS_RELEASE / SELF_ASSIGN unchanged. Reason: an assignment cannot show who originated the loan; the tool will later track true originations from recorded mortgages. Touched normalize.py, enrich_entities.py, server routes/chat/email, client pages + glossary, tests, accuracy_audit.py, Confluence. API field names too (`originations` -> `into_institution`; chat tool `institutional_out`/`private` -> `out_of_institution`/`non_institutional`). Stored values need a one-time UPDATE in `aom_events_clean` and `aom_events_nonloan` (the only tables with `txn_type`). Counts must be identical before/after. "Other" (unclassified) label NOT renamed (not requested).
+- **Still open:** the two small follow-ups (assignee-MERS rule in enrich/routes txn_type SQL; preserve enrich's GSE/MERS rule results); audit F2-F4; watchlist Stream 1 awaiting go.
+
+---
+
 ## 2026-11-02 — F1 FIX BUILT (entity types survive the nightly rebuild); REHEARSING; NOT DEPLOYED
 
 Owner: "Yes, fix it" then "Okay lets get started" (after being told: ~3 h wall-clock, no outage during the rebuild, two ~seconds restarts). Rule kept: nothing on the droplet changes until the owner has seen the rehearsal figures and says go.

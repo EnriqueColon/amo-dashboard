@@ -77,11 +77,11 @@ export const ENTITY_REPORT_VIEW_DEFS: Record<string, Definition> = {
 export const TXN_TYPE_DEFS: Record<string, Definition> = {
   '':                d('All', 'Every transaction type.'),
   MARKET_TRANSFER:   d('Market Transfer', 'Institution to institution — a bank, servicer, fund or trust selling a loan to another. The true secondary market.'),
-  ORIGINATION:       d('Origination', 'A non-institution (an individual, small or private lender) selling a loan into an institution. New supply entering the market.'),
+  INTO_INSTITUTION:       d('Into Institution', 'A party we could not identify as an institution (an individual, a small or private lender, or an unclassified entity) assigning a loan to an institution. The document does not say who originally made the loan.'),
   MERS_RELEASE:      d('MERS Release', "MERS — the industry's electronic loan registry — on either side: handing over the placeholder interest it holds, or taking one. Record-keeping, not a sale."),
   SELF_ASSIGN:       d('Self-Assign', 'The same company on both sides, such as moving a loan between its own affiliates. Administrative, not a market trade.'),
-  INSTITUTIONAL_OUT: d('Inst. Out', 'An institution transferring a loan to a non-institution — typically a payoff, a foreclosed property (REO) or a distressed sale.'),
-  PRIVATE:           d('Private', 'Neither side is an institution — for example an individual or small private lender transferring to another. Outside the institutional market.'),
+  OUT_OF_INSTITUTION: d('Out of Institution', 'An institution transferring a loan to a non-institution — typically a payoff, a foreclosed property (REO) or a distressed sale.'),
+  NON_INSTITUTIONAL:           d('Non-Institutional', 'Neither side is an identified institution — for example an individual or small private lender assigning to another. Outside the institutional market.'),
 };
 
 // ── Entities / Raw Assignments: kind of company ────────────────────────────────

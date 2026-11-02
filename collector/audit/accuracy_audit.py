@@ -11,7 +11,7 @@ Layers audited (one section each in the report):
   S4  direction                      index order vs document order, per county
   S5  parties                        person-shaped parties, missing document parties, self-assignments
   S6  entity types                   OTHER-typed lenders, BANK without FDIC match, behavioural/LLM verdicts
-  S7  transaction type               what ORIGINATION / SELF_ASSIGN rows actually are
+  S7  transaction type               what INTO_INSTITUTION / SELF_ASSIGN rows actually are
   S8  amounts                        outliers, echoes, amounts on non-loan instruments
   S9  addresses                      corporate addresses stored as the property
   S10 samples                        stratified CFNs for hand-reading (Tier C)
@@ -415,7 +415,7 @@ def s6_entity_types(R, conn):
     other_lenders.sort(key=lambda r: -r[2])
     R.p(f'**Lender-named entities typed OTHER** (name carries BANK/MORTGAGE/LENDING/FUNDING/CAPITAL/CREDIT…, ≥3 filings): '
         f'{len(other_lenders):,} entities, {sum(r[2] for r in other_lenders):,} filings. Every one of their deals is typed '
-        'ORIGINATION/INSTITUTIONAL_OUT/PRIVATE instead of MARKET_TRANSFER.')
+        'INTO_INSTITUTION/OUT_OF_INSTITUTION/NON_INSTITUTIONAL instead of MARKET_TRANSFER.')
     R.table(['entity', 'type', 'filings', 'out', 'in', 'counterparties', 'source'], other_lenders, limit=40)
     R.csv('s6_other_typed_lenders.csv', ['entity', 'type', 'filings', 'out', 'in', 'degree', 'source'], other_lenders)
     fdic = {r[0] for r in q(conn, "SELECT DISTINCT UPPER(canonical_name) FROM fdic_institution_cache WHERE cert IS NOT NULL")} if q(conn, "SELECT name FROM sqlite_master WHERE name='fdic_institution_cache'") else set()
@@ -437,12 +437,12 @@ def s6_entity_types(R, conn):
 @section
 def s7_txn_type(R, conn):
     R.h('S7. Transaction type')
-    R.p('`ORIGINATION` = non-institution → institution. In a table of mortgage **assignments** this shape is suspect: a borrower '
+    R.p('`INTO_INSTITUTION` = non-institution → institution. In a table of mortgage **assignments** this shape is suspect: a borrower '
         'does not assign a mortgage to its lender. These rows are either rents/collateral instruments mis-categorised, or '
         'borrower-indexed rows where the real assignor was not recovered, or lenders the type classifier does not know.')
-    R.table(['county', 'ORIGINATION rows', 'stated $', 'assignor person-shaped', 'title says rents/other', 'title says mortgage/note'],
-            [(c, n, money(amt), 0, 0, 0) for c, n, amt in q(conn, "SELECT county, COUNT(*), SUM(COALESCE(loan_amount,0)) FROM aom_events_clean WHERE txn_type='ORIGINATION' GROUP BY 1")])
-    rows = q(conn, "SELECT county, cfn, assignor, assignee, doc_title, loan_amount, assignor_type FROM aom_events_clean WHERE txn_type='ORIGINATION'")
+    R.table(['county', 'INTO_INSTITUTION rows', 'stated $', 'assignor person-shaped', 'title says rents/other', 'title says mortgage/note'],
+            [(c, n, money(amt), 0, 0, 0) for c, n, amt in q(conn, "SELECT county, COUNT(*), SUM(COALESCE(loan_amount,0)) FROM aom_events_clean WHERE txn_type='INTO_INSTITUTION' GROUP BY 1")])
+    rows = q(conn, "SELECT county, cfn, assignor, assignee, doc_title, loan_amount, assignor_type FROM aom_events_clean WHERE txn_type='INTO_INSTITUTION'")
     agg = defaultdict(Counter)
     for county, cfn, a, b, title, amt, at in rows:
         exp = expected_from_title(title)
@@ -453,9 +453,9 @@ def s7_txn_type(R, conn):
     R.table(['county', 'assignor person-shaped', 'title says rents/other/collateral', 'title says mortgage/note', 'company assignor + mortgage title (likely unknown lender)'],
             [(c, v['person'], v['title_rents_other'], v['title_debt'], v['company_not_person_debt_title']) for c, v in agg.items()])
     R.p('Company assignors with a mortgage title, by name — these are most likely **lenders the classifier typed OTHER**:')
-    R.table(['assignor', 'ORIGINATION rows', 'stated $'],
+    R.table(['assignor', 'INTO_INSTITUTION rows', 'stated $'],
             q(conn, """SELECT assignor_canon, COUNT(*), SUM(COALESCE(loan_amount,0)) FROM aom_events_clean
-                       WHERE txn_type='ORIGINATION' GROUP BY 1 ORDER BY 2 DESC LIMIT 30"""))
+                       WHERE txn_type='INTO_INSTITUTION' GROUP BY 1 ORDER BY 2 DESC LIMIT 30"""))
     R.csv('s7_origination_rows.csv', ['county', 'cfn', 'assignor', 'assignee', 'title', 'amount', 'assignor_type'], rows)
     R.p('**MARKET_TRANSFER rows whose title is a rents/leases-only instrument** (counted as loan trades):')
     mt = q(conn, """SELECT county, cfn, assignor, assignee, doc_title, loan_amount FROM aom_events_clean WHERE txn_type='MARKET_TRANSFER'""")
@@ -529,7 +529,7 @@ def s10_samples(R, conn):
             if county == 'MIAMI-DADE' and cat == 'LOAN_TRANSFER':
                 continue   # covered by S3 text
             pick(f'{county} {cat}', base + " AND a.county=? AND e.doc_category=?", 8, (county, cat))
-    pick('ORIGINATION (clean)', base + " AND a.cfn IN (SELECT cfn FROM aom_events_clean WHERE txn_type='ORIGINATION')", 15)
+    pick('INTO_INSTITUTION (clean)', base + " AND a.cfn IN (SELECT cfn FROM aom_events_clean WHERE txn_type='INTO_INSTITUTION')", 15)
     pick('SELF_ASSIGN (clean)', base + " AND a.cfn IN (SELECT cfn FROM aom_events_clean WHERE txn_type='SELF_ASSIGN')", 12)
     pick('amount > $100M (clean)', base + " AND a.cfn IN (SELECT cfn FROM aom_events_clean WHERE loan_amount > 100e6)", 12)
     pick('title/category disagree', base + " AND e.doc_category='LOAN_TRANSFER' AND (UPPER(e.doc_title) LIKE '%RENT%' OR UPPER(e.doc_title) LIKE '%LEASE%') AND UPPER(e.doc_title) NOT LIKE '%MORTGAGE%' AND UPPER(e.doc_title) NOT LIKE '%NOTE%'", 12)

@@ -697,7 +697,7 @@ export function buildRollupReport(db: Database.Database, sendDate: string): Roll
     if (otherFirm && sameFirm(otherFirm, r.target_entity)) { internalHidden++; continue; }
 
     const T = r.target_entity;
-    const origination = inClean && r.txn_type === 'ORIGINATION';
+    const origination = inClean && r.txn_type === 'INTO_INSTITUTION';
     let verb: string;
     if (category === 'LOAN_TRANSFER') {
       verb = origination

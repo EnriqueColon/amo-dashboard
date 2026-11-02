@@ -44,7 +44,7 @@ export const GLOSSARY: Record<string, MetricDef> = {
   },
   'clean-events:Type': {
     definition:
-      "The dashboard's classification of what kind of transfer this is: Market Transfer (institution to institution — a true secondary-market trade), Origination (individual or private party to institution — new supply entering), MERS Release (the MERS registry stepping aside, housekeeping only), Self-Assign (the same entity on both sides — a rename or merger, not a sale), Inst. Out (institution to individual — a payoff, REO or distressed sale), or Private (individual to individual).",
+      "The dashboard's classification of what kind of transfer this is: Market Transfer (institution to institution — a true secondary-market trade), Into Institution (a party not identified as an institution assigning to an institution — the document does not say who made the loan), MERS Release (the MERS registry stepping aside, housekeeping only), Self-Assign (the same entity on both sides — a rename or merger, not a sale), Out of Institution (institution to a non-institution — a payoff, REO or distressed sale), or Non-Institutional (neither side an identified institution).",
     howCalculated:
       "Derived by the normalisation step from the entity types of the canonical assignor and assignee: for example two institutional parties become Market Transfer, and matching canonical names on both sides become Self-Assign. It is the dashboard's label, not something written on the document.",
     whyValuable:

@@ -23,11 +23,11 @@ const EMPTY: Filters = { assignor: '', assignee: '', cfn: '', start_date: '', en
 // ── Transaction type metadata ─────────────────────────────────────────────────
 const TXN_TYPES: Record<string, { label: string; color: string; desc: string }> = {
   MARKET_TRANSFER:   { label: 'Market Transfer',  color: 'bg-emerald-100 text-emerald-700 border-emerald-300',  desc: 'Institution → Institution (true secondary market)' },
-  ORIGINATION:       { label: 'Origination',      color: 'bg-blue-100 text-blue-700 border-blue-300',          desc: 'Individual / private → Institution (new supply entering)' },
+  INTO_INSTITUTION:       { label: 'Into Institution',      color: 'bg-blue-100 text-blue-700 border-blue-300',          desc: 'Non-institution → Institution' },
   MERS_RELEASE:      { label: 'MERS Release',     color: 'bg-purple-100 text-purple-700 border-purple-300',    desc: 'MERS nominee discharging nominal interest (registry housekeeping)' },
   SELF_ASSIGN:       { label: 'Self-Assign',      color: 'bg-zinc-100 text-zinc-600 border-zinc-300',          desc: 'Same canonical entity on both sides (administrative noise)' },
-  INSTITUTIONAL_OUT: { label: 'Inst. Out',        color: 'bg-amber-100 text-amber-700 border-amber-300',       desc: 'Institution → Individual (payoff, REO, or distressed)' },
-  PRIVATE:           { label: 'Private',          color: 'bg-slate-100 text-slate-600 border-slate-300',       desc: 'Individual → Individual (non-institutional)' },
+  OUT_OF_INSTITUTION: { label: 'Out of Institution',        color: 'bg-amber-100 text-amber-700 border-amber-300',       desc: 'Institution → non-institution (payoff, REO, or distressed)' },
+  NON_INSTITUTIONAL:           { label: 'Non-Institutional',          color: 'bg-slate-100 text-slate-600 border-slate-300',       desc: 'Non-institution → non-institution' },
 };
 
 function TxnTypeBadge({ type }: { type: string }) {
@@ -130,10 +130,10 @@ function getTransactionNarrative(row: {
     };
   }
 
-  if (txn_type === 'ORIGINATION') return {
-    headline: 'Mortgage entering the institutional system',
-    what: `${assignor_canon} — an individual borrower, seller, or non-institutional intermediary — assigned this mortgage to ${assignee_canon} (${fmt(bt)}). The loan is being transferred into the formal financial system for the first time.`,
-    why: 'Origination flows represent new supply. They show which institutions are capturing new loans in this market. The receiving entity is either the originating lender taking formal title, or a servicer receiving a freshly-originated loan for servicing.',
+  if (txn_type === 'INTO_INSTITUTION') return {
+    headline: 'Assigned into an institution',
+    what: `${assignor_canon} — a party we could not identify as an institution (an individual, small or private lender, or an unclassified entity) — assigned this mortgage to ${assignee_canon} (${fmt(bt)}). The document does not say who originally made the loan.`,
+    why: 'Shows which institutions are acquiring loans from parties we could not classify as institutions. This is not proof of a new origination: the assignor may be the originating lender, an earlier holder, or an institution the tool has not yet identified.',
     icon: ArrowUpRight,
     accentClass: 'text-blue-400',
   };
@@ -154,7 +154,7 @@ function getTransactionNarrative(row: {
     accentClass: 'text-zinc-400',
   };
 
-  if (txn_type === 'INSTITUTIONAL_OUT') return {
+  if (txn_type === 'OUT_OF_INSTITUTION') return {
     headline: 'Institution releasing to a private party',
     what: `${assignor_canon} (${fmt(at)}) assigned this mortgage to ${assignee_canon}, a non-institutional party. Institutions rarely assign mortgages outward to individuals — this typically indicates a loan payoff/satisfaction being recorded, an REO property transfer, or a distressed sale to a local investor.`,
     why: 'Worth investigating individually. Could signal a foreclosure-related deed transfer, a short sale, or a hard-money lender releasing collateral after repayment. The receiving party\'s name often tells the story.',
@@ -162,7 +162,7 @@ function getTransactionNarrative(row: {
     accentClass: 'text-amber-400',
   };
 
-  if (txn_type === 'PRIVATE') return {
+  if (txn_type === 'NON_INSTITUTIONAL') return {
     headline: 'Private-party transfer',
     what: `${assignor_canon} and ${assignee_canon} are both non-institutional parties — individuals, small LLCs, or unclassified entities. This is person-to-person or small-investor activity outside the formal lending system.`,
     why: 'Non-institutional flows: seller financing, estate transfers, small real estate investors, or HOA-related liens. Lower market intelligence value but can reveal informal lending patterns in specific neighborhoods.',
@@ -400,7 +400,7 @@ export default function CleanEvents() {
               <div><span className="text-foreground font-medium">Date</span> — Date the assignment was recorded with the county.</div>
               <div><span className="text-foreground font-medium">Canonical name</span> — Normalized version (suffixes stripped, brand aliases unified). The smaller grey text below is the original raw name from the filing.</div>
               <div><span className="text-foreground font-medium">Category badge</span> — Entity type: BANK, SERVICER, PRIVATE CREDIT, GSE, MERS, or OTHER.</div>
-              <div><span className="text-foreground font-medium">Type</span> — Transaction classification: <em>Market Transfer</em> (institution→institution), <em>Origination</em> (individual→institution), <em>MERS Release</em>, <em>Self-Assign</em> (administrative noise), <em>Inst. Out</em> (institution→individual), or <em>Private</em> (individual→individual).</div>
+              <div><span className="text-foreground font-medium">Type</span> — Transaction classification: <em>Market Transfer</em> (institution→institution), <em>Into Institution</em> (non-institution→institution), <em>MERS Release</em>, <em>Self-Assign</em> (administrative noise), <em>Out of Institution</em> (institution→non-institution), or <em>Non-Institutional</em> (neither side an institution).</div>
               <div><span className="text-foreground font-medium">Property</span> — Street address of the encumbered property, read from the recorded PDF when stated. Many assignments only reference a legal description, so this can be blank.</div>
               <div><span className="text-foreground font-medium">Amount</span> — Original loan amount (or actual consideration paid) extracted from the recorded PDF. Most assignments recite only nominal consideration ("$10 and other..."), which is ignored.</div>
               <div><span className="text-foreground font-medium">Parties</span> — Total parties on the original filing. Multi-party filings (e.g. 3–4) indicate complex structures; this table collapses them to their dominant direction.</div>
@@ -534,7 +534,7 @@ export default function CleanEvents() {
                   </span>
                 </th>
                 <th className="px-3 py-2.5 text-left font-medium">
-                  <ColHeader label={<DefTerm term="clean-events:Type">Type</DefTerm>} tooltip="Transaction classification: Market Transfer (institution→institution), Origination (individual→institution, new supply entering), MERS Release (registry housekeeping), Self-Assign (administrative, same entity both sides), Inst. Out (institution→individual, e.g. REO/payoff), or Private (individual→individual)." />
+                  <ColHeader label={<DefTerm term="clean-events:Type">Type</DefTerm>} tooltip="Transaction classification: Market Transfer (institution→institution), Into Institution (non-institution→institution; the document does not say who made the loan), MERS Release (registry housekeeping), Self-Assign (administrative, same entity both sides), Out of Institution (institution→non-institution, e.g. REO/payoff), or Non-Institutional (neither side an institution)." />
                 </th>
                 <th className="px-3 py-2.5 text-left font-medium">
                   <ColHeader label={<DefTerm term="clean-events:Property">Property</DefTerm>} tooltip="Street address of the encumbered property, extracted from the recorded PDF document when stated (falls back to the county index address). Blank when the document only gives a legal description." />
