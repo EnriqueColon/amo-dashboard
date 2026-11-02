@@ -22,6 +22,14 @@ import requests
 OPENAI_URL = "https://api.openai.com/v1/chat/completions"
 MAX_OUTPUT_TOKENS = 12000
 PRINCIPAL_THRESHOLD = 500_000  # rule 9: inclusive
+# USD per 1M tokens (input, output). From web listings on 2 Nov 2026, NOT checked against OpenAI's own page:
+# confirm before relying on the budget. An unknown model is priced at the dearest row so the cap errs early.
+PRICES = {"gpt-5.5": (5.00, 30.00), "gpt-5.4-mini": (0.75, 4.50), "gpt-5-nano": (0.05, 0.40)}
+
+
+def cost_usd(model: str, in_tok: int, out_tok: int) -> float:
+    pin, pout = PRICES.get(model, max(PRICES.values()))
+    return (in_tok * pin + out_tok * pout) / 1_000_000
 
 SYSTEM_PROMPT = """You extract facts from a Florida circuit-court complaint (text is page-numbered, \
 "=== PAGE n ===", some pages OCR'd and imperfect). Return ONE JSON object, no commentary.
@@ -304,32 +312,48 @@ CREATE TABLE IF NOT EXISTS foreclosure_reviews (
 """
 
 
-def process_pending(conn, model: str, api_key: str, limit: int | None = None) -> dict:
-    """Read + extract every downloaded complaint that has no extraction from this model yet."""
+def spent_today(conn, model: str) -> float:
+    rows = conn.execute("""SELECT input_tokens, output_tokens FROM foreclosure_extractions
+                           WHERE model=? AND substr(extracted_at,1,10)=date('now')""", (model,)).fetchall()
+    return sum(cost_usd(model, r[0] or 0, r[1] or 0) for r in rows)
+
+
+def process_pending(conn, model: str, api_key: str, limit: int | None = None, budget_usd: float | None = None) -> dict:
+    """Read + extract every downloaded complaint that has no extraction from this model yet. Stops, without
+    error, when today's spend (extraction + address-repair page reads) reaches budget_usd; the rest waits for
+    the next run."""
     import complaints_reader  # imported here: needs poppler/tesseract, which only the droplet job requires
+    import complaints_address  # repairs scan-misread addresses by voting between page-image readings
     conn.executescript(STORE_SCHEMA)
     rows = conn.execute("""SELECT case_id, case_number, complaint_pdf FROM foreclosure_cases
-                           WHERE complaint_status='downloaded' AND case_id NOT IN
+                           WHERE complaint_status='downloaded' AND complaint_pdf IS NOT NULL AND case_id NOT IN
                                  (SELECT case_id FROM foreclosure_extractions WHERE model=?)
-                           ORDER BY filing_date""", (model,)).fetchall()
+                           ORDER BY filing_date DESC""", (model,)).fetchall()
     rows = rows[:limit] if limit else rows
     done = failed = 0
+    stopped_for_budget = False
     for r in rows:
+        if budget_usd is not None and spent_today(conn, model) >= budget_usd:
+            stopped_for_budget = True
+            break
         try:
+            complaints_address.USAGE.update({"in": 0, "out": 0})
             res = extract(complaints_reader.read_complaint(r["complaint_pdf"]), model, api_key)
-            import complaints_address  # repairs scan-misread addresses by voting between page-image readings
-            res = complaints_address.repair_result(r["complaint_pdf"], res, model, api_key)
             u = res.get("_usage", {})
+            res = complaints_address.repair_result(r["complaint_pdf"], res, model, api_key)
+            tin = (u.get("prompt_tokens") or 0) + complaints_address.USAGE["in"]
+            tout = (u.get("completion_tokens") or 0) + complaints_address.USAGE["out"]
             conn.execute("INSERT OR REPLACE INTO foreclosure_extractions VALUES (?,?,?,?,?,?,?)",
-                         (r["case_id"], model, datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
-                          None if res["computed_meets_criteria"] is None else int(res["computed_meets_criteria"]), u.get("prompt_tokens"),
-                          u.get("completion_tokens"), json.dumps(res)))
+                         (r["case_id"], model, datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S"),
+                          None if res["computed_meets_criteria"] is None else int(res["computed_meets_criteria"]),
+                          tin, tout, json.dumps(res)))
             conn.commit()
             done += 1
-        except Exception as e:  # one bad complaint must not stop the batch
+        except Exception as e:  # one bad complaint must not stop the batch; it is retried next run
             failed += 1
             print(f"  ERROR {r['case_number']}: {e}")
-    return {"extracted": done, "failed": failed}
+    return {"extracted": done, "failed": failed, "waiting": len(rows) - done - failed,
+            "stopped_for_budget": stopped_for_budget, "spent_today_usd": round(spent_today(conn, model), 2)}
 
 
 if __name__ == "__main__":

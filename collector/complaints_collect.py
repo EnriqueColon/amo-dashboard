@@ -237,6 +237,10 @@ def main():
     ap.add_argument("--search-only", action="store_true")
     ap.add_argument("--fetch-only", action="store_true")
     ap.add_argument("--limit", type=int, help="fetch at most N documents")
+    ap.add_argument("--extract", action="store_true", help="after fetching, read and extract new complaints")
+    ap.add_argument("--model", default=os.environ.get("COMPLAINTS_MODEL", "gpt-5.5"))
+    ap.add_argument("--budget", type=float, default=float(os.environ.get("COMPLAINTS_DAILY_BUDGET_USD", "15")),
+                    help="stop extracting for the day once estimated spend reaches this many USD")
     a = ap.parse_args()
     conn = connect()
     clerk = Clerk()
@@ -251,6 +255,12 @@ def main():
         print(f"new cases: {search_range(conn, clerk, d_from, d_to)}")
     if not a.search_only:
         print("fetch results:", fetch_pending(conn, clerk, a.limit))
+    if a.extract:
+        import complaints_extract
+        key = os.environ.get("OPENAI_API_KEY")
+        if not key:
+            sys.exit("OPENAI_API_KEY is not set")
+        print("extract results:", complaints_extract.process_pending(conn, a.model, key, a.limit, a.budget))
     for r in conn.execute("SELECT complaint_status, COUNT(*) n FROM foreclosure_cases GROUP BY 1"):
         print(f"  {r['complaint_status']}: {r['n']}")
 

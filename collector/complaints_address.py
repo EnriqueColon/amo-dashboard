@@ -25,6 +25,9 @@ character, including unit/apartment and ZIP. Do not correct spelling and do not 
 If this page has no property address, return {"address": null, "unit": null, "legible": true}."""
 
 
+USAGE = {"in": 0, "out": 0}  # tokens spent on page-image reads since the caller last reset it
+
+
 def render_page(pdf_path: str, page: int, dpi: int = 200) -> bytes:
     with tempfile.TemporaryDirectory() as tmp:
         stem = Path(tmp) / "p"
@@ -42,7 +45,10 @@ def read_address_image(png: bytes, model: str, api_key: str) -> dict:
     r = requests.post(OPENAI_URL, json=body, timeout=300, headers={"Authorization": f"Bearer {api_key}"})
     if not r.ok:
         raise RuntimeError(f"OpenAI {r.status_code}: {r.text[:200]}")
-    return json.loads(r.json()["choices"][0]["message"]["content"])
+    j = r.json()
+    USAGE["in"] += j.get("usage", {}).get("prompt_tokens", 0)
+    USAGE["out"] += j.get("usage", {}).get("completion_tokens", 0)
+    return json.loads(j["choices"][0]["message"]["content"])
 
 
 def needs_repair(prop: dict) -> bool:
