@@ -169,6 +169,43 @@ def normalize_address(a):
     return " ".join(rest[:1] + sorted(dirs) + rest[1:])
 
 
+_STREET_SUFFIXES = {"ST", "AVE", "DR", "CT", "RD", "BLVD", "LN", "PL", "TER", "WAY", "HWY", "CIR"}
+
+
+def street_key(addr):
+    """House number + street name only (no unit, city or ZIP). Two readings with the same street key are
+    the same street address for flagging purposes: a ZIP-only difference is not a conflict."""
+    k = normalize_address(addr)
+    if not k:
+        return None
+    toks = [t for t in k.split() if not t.startswith("#")]
+    for i, t in enumerate(toks[1:], start=1):
+        if t in _STREET_SUFFIXES:
+            return " ".join(toks[: i + 1])
+    return " ".join(toks[:4])
+
+
+def classify_flags(res: dict) -> dict:
+    """Three tiers (owner decision 2 Nov 2026): harmless differences are not flagged at all; real but
+    informational ones ride along on the row; only unresolved items on a lead that qualifies (or might)
+    go to the review list. Unresolved items on a case that does not qualify are ignored."""
+    flags = set(res.get("review_flags") or [])
+    props = res.get("properties") or []
+    if not any(p.get("address_conflict") for p in props):
+        flags.discard("address_body_conflict")
+    if not any(p.get("exhibit_addresses_differ") for p in props):
+        flags.discard("address_note_vs_mortgage_differ")
+    if any(str(p.get("address_repair_status", "")).endswith("needs_review") for p in props):
+        flags.add("address_unresolved")
+    res["review_flags"] = sorted(flags)
+    blocking = {"address_unresolved", "address_missing", "principal_missing",
+                "reinstatement_unreadable", "no_note_extracted"}
+    verdict = res.get("computed_meets_criteria")
+    res["review_reasons"] = sorted(flags & blocking) if verdict in (True, None) else []
+    res["needs_review"] = bool(res["review_reasons"])
+    return res
+
+
 def postprocess(raw: dict) -> dict:
     """Apply the approved rules in code. Never trusts a model-computed total or label."""
     res = dict(raw)
@@ -198,12 +235,12 @@ def postprocess(raw: dict) -> dict:
             chosen, src = p["address_body"], "complaint body"
         p["property_address"], p["address_source"] = chosen, src
         body = normalize_address(p.get("address_body"))
-        p["address_conflict"] = bool(body and chosen and body != normalize_address(chosen)
+        p["address_conflict"] = bool(body and chosen and street_key(p.get("address_body")) != street_key(chosen)
                                      and src != "complaint body")
         p["address_key"] = normalize_address(chosen)
         note_key = normalize_address(p.get("address_note"))
         p["exhibit_addresses_differ"] = bool(note_key and p["address_key"] and src.startswith("mortgage")
-                                             and note_key != p["address_key"])
+                                             and street_key(p.get("address_note")) != street_key(chosen))
         props.append(p)
     res["properties"] = props
     # Criteria are computed, never stored as a label. True / False / None (None = cannot tell, needs review).
@@ -234,6 +271,7 @@ def postprocess(raw: dict) -> dict:
             flags.append("multiple_properties")
     res["computed_meets_criteria"] = verdict
     res["review_flags"] = sorted(set(flags))
+    classify_flags(res)
     return res
 
 
@@ -254,6 +292,14 @@ CREATE TABLE IF NOT EXISTS foreclosure_extractions (
     output_tokens  INTEGER,
     result_json    TEXT NOT NULL,    -- full result incl. notes, properties and source pages
     PRIMARY KEY (case_id, model)
+);
+-- A person's answer to a review-list item. Never overwritten by the pipeline.
+CREATE TABLE IF NOT EXISTS foreclosure_reviews (
+    case_id          TEXT PRIMARY KEY,
+    decision         TEXT NOT NULL,   -- 'address_entered' | 'no_address_in_complaint' | 'dismissed'
+    address          TEXT,            -- only what is printed in the complaint's own pages
+    note             TEXT,
+    reviewed_at      TEXT NOT NULL
 );
 """
 

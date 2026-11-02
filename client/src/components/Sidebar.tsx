@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'wouter';
-import { BarChart2, FileText, CheckCircle, Shield, Building2, ClipboardList, Menu, X, LineChart, LayoutList, LogOut, Crosshair, Landmark, FileSignature, MessageSquare, Gauge, Users, Newspaper, Scale, BookOpen } from 'lucide-react';
+import { BarChart2, FileText, CheckCircle, Shield, Building2, ClipboardList, Menu, X, LineChart, LayoutList, LogOut, Crosshair, Landmark, FileSignature, MessageSquare, Gauge, Users, Newspaper, Scale, BookOpen, Gavel } from 'lucide-react';
 import { useState } from 'react';
 import { useCounty, COUNTY_OPTIONS, type CountyScope } from '@/lib/county';
 import { FilterHint } from '@/components/FilterHint';
@@ -27,6 +27,7 @@ const NAV = [
   { href: '/assignments',      icon: FileText,     label: 'Raw Assignments',    group: 'data' },
   // UCC Filings and Clean Transactions moved here from Analysis (owner, 29 Oct 2026):
   // they are document views, not analyses.
+  { href: '/complaints',       icon: Gavel,        label: 'Complaints',         group: 'data', badge: 'Beta' },
   { href: '/ucc',              icon: FileSignature,label: 'UCC Filings',        group: 'data' },
   { href: '/clean-events',     icon: CheckCircle,  label: 'Clean Transactions', group: 'data' },
   { href: '/entities',         icon: Building2,    label: 'Entities',           group: 'data' },

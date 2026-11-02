@@ -15,7 +15,7 @@ from pathlib import Path
 
 import requests
 
-from complaints_extract import OPENAI_URL, normalize_address, request_params
+from complaints_extract import OPENAI_URL, classify_flags, normalize_address, request_params, street_key as _street_key
 
 IMAGE_PROMPT = """This is one page of a scanned mortgage or promissory note. Find the PROPERTY address: the \
 line labelled "Property Address", "commonly known as", "which currently has the address of" or similar -- \
@@ -53,19 +53,7 @@ def _key(addr):
     return normalize_address(addr) if addr else None
 
 
-_SUFFIXES = {"ST", "AVE", "DR", "CT", "RD", "BLVD", "LN", "PL", "TER", "WAY", "HWY", "CIR"}
-
-
-def street_key(addr):
-    """House number + street name, with unit, city and ZIP left out, for voting between readings."""
-    k = _key(addr)
-    if not k:
-        return None
-    toks = [t for t in k.split() if not t.startswith("#")]
-    for i, t in enumerate(toks[1:], start=1):
-        if t in _SUFFIXES:
-            return " ".join(toks[: i + 1])
-    return " ".join(toks[:4])
+street_key = _street_key
 
 
 def repair_property(pdf_path: str, prop: dict, model: str, api_key: str) -> dict:
@@ -125,17 +113,9 @@ def repair_result(pdf_path: str, result: dict, model: str, api_key: str) -> dict
     out = dict(result)
     out["properties"] = [repair_property(pdf_path, p, model, api_key) if needs_repair(p) else p
                          for p in result.get("properties") or []]
-    flags = set(result.get("review_flags") or [])
     for p in out["properties"]:
         if p.get("address_repair_status") == "repaired_by_vote":
             p["address_conflict"] = bool(p.get("address_body") and
-                                         _key(p["address_body"]) != p["address_key"])
+                                         street_key(p["address_body"]) != street_key(p["property_address"]))
             p["exhibit_addresses_differ"] = False
-    if not any(p.get("exhibit_addresses_differ") for p in out["properties"]):
-        flags.discard("address_note_vs_mortgage_differ")
-    if not any(p.get("address_conflict") for p in out["properties"]):
-        flags.discard("address_body_conflict")
-    if any(p.get("address_repair_status", "").endswith("needs_review") for p in out["properties"]):
-        flags.add("address_unresolved")
-    out["review_flags"] = sorted(flags)
-    return out
+    return classify_flags(out)

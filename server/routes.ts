@@ -2,6 +2,7 @@ import type { Express } from 'express';
 import type { Server } from 'http';
 import { getDb } from './db';
 import { registerBankStressRoutes } from './bank-stress';
+import { registerComplaintsRoutes } from './complaints';
 import { registerFdicAnalyticsRoutes } from './fdic-analytics';
 import { registerIntelRoutes } from './intel/routes';
 import { registerChatRoutes } from './chat';
@@ -1453,6 +1454,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   // removed on 2026-10-07 for a Market Intelligence pass-through at /api/mi/*,
   // which was in turn removed on 2026-10-27 (stage 4 of the Bank Stress work).
   registerBankStressRoutes(app);
+  registerComplaintsRoutes(app);
   registerFdicAnalyticsRoutes(app);
   registerChatRoutes(app);
 

@@ -23,6 +23,7 @@ import Reporting from '@/pages/Reporting';
 import Targets from '@/pages/Targets';
 import Entities from '@/pages/Entities';
 import CollectionLog from '@/pages/CollectionLog';
+import Complaints from '@/pages/Complaints';
 import NotFound from '@/pages/not-found';
 
 export default function App() {
@@ -54,6 +55,7 @@ export default function App() {
                 <Route path="/targets" component={Targets} />
                 <Route path="/entities" component={Entities} />
                 <Route path="/collection-log" component={CollectionLog} />
+                <Route path="/complaints" component={Complaints} />
                 <Route component={NotFound} />
               </Switch>
             </main>

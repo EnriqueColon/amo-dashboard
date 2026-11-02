@@ -22,6 +22,7 @@
 // heights, and carries its numbers as text. The county palette is validated
 // with the dataviz skill's validator (all checks pass; the sub-3:1 slots are
 // always shown with labels or a table beside them).
+import { buildComplaintsSection } from './complaintsSection';
 import type Database from 'better-sqlite3';
 import { queryGroupedFacilities } from '../lending/facilities';
 // EMAIL_EXCLUDE, not REPORTING_EXCLUDE: the email hides five large firms the
@@ -747,6 +748,9 @@ export function buildRollupReport(db: Database.Database, sendDate: string): Roll
       : 'Newly collected assignments naming a firm on the watchlist.',
     watchTable);
 
+  const complaints = buildComplaintsSection(db, sendDate, { esc, fmtMoney, trunc, MUTED, HAIR, INK, dashboardUrl: DASHBOARD_URL });
+  const complaintsSection = complaints ? section('Foreclosure complaints (beta)', complaints.sub, complaints.body) : '';
+
   const coverageLine = counties.map(c => `${COUNTY_LABEL[c]} through ${fmtDay(asOf[c])}`).join(' · ');
 
   // ── Stale-county notice ───────────────────────────────────────────────────
@@ -803,6 +807,8 @@ export function buildRollupReport(db: Database.Database, sendDate: string): Roll
   </td></tr>
 
   ${watchSection}
+
+  ${complaintsSection}
 
   ${section('52-week trend', 'Loan transfers per week, both counties. The darker the column, the more recent the window it belongs to.', trendChart)}
 
