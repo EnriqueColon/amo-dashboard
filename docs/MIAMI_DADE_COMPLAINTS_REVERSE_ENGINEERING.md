@@ -331,7 +331,7 @@ Matched the PDF: loan amount, loan date, note rate, unpaid principal, address, g
 - Private-lender and commercial filings are where the errors are (items 1–6 above).
 - 7 of 16 sheet rows are scored "Meets criteria"; one of the seven (Keller) is not a mortgage foreclosure.
 
-## 17. Proposed rules for owner approval (nothing built)
+## 17. Extraction rules — APPROVED by the owner 2 Nov 2026 (all nine, no changes)
 1. **Is it a mortgage foreclosure?** Require a Note and a Mortgage (or the complaint's own words "foreclose a mortgage"). Reject construction-lien, association-lien and timeshare-lien suits, and any complaint with no promissory note. (Fixes Keller; drops Solara, Polo-type lien suits.)
 2. **Default Date** = the earliest payment the complaint says was missed and not cured (for balloon loans with no missed installment, the maturity date). Never a date of death, a notice date or a filing date. Store the complaint's other dates as `other_default_dates`.
 3. **Unpaid principal** = the principal sum the complaint says is owed on the Note (excluding interest, late fees and costs), taken per note; the test amount for the $500,000 threshold is the **largest principal sum demanded against any defendant** for that note, with every per-defendant figure stored. (Black River would then be tested on the borrower/mortgage figure, not only the guarantor's.)
@@ -341,3 +341,26 @@ Matched the PDF: loan amount, loan date, note rate, unpaid principal, address, g
 7. **Late fee vs default interest:** two fields; "Default Rate" = default interest only.
 8. **Address:** the §12.4 rule, plus normalisation (unit marker, directionals, commas) before any match.
 9. **Threshold:** principal at least $500,000, inclusive.
+
+
+## 18. Proposed build plan (awaiting owner approval; nothing built)
+
+**Principle:** build in small stages, each one checked against the PDFs already reviewed (41 filings, two weeks) before the next starts. Separate tables and scripts; the existing assignment pipeline is not touched.
+
+**Stage 1 — Case discovery.** Weekly (and a daily catch-up) search of the Clerk site by File Date for case types 27185 and 27187. Store every case found (case number, filing date, style, type, status) in a new `foreclosure_cases` table, whether or not a document exists. This alone fixes the sheet's biggest gap (8 of 41 filings missed).
+
+**Stage 2 — Document fetch.** For each new case, read the docket, take the earliest Complaint (normally DIN 2), download the PDF, keep it on disk. Zero documents → status `complaint_not_public` (rule 6), retried weekly for 8 weeks.
+
+**Stage 3 — Reading the PDF.** Page-by-page text check; OCR (tesseract) for pages with no readable text; **no 50-page cap**. Output: full text with page numbers, saved so any figure can be traced to its page.
+
+**Stage 4 — Extraction.** LLM extraction of the fields in §3 and rules 1–9 from the text, with a separate step that gives the address from the Mortgage exhibit (§12.4). Criteria (reinstate = No, principal ≥ $500,000) computed in code, never stored as labels. One row per note and per property. Source page stored for default date, principal, reinstatement and address.
+
+**Stage 5 — Check before trusting.** Re-run on the 33 matched filings and compare to the sheet; every disagreement is either explained by §14–16 or fixed. Spot-read a sample by eye. Only then turn on the schedule.
+
+**Stage 6 — Valuation and display.** PropertyRadar lookup for Miami-Dade properties only (needs the API key and a per-lookup cost decision), then a dashboard page and export in the same columns as the sheet plus the new ones.
+
+**Decisions I need from the owner before Stage 1:**
+1. **Clerk login on the droplet.** Everything above needs a signed-in Clerk session. I used your login in the browser pane; an unattended 24/7 job on the droplet needs its own stored account. Does the old collector use an account we can reuse, or should one be created for this? (I will not create accounts or handle passwords myself.)
+2. **Extraction model.** `gpt-5-nano` is the current default for assignments; complaints are long and subtle (§16 errors). Proposal: test `gpt-5-nano` against a stronger OpenAI model on the 33 reviewed filings and pick on measured accuracy and cost.
+3. **PropertyRadar** key and budget (Stage 6 only; can wait).
+4. **Where it lives:** new tables in the existing SQLite DB and a new page in this dashboard (proposed), versus a separate database.
