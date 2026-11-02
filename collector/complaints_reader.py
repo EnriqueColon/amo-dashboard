@@ -8,6 +8,7 @@ reinstatement clause) sit deep in long complaints.
 Usage: python complaints_reader.py file.pdf [out.json]
 """
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -29,15 +30,23 @@ def readable_ratio(text: str) -> tuple[float, int]:
 
 
 def ocr_page(pdf_path: Path, page_no: int) -> str:
-    """OCR one page (1-based) with pdftoppm + tesseract."""
-    with tempfile.TemporaryDirectory() as tmp:
-        stem = Path(tmp) / "p"
-        subprocess.run(["pdftoppm", "-r", "200", "-f", str(page_no), "-l", str(page_no),
-                        "-png", str(pdf_path), str(stem)], check=True, capture_output=True)
-        png = next(Path(tmp).glob("p*.png"))
-        out = subprocess.run(["tesseract", str(png), "-", "--psm", "6"],
-                             check=True, capture_output=True, text=True)
-        return out.stdout
+    """OCR one page (1-based) with pdftoppm + tesseract. One tesseract thread (several threads fight each other
+    on a busy box: a single page once took over four minutes on the droplet) and a time limit; a page that
+    times out is retried once at lower resolution, then given up on (empty text) rather than stalling the run."""
+    env = {**os.environ, "OMP_THREAD_LIMIT": "1"}
+    for dpi, limit in ((200, 120), (140, 120)):
+        with tempfile.TemporaryDirectory() as tmp:
+            stem = Path(tmp) / "p"
+            subprocess.run(["pdftoppm", "-r", str(dpi), "-f", str(page_no), "-l", str(page_no),
+                            "-png", str(pdf_path), str(stem)], check=True, capture_output=True)
+            png = next(Path(tmp).glob("p*.png"))
+            try:
+                out = subprocess.run(["tesseract", str(png), "-", "--psm", "6"], check=True,
+                                     capture_output=True, text=True, timeout=limit, env=env)
+                return out.stdout
+            except subprocess.TimeoutExpired:
+                continue
+    return ""
 
 
 def page_count(pdf_path: Path) -> int:
