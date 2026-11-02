@@ -15,8 +15,6 @@ import sys
 import tempfile
 from pathlib import Path
 
-import fitz  # PyMuPDF
-
 MIN_READABLE = 0.60  # share of tokens that look like words, below which a page is OCR'd
 MIN_WORDS = 15       # fewer words than this on a page also means "no usable text layer"
 WORD = re.compile(r"^[A-Za-z][a-z]{2,}$|^[A-Z]{3,}$|^[\d,.$%/-]+$")
@@ -42,21 +40,30 @@ def ocr_page(pdf_path: Path, page_no: int) -> str:
         return out.stdout
 
 
+def page_count(pdf_path: Path) -> int:
+    out = subprocess.run(["pdfinfo", str(pdf_path)], check=True, capture_output=True, text=True).stdout
+    return int(re.search(r"^Pages:\s+(\d+)", out, re.M).group(1))
+
+
+def text_layer(pdf_path: Path, page_no: int) -> str:
+    return subprocess.run(["pdftotext", "-f", str(page_no), "-l", str(page_no), "-layout",
+                           str(pdf_path), "-"], check=True, capture_output=True, text=True).stdout
+
+
 def read_complaint(pdf_path: str | Path) -> dict:
     pdf_path = Path(pdf_path)
-    if not (shutil.which("pdftoppm") and shutil.which("tesseract")):
-        raise RuntimeError("pdftoppm and tesseract are required")
+    if not all(shutil.which(t) for t in ("pdftoppm", "pdftotext", "pdfinfo", "tesseract")):
+        raise RuntimeError("poppler (pdftoppm, pdftotext, pdfinfo) and tesseract are required")
     pages = []
-    with fitz.open(pdf_path) as doc:
-        for i, page in enumerate(doc, start=1):
-            text = page.get_text()
+    for i in range(1, page_count(pdf_path) + 1):
+        text = text_layer(pdf_path, i)
+        ratio, n = readable_ratio(text)
+        method = "text"
+        if ratio < MIN_READABLE or n < MIN_WORDS:
+            text, method = ocr_page(pdf_path, i), "ocr"
             ratio, n = readable_ratio(text)
-            method = "text"
-            if ratio < MIN_READABLE or n < MIN_WORDS:
-                text, method = ocr_page(pdf_path, i), "ocr"
-                ratio, n = readable_ratio(text)
-            pages.append({"page": i, "method": method, "words": n,
-                          "readable": round(ratio, 2), "text": text})
+        pages.append({"page": i, "method": method, "words": n,
+                      "readable": round(ratio, 2), "text": text})
     return {"file": pdf_path.name, "page_count": len(pages),
             "ocr_pages": sum(p["method"] == "ocr" for p in pages), "pages": pages}
 
