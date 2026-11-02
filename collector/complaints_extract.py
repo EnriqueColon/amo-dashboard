@@ -36,7 +36,9 @@ timeshare-lien and similar suits are false. Give a one-sentence reason.
 2. default_date = the earliest payment the complaint says was missed and not cured (for a balloon loan with \
 no missed installment, the maturity date). NEVER a date of death, a notice date, an acceleration date or the \
 filing date. List every other default date the complaint mentions in other_default_dates.
-3. unpaid_principal = principal only (exclude interest, late charges, fees, costs, escrow). If the complaint \
+3. unpaid_principal = principal only (exclude interest, late charges, fees, costs, escrow). A figure stated in \
+the counts ("Defendants owe Plaintiff $X, representing principal due on the Note") IS the unpaid principal \
+even if it is not repeated elsewhere. If the complaint \
 demands different principal amounts from different defendants (borrower vs guarantor), list each in \
 principal_by_defendant. If it states deferred principal separately, give it in deferred_principal.
 4. right_to_reinstate_clause = true only if the MORTGAGE exhibit itself contains the uniform clause titled \
@@ -160,6 +162,7 @@ def normalize_address(a):
     s = re.sub(r"\b(APT|UNIT|STE|SUITE|NO)\b\.?\s*#?", "#", s)
     s = re.sub(r"#\s+", "#", s)
     toks = [_DIR.get(t, _SUFFIX.get(t, t)) for t in s.split()]
+    toks = ["FL" if t == "FLORIDA" else t for t in toks]
     toks = [re.sub(r"^(\d+)(ST|ND|RD|TH)$", r"\1", t) if re.match(r"^\d+(ST|ND|RD|TH)$", t) else t for t in toks]
     dirs = [t for t in toks if t in _DIR.values()]
     rest = [t for t in toks if t not in _DIR.values()]
@@ -203,9 +206,34 @@ def postprocess(raw: dict) -> dict:
                                              and note_key != p["address_key"])
         props.append(p)
     res["properties"] = props
-    # Criteria are computed, never stored as a label: any note >= threshold AND clause absent.
-    res["computed_meets_criteria"] = bool(res.get("is_mortgage_foreclosure") and any(
-        n["meets_amount"] and n.get("right_to_reinstate_clause") is False for n in notes))
+    # Criteria are computed, never stored as a label. True / False / None (None = cannot tell, needs review).
+    flags = []
+    if raw.get("is_mortgage_foreclosure") is False:
+        verdict = False
+    else:
+        any_yes = any(n["meets_amount"] and n.get("right_to_reinstate_clause") is False for n in notes)
+        unknown = any(n["meets_amount"] is None or (n["meets_amount"] and n.get("right_to_reinstate_clause") is None)
+                      for n in notes) or not notes
+        verdict = True if any_yes else (None if unknown else False)
+        if not notes:
+            flags.append("no_note_extracted")
+        for n in notes:
+            if n["meets_amount"] is None:
+                flags.append("principal_missing")
+            if n["meets_amount"] and n.get("right_to_reinstate_clause") is None:
+                flags.append("reinstatement_unreadable")
+        if len(notes) > 1:
+            flags.append("multiple_notes")
+        if not props or all(not p["property_address"] for p in props):
+            flags.append("address_missing")
+        if any(p["address_conflict"] for p in props):
+            flags.append("address_body_conflict")
+        if any(p["exhibit_addresses_differ"] for p in props):
+            flags.append("address_note_vs_mortgage_differ")  # usually a scan misread: check the page
+        if len(props) > 1:
+            flags.append("multiple_properties")
+    res["computed_meets_criteria"] = verdict
+    res["review_flags"] = sorted(set(flags))
     return res
 
 
@@ -246,7 +274,7 @@ def process_pending(conn, model: str, api_key: str, limit: int | None = None) ->
             u = res.get("_usage", {})
             conn.execute("INSERT OR REPLACE INTO foreclosure_extractions VALUES (?,?,?,?,?,?,?)",
                          (r["case_id"], model, datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
-                          int(res["computed_meets_criteria"]), u.get("prompt_tokens"),
+                          None if res["computed_meets_criteria"] is None else int(res["computed_meets_criteria"]), u.get("prompt_tokens"),
                           u.get("completion_tokens"), json.dumps(res)))
             conn.commit()
             done += 1

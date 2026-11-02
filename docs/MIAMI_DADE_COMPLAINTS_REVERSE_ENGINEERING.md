@@ -364,3 +364,22 @@ Matched the PDF: loan amount, loan date, note rate, unpaid principal, address, g
 2. **Extraction model.** `gpt-5-nano` is the current default for assignments; complaints are long and subtle (§16 errors). Proposal: test `gpt-5-nano` against a stronger OpenAI model on the 33 reviewed filings and pick on measured accuracy and cost.
 3. **PropertyRadar** key and budget (Stage 6 only; can wait).
 4. **Where it lives:** new tables in the existing SQLite DB and a new page in this dashboard (proposed), versus a separate database.
+
+## 19. Stage 5 — extraction checked against the sheet and the hand review (2 Nov 2026)
+Run: all 38 complaints I had downloaded (weeks of 1–8 Sep 2025 and 2–8 Mar 2026) read with `complaints_reader.py` and extracted with `gpt-5.5` (price per source: $5 / $30 per million input / output tokens, not checked against OpenAI's own page; about $0.27 per average complaint). 37 matched a sheet row by plaintiff/defendant text (a few apparent differences were wrong pairings, not extraction errors: Selene 017282 and the two U.S. Bank March cases).
+
+**Result: 11 qualify, 26 do not, 1 reclassified after a fix; 0 left undecided.** Qualifying (principal ≥ $500,000, inclusive, and no reinstatement clause): Tryon, UMB, IBI-EJ Falcon, FC Miami Ave Land ($8.24M), Financial Business Investments ($670,000), Hancock Whitney (3 notes), Interamerican ($862,474.35), Atomic Loans, Wilmington (2026-004509), Pacific Life, Peccho.
+
+**Where the new extraction disagrees with the sheet — and who is right (checked in the PDF text):**
+- Reinstatement: UMB and Millecento have no clause in any page (sheet says Yes); Bradesco's mortgage rider says "Borrower's Right to Reinstate — DELETED. Section 19 is deleted" (sheet says Yes). The new result is No for all three.
+- Not mortgage foreclosures: Keller v. Tech Tower (construction lien; sheet scored "Meets") and Solara (timeshare lien) are rejected.
+- Missed by the sheet and qualifying: FC Miami Ave Land, Financial Business Investments.
+- Hancock Whitney: the sheet's address is the mortgagor's *mailing* address ("having a mailing address of …"); the complaint never labels a property address, only a legal description. New result: address NULL with reason.
+- Gitsit: default date is no longer the date of death (sheet had 2017-08-30).
+- Black River: 3 properties kept (Miami, Daytona Beach, Plantation Key) with county each.
+
+**Weak point found: scan misreads in addresses.** Exhibit pages are OCR'd, and the Mortgage page misread the address in 9 of 38 cases ("Floxida City", "Opa Locke", "SW 236 ST / 34030" for SW 296 ST / 33030, "00 16th Street" for 800, "ami Beach", "55 NW 477TH" for 47th). The Note exhibit, OCR'd separately, usually read it correctly. Fix: when the Mortgage and Note addresses differ after normalisation, the case is flagged `address_note_vs_mortgage_differ` (9 cases) for a look at the page; conflicts with the body are flagged `address_body_conflict` (6). Every misread I found is flagged. Not yet done: automatic repair of flagged addresses.
+
+**Fixed after this check:** (1) Interamerican's principal sits only in the counts ("owe Plaintiff $862,474.35, representing principal") and the model returned null, which would have scored a $900,000 loan "does not meet"; the prompt now says a figure stated in the counts is the unpaid principal, and re-run it reads 862,474.35. (2) The criteria result is now three-valued (yes / no / cannot tell) with `review_flags` (no_note_extracted, principal_missing, reinstatement_unreadable, multiple_notes, multiple_properties, address_missing, address_body_conflict, address_note_vs_mortgage_differ), so a missing figure can never silently become "does not meet". (3) "Florida" and "FL" now compare equal.
+
+**Limits of this check:** 38 filings, two weeks, mostly the same few law firms; default dates and unpaid principal were compared with the sheet and my earlier reading, not re-read by eye for every case; no case with a *different* kind of problem (e.g. loan modification chains, multiple lenders) beyond what these weeks contained.
