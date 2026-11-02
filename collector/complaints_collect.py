@@ -56,6 +56,27 @@ CREATE TABLE IF NOT EXISTS foreclosure_cases (
     last_attempt    TEXT,
     note            TEXT
 );
+-- One row per run of this script: what it searched, found, fetched, extracted and spent. The Collection Log
+-- tab reads it to show freshness and to flag a run that failed or did not happen.
+CREATE TABLE IF NOT EXISTS foreclosure_runs (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at       TEXT NOT NULL,
+    finished_at      TEXT,
+    window_from      TEXT,
+    window_to        TEXT,
+    cases_found      INTEGER,        -- every case the Clerk returned for the window (both types)
+    new_cases        INTEGER,
+    downloaded       INTEGER,
+    not_public       INTEGER,
+    fetch_errors     INTEGER,
+    extracted        INTEGER,
+    extract_failed   INTEGER,
+    extract_waiting  INTEGER,
+    stopped_for_budget INTEGER,
+    spent_today_usd  REAL,
+    status           TEXT,           -- ok | error
+    error            TEXT
+);
 CREATE INDEX IF NOT EXISTS idx_fc_status ON foreclosure_cases(complaint_status);
 CREATE INDEX IF NOT EXISTS idx_fc_filing ON foreclosure_cases(filing_date);
 """
@@ -139,8 +160,8 @@ class Clerk:
 # ---------------------------------------------------------------- Stage 1
 
 def search_range(conn, clerk: Clerk, d_from: date, d_to: date) -> int:
-    """Store every case filed d_from..d_to for both types; return how many were new."""
-    new = 0
+    """Store every case filed d_from..d_to for both types; return (cases returned by the Clerk, how many were new)."""
+    new = found = 0
     d = d_from
     while d < d_to:
         w_to = min(d + timedelta(days=WINDOW_DAYS), d_to)
@@ -148,6 +169,7 @@ def search_range(conn, clerk: Clerk, d_from: date, d_to: date) -> int:
             rows = clerk.search(d, w_to, code)
             if len(rows) >= CAP_WARNING:
                 print(f"WARNING {name} {d}..{w_to}: {len(rows)} results, may be truncated")
+            found += len(rows)
             for c in rows:
                 cur = conn.execute(
                     """INSERT OR IGNORE INTO foreclosure_cases
@@ -162,7 +184,7 @@ def search_range(conn, clerk: Clerk, d_from: date, d_to: date) -> int:
             print(f"  {name} {d}..{w_to}: {len(rows)} cases")
         conn.commit()
         d = w_to
-    return new
+    return found, new
 
 
 # ---------------------------------------------------------------- Stage 2
@@ -243,24 +265,44 @@ def main():
                     help="stop extracting for the day once estimated spend reaches this many USD")
     a = ap.parse_args()
     conn = connect()
-    clerk = Clerk()
-    if not a.fetch_only:
-        if a.days:
-            d_to, d_from = date.today() + timedelta(days=1), date.today() - timedelta(days=a.days)
-        elif a.d_from and a.d_to:
-            d_from, d_to = date.fromisoformat(a.d_from), date.fromisoformat(a.d_to)
-        else:
-            sys.exit("give --days N or --from/--to (or --fetch-only)")
-        print(f"searching {d_from}..{d_to}")
-        print(f"new cases: {search_range(conn, clerk, d_from, d_to)}")
-    if not a.search_only:
-        print("fetch results:", fetch_pending(conn, clerk, a.limit))
-    if a.extract:
-        import complaints_extract
-        key = os.environ.get("OPENAI_API_KEY")
-        if not key:
-            sys.exit("OPENAI_API_KEY is not set")
-        print("extract results:", complaints_extract.process_pending(conn, a.model, key, a.limit, a.budget))
+    run = {"started_at": now(), "window_from": None, "window_to": None, "cases_found": None, "new_cases": None,
+           "downloaded": None, "not_public": None, "fetch_errors": None, "extracted": None, "extract_failed": None,
+           "extract_waiting": None, "stopped_for_budget": None, "spent_today_usd": None, "status": "ok", "error": None}
+    try:
+        clerk = Clerk()
+        if not a.fetch_only:
+            if a.days:
+                d_to, d_from = date.today() + timedelta(days=1), date.today() - timedelta(days=a.days)
+            elif a.d_from and a.d_to:
+                d_from, d_to = date.fromisoformat(a.d_from), date.fromisoformat(a.d_to)
+            else:
+                sys.exit("give --days N or --from/--to (or --fetch-only)")
+            print(f"searching {d_from}..{d_to}")
+            found, new = search_range(conn, clerk, d_from, d_to)
+            run.update(window_from=str(d_from), window_to=str(d_to), cases_found=found, new_cases=new)
+            print(f"new cases: {new}")
+        if not a.search_only:
+            counts = fetch_pending(conn, clerk, a.limit)
+            print("fetch results:", counts)
+            run.update(downloaded=counts.get("downloaded", 0), not_public=counts.get("complaint_not_public", 0),
+                       fetch_errors=counts.get("error", 0))
+        if a.extract:
+            import complaints_extract
+            key = os.environ.get("OPENAI_API_KEY")
+            if not key:
+                raise RuntimeError("OPENAI_API_KEY is not set")
+            ex = complaints_extract.process_pending(conn, a.model, key, a.limit, a.budget)
+            print("extract results:", ex)
+            run.update(extracted=ex["extracted"], extract_failed=ex["failed"], extract_waiting=ex["waiting"],
+                       stopped_for_budget=int(ex["stopped_for_budget"]), spent_today_usd=ex["spent_today_usd"])
+    except BaseException as e:  # log the failure, then let it surface so cron mail / the wrapper's exit code see it
+        run.update(status="error", error=f"{type(e).__name__}: {e}"[:300])
+        raise
+    finally:
+        run["finished_at"] = now()
+        cols = ",".join(run)
+        conn.execute(f"INSERT INTO foreclosure_runs ({cols}) VALUES ({','.join('?' * len(run))})", list(run.values()))
+        conn.commit()
     for r in conn.execute("SELECT complaint_status, COUNT(*) n FROM foreclosure_cases GROUP BY 1"):
         print(f"  {r['complaint_status']}: {r['n']}")
 

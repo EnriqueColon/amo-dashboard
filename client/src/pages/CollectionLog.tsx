@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import { Skeleton } from '@/components/ui/skeleton';
 import { DefTerm } from '@/components/DefTerm';
+import ComplaintsQc from '@/components/ComplaintsQc';
 import { documentUrl } from '@/lib/doc-url';
 import {
   CheckCircle, AlertTriangle, XCircle, MinusCircle, ClipboardList, ShieldCheck, ShieldAlert,
@@ -314,6 +315,8 @@ export default function CollectionLog() {
       </div>
 
       <CompletenessProof />
+
+      <ComplaintsQc />
 
       {/* Summary pills */}
       {stats && (

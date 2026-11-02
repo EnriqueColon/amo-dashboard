@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 MIN_READABLE = 0.60  # share of tokens that look like words, below which a page is OCR'd
@@ -59,20 +60,27 @@ def text_layer(pdf_path: Path, page_no: int) -> str:
                            str(pdf_path), "-"], check=True, capture_output=True, text=True).stdout
 
 
+OCR_WORKERS = int(os.environ.get("COMPLAINTS_OCR_WORKERS", "3"))
+
+
 def read_complaint(pdf_path: str | Path) -> dict:
     pdf_path = Path(pdf_path)
     if not all(shutil.which(t) for t in ("pdftoppm", "pdftotext", "pdfinfo", "tesseract")):
         raise RuntimeError("poppler (pdftoppm, pdftotext, pdfinfo) and tesseract are required")
+    n_pages = page_count(pdf_path)
+    layers = {i: text_layer(pdf_path, i) for i in range(1, n_pages + 1)}
+    need_ocr = [i for i, t in layers.items()
+                if readable_ratio(t)[0] < MIN_READABLE or readable_ratio(t)[1] < MIN_WORDS]
+    ocr = {}
+    if need_ocr:  # pages are independent, so they are read in parallel (one tesseract thread each)
+        with ThreadPoolExecutor(max_workers=max(1, OCR_WORKERS)) as pool:
+            for i, txt in zip(need_ocr, pool.map(lambda n: ocr_page(pdf_path, n), need_ocr)):
+                ocr[i] = txt
     pages = []
-    for i in range(1, page_count(pdf_path) + 1):
-        text = text_layer(pdf_path, i)
+    for i in range(1, n_pages + 1):
+        text, method = (ocr[i], "ocr") if i in ocr else (layers[i], "text")
         ratio, n = readable_ratio(text)
-        method = "text"
-        if ratio < MIN_READABLE or n < MIN_WORDS:
-            text, method = ocr_page(pdf_path, i), "ocr"
-            ratio, n = readable_ratio(text)
-        pages.append({"page": i, "method": method, "words": n,
-                      "readable": round(ratio, 2), "text": text})
+        pages.append({"page": i, "method": method, "words": n, "readable": round(ratio, 2), "text": text})
     return {"file": pdf_path.name, "page_count": len(pages),
             "ocr_pages": sum(p["method"] == "ocr" for p in pages), "pages": pages}
 
