@@ -2,8 +2,9 @@
 # Miami-Dade foreclosure complaints (RPMF-Commercial / RPMF-Non-Homestead): discover -> download -> read -> extract.
 #
 # Cron entry (crontab -e):
-#   10 15 * * * /opt/amo-dashboard/collector/run_complaints_daily.sh >> /opt/amo-dashboard/collector/complaints_daily.log 2>&1
+#   30 11 * * * /opt/amo-dashboard/collector/run_complaints_daily.sh >> /opt/amo-dashboard/collector/complaints_daily.log 2>&1
 #
+# Runs every morning (11:30 UTC = 07:30 EDT / 06:30 EST), before the Miami-Dade ASG pull at 12:30 UTC.
 # Searches the last 10 days every run (a late-listed case is picked up by the overlap; cases already held are
 # skipped), downloads each new complaint, retries "complaint not public" cases weekly for 8 weeks, then extracts
 # with gpt-5.5 and repairs flagged addresses. Spending is capped per UTC day (COMPLAINTS_DAILY_BUDGET_USD,
