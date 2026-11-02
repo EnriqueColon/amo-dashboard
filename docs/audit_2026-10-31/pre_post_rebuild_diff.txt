@@ -1,0 +1,52 @@
+pre clean rows 88273 post 88355
+rows whose txn_type changed overnight: 18230 of 88355
+   10206  $ 26.33B  MARKET_TRANSFER -> ORIGINATION
+    3324  $ 17.05B  MARKET_TRANSFER -> INSTITUTIONAL_OUT
+    2268  $ 20.31B  MARKET_TRANSFER -> PRIVATE
+     940  $  0.40B  PRIVATE -> MERS_RELEASE
+     733  $  4.51B  ORIGINATION -> PRIVATE
+     705  $  1.78B  INSTITUTIONAL_OUT -> PRIVATE
+      26  $  0.00B  MERS_RELEASE -> ORIGINATION
+      23  $  0.02B  MARKET_TRANSFER -> SELF_ASSIGN
+       3  $  0.00B  PRIVATE -> INSTITUTIONAL_OUT
+       2  $  0.00B  MERS_RELEASE -> PRIVATE
+entities whose type changed overnight: 7089 of 12992
+    2274  PRIVATE_CREDIT -> OTHER
+    2195  TRUST -> OTHER
+    1386  BANK -> OTHER
+    1111  SERVICER -> OTHER
+      92  GSE -> OTHER
+      21  MERS -> OTHER
+       6  PRIVATE_CREDIT -> TRUST
+       2  BANK -> SERVICER
+       1  BANK -> TRUST
+       1  TRUST -> BANK
+highest-volume re-typed entities:
+     153 AMERICAN ADVISORS GROUP                       SERVICER -> OTHER
+     139 IRONFUND LOAN SELLER I                        SERVICER -> OTHER
+     118 ANCHOR ASSETS XVIII                           PRIVATE_CREDIT -> OTHER
+     107 HERA HOLDINGS                                 PRIVATE_CREDIT -> OTHER
+     105 HOMEOWNERS FINANCIAL GROUP USA                BANK -> OTHER
+     103 CHASE HOME LENDING MTG TRUST                  TRUST -> OTHER
+     100 RFLF 4                                        PRIVATE_CREDIT -> OTHER
+     100 NATIONAL LOAN FUNDING                         SERVICER -> OTHER
+      95 FRC VTX ASSETS                                PRIVATE_CREDIT -> OTHER
+      89 CV3 BRAVO TRUST                               TRUST -> OTHER
+      80 UPSTART MORTGAGE                              SERVICER -> OTHER
+      69 GERSHMAN INVESTMENT                           PRIVATE_CREDIT -> OTHER
+      68 CORNERSTONE FIRST MORTGAGE                    SERVICER -> OTHER
+      67 HOMETAP HOMEOWNERSHIP SOLUTIONS               SERVICER -> OTHER
+      64 COASTAL EQUITY GROUP                          PRIVATE_CREDIT -> OTHER
+      63 WASHINGTON MUTUAL BANK FA                     BANK -> OTHER
+      61 ATLANTIS HOLDINGS AM                          PRIVATE_CREDIT -> OTHER
+      60 NO LIMIT MORTGAGE SOLUTIONS                   SERVICER -> OTHER
+      60 COMMERCIAL LENDER                             BANK -> OTHER
+      60 BC SHASTA                                     PRIVATE_CREDIT -> OTHER
+      59 PINEYWOODS CAPITAL                            PRIVATE_CREDIT -> OTHER
+      59 212 LOANS                                     SERVICER -> OTHER
+      58 NAIKAN I SPV                                  TRUST -> OTHER
+      58 INVESTOR MORTGAGE FINANCE                     SERVICER -> OTHER
+      57 TY MORTGAGE                                   SERVICER -> OTHER
+classification sources pre: {None: 1103, 'behavioral': 966, 'default': 16045, 'fdic_match': 266, 'llm': 10785, 'manual_override': 176, 'regex_rule': 586, 'suffix_banking': 162, 'suffix_gse': 5, 'suffix_trust_name': 621}
+classification sources post: {None: 1103, 'behavioral': 979, 'default': 26784, 'fdic_match': 266, 'llm': 59, 'manual_override': 176, 'regex_rule': 572, 'suffix_banking': 162, 'suffix_gse': 5, 'suffix_trust_name': 621}
+DONE

@@ -4,6 +4,18 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-10-31 — DEEP ACCURACY AUDIT (read-only; nothing in production changed). Full report: `docs/audit_2026-10-31/ACCURACY_AUDIT.md`
+
+Trigger: a watchlist email sample showed a rents instrument counted as a loan transfer. Harness `collector/audit/accuracy_audit.py` (read-only, 10 sections) + `fetch_sample_texts.py`; 194 documents hand-read against stored verdicts (`hand_read_verdicts.csv`; sample is enriched for suspect strata, not a population rate).
+
+- **F1 CRITICAL — nightly rebuild erases AI entity types.** 03:15 backup vs live after the 08:30 rebuild: `llm`-typed entities 10,785 → 59; 7,089 of 12,992 entities re-typed; 18,230 of 88,355 clean rows (21%) change txn_type ($26.3B MARKET_TRANSFER→ORIGINATION); Private Credit rows 12,181 → 6,838; Miami-Dade ORIGINATION 1,926 → 7,647. Friday job restores, Saturday-onward nightly wipes. Cause: `normalize.py` upserts `entity_classifications` with the rule waterfall over `llm` rows. Nightly job exists since 21 Jul (earlier history not checked).
+- **F2 CRITICAL — outright sales filed as COLLATERAL never reach the dashboard:** 1,577 filings (MD 1,275, Broward 257, Hillsborough 45; $33.3B stated) have a mortgage/note/security-instrument title; hand-read: 36 of 48 COLLATERAL docs were plain transfers (all 10 Fannie/Freddie "Assignment of Security Instrument"), 9 genuine pledges. 749 MD have no correction evidence.
+- **F3 HIGH — rents-only instruments counted as loan transfers:** 438 filings (432 in clean; 217 borrower-assignor "ORIGINATION", ~$3.3B). `reclassify_rents_by_title` only fires on a COLLATERAL verdict. Hand-read: 26 of 98 LOAN_TRANSFER docs in sample were rents.
+- **F4 HIGH — direction corrected only in Miami-Dade:** Hillsborough 1,334 of 32,262 (4.1%) and Broward 10 name parties opposite to the index with no correction; hand-check of 4 Hillsborough found 1 wrong (needs n≈40). MD review queue: 1,528 flagged, 0 reviewed.
+- Parties largely right (assignor 181/194, assignee 184/194, direction 190/193); amounts 113/194 verified, 18 missing a stated principal (11 on rents docs), 2 wrong; portfolio/CMBS amounts inflate totals (45 MD + 36 Hillsborough rows > $1B). Goldman Sachs bank+mortgage co. canonicalise to one name ($51.7B SELF_ASSIGN). $544,185 repeat is genuine (HUD). Addresses: 0.3% corporate/out-of-state.
+- **Fix order proposed (none applied):** 1 preserve `llm`/`manual_override` types across rebuilds; 2+3 category rules (COLLATERAL→LOAN_TRANSFER by title/text, LOAN_TRANSFER→RENTS_LEASES by title) with one backfill + one rebuild and the owner's approval of the new totals; 4 Hillsborough direction after a 40-doc read; 5–7 taxonomy, portfolio-amount labelling, weekly accuracy run.
+- Droplet: audit files in `/tmp/audit*` (ephemeral), `/opt/amo-dashboard/collector/audit/` holds the two scripts (untracked there until pulled). A 280 MB `pre.db` was extracted to `/tmp/audit/pre.db` for the diff.
+
 ## 2026-10-30 — News fixed (lost env vars); WATCHLIST STREAM 1 BUILT (not deployed)
 
 - **News "Real Deal refused every request":** not the relay. The PM2 process (started 09:16 UTC) had lost `TRD_RELAY_URL`, `TRD_RELAY_KEY` and `LEGISCAN_API_KEY` (all present in `.env`), so it hit therealdeal.com directly → CloudFront empty 202 → `res.json()` on empty body. Fixed on the owner's "Yes, restart": `pm2 restart --update-env` exporting only those three + `pm2 save`; verified 10 picks, both queries 200. Cause of the loss at 09:16 not confirmed. Legal Landscape also needs the LegiScan key (cache entry present, page not opened).
