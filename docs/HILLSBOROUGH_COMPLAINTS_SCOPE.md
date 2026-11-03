@@ -138,3 +138,28 @@ Original recommendation: **ask the Clerk (B1) and, while waiting, build Stage A 
 5. Do **not** schedule anything or push to production until the owner has chosen the document route.
 
 **Starter prompt for the new chat:** "Read `docs/HILLSBOROUGH_COMPLAINTS_SCOPE.md` and `SESSION_LOG.md`. Build Stage A of Hillsborough foreclosure-complaint discovery locally (daily filings and monthly bulk files, county column, band filter), test it on the September 2026 files, and draft the request to the Clerk for the document feed. No production changes until I choose the document route."
+
+---
+
+## 10. Trellis coverage test — other Florida counties (3 Nov 2026)
+
+Tested through the Trellis connector in the Claude session (interactive use, not an unattended API). One recent mortgage foreclosure per county, complaint text requested.
+
+| County | Foreclosure-related cases since 1 Oct (Miami-Dade since 26 Oct) | Newest case in Trellis | Complaint returned? | Notes |
+|---|---|---|---|---|
+| Hillsborough | 245 | filed 2 Nov, in Trellis same day | **Yes**, 108 pages, unpaid principal in the text ($268,882.17) | Real clerk case numbers |
+| Palm Beach | 365 | 2 Nov | **Yes**, 69 pages (First Internet Bank of Indiana) | Case id shown as `TCN-1075806`, not the clerk's number; some text garbled |
+| Duval | 335 | 2 Nov | **Yes**, 66 pages (Athene Annuity, commercial, guaranty and leases) | `TCN-` id; some text garbled |
+| Orange | 248 | 2 Nov | **Yes**, 36 pages (Lakeview Loan Servicing); principal figure legible ($266,263.28) | Real case number (`2026-CA-011662-O`); some text garbled |
+| Monroe | 20 (includes liens and code enforcement) | 2 Nov | **Yes**, 25 pages (First National Bank of America v. Trinity Without Borders) | `TCN-` id; heavily garbled opening paragraphs |
+| Miami-Dade | 162 | 2 Nov | not tested | Includes our own `2026-022267-CA-01` (the MEG construction case), so Trellis agrees with the Clerk's case numbers there |
+
+Trellis lists 58 Florida counties with documents (Alachua through Washington, including Broward, Collier, Lee, Pinellas, Polk, Sarasota, Seminole, Volusia and the rest). Only the five counties above were tested; the "has documents" flag does not prove complaints are held for every county.
+
+**What this means**
+- A single licensed source could cover Hillsborough, Palm Beach, Duval, Orange and Monroe, and probably more. It would also work as a **cross-check for Miami-Dade**.
+- Documents are labelled "unofficial" copies received from the courts' e-filing feeds. Text comes from OCR; in several complaints the first paragraphs are garbled, though figures further down (principal) were legible. We must not trust their text blindly: the safe design is to download the **PDF** and read it with our own reader (text, OCR, gpt-5.5, address vote). PDF download needs a Trellis subscription; unattended use needs their Enterprise API.
+- Palm Beach: our own scope doc (§1–§8 of `PALM_BEACH_EXPANSION_SCOPE.md`) prices the county FTP feed at $3,600 a year and flags the portal captcha. Trellis is an alternative only if its price and terms beat that.
+- Unknown: price, API terms, whether automated storage and re-reading is allowed, completeness against each Clerk's own counts, how many of each county's cases are commercial/non-homestead mortgage foreclosures (the case-type labels differ by county).
+
+**Next:** get Trellis's API and price terms for these counties, then run the 5 to 10 case comparison in §9 per county, starting with Hillsborough.
