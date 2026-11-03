@@ -819,14 +819,14 @@ function RollForwardHeader() {
   return (
     <TableHeader>
       <TableRow>
-        <TableHead className="h-8 text-xs">Quarter</TableHead>
-        <TableHead className="h-8 text-xs text-right">Prior nonaccrual</TableHead>
-        <TableHead className="h-8 text-xs text-right">New (proxy)</TableHead>
-        <TableHead className="h-8 text-xs text-right">Charge-offs</TableHead>
-        <TableHead className="h-8 text-xs text-right">To OREO (proxy)</TableHead>
-        <TableHead className="h-8 text-xs text-right">Unexplained exit</TableHead>
-        <TableHead className="h-8 text-xs text-right">% of CRE</TableHead>
-        <TableHead className="h-8 text-xs text-right">Current nonaccrual</TableHead>
+        <TableHead className="h-8 text-xs"><DefTerm term="bank-card:Quarter">Quarter</DefTerm></TableHead>
+        <TableHead className="h-8 text-xs text-right"><DefTerm term="bank-card:Prior nonaccrual">Prior nonaccrual</DefTerm></TableHead>
+        <TableHead className="h-8 text-xs text-right"><DefTerm term="bank-card:New (proxy)">New (proxy)</DefTerm></TableHead>
+        <TableHead className="h-8 text-xs text-right"><DefTerm term="bank-card:Charge-offs">Charge-offs</DefTerm></TableHead>
+        <TableHead className="h-8 text-xs text-right"><DefTerm term="bank-card:To OREO (proxy)">To OREO (proxy)</DefTerm></TableHead>
+        <TableHead className="h-8 text-xs text-right"><DefTerm term="bank-card:Unexplained exit">Unexplained exit</DefTerm></TableHead>
+        <TableHead className="h-8 text-xs text-right"><DefTerm term="bank-card:% of CRE">% of CRE</DefTerm></TableHead>
+        <TableHead className="h-8 text-xs text-right"><DefTerm term="bank-card:Current nonaccrual">Current nonaccrual</DefTerm></TableHead>
       </TableRow>
     </TableHeader>
   )
@@ -897,17 +897,17 @@ export function InstitutionDetailSections({ cert, hideTrendCharts = false }: { c
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="h-8 text-xs">Quarter</TableHead>
-                    <TableHead className="h-8 text-xs text-right">NPL</TableHead>
-                    <TableHead className="h-8 text-xs text-right">Noncurrent</TableHead>
-                    <TableHead className="h-8 text-xs text-right">Leverage</TableHead>
-                    {!trend.leverageOnly && <TableHead className="h-8 text-xs text-right">CET1</TableHead>}
-                    <TableHead className="h-8 text-xs text-right">CRE / Capital</TableHead>
-                    <TableHead className="h-8 text-xs text-right">Const / Capital</TableHead>
-                    <TableHead className="h-8 text-xs text-right">Reserve</TableHead>
-                    <TableHead className="h-8 text-xs text-right">ROA</TableHead>
-                    <TableHead className="h-8 text-xs text-right">NIM</TableHead>
-                    <TableHead className="h-8 text-xs">Capital</TableHead>
+                    <TableHead className="h-8 text-xs"><DefTerm term="bank-card:Quarter">Quarter</DefTerm></TableHead>
+                    <TableHead className="h-8 text-xs text-right"><DefTerm term="NPL Ratio">NPL</DefTerm></TableHead>
+                    <TableHead className="h-8 text-xs text-right"><DefTerm term="Noncurrent / Loans">Noncurrent</DefTerm></TableHead>
+                    <TableHead className="h-8 text-xs text-right"><DefTerm term="Leverage">Leverage</DefTerm></TableHead>
+                    {!trend.leverageOnly && <TableHead className="h-8 text-xs text-right"><DefTerm term="CET1">CET1</DefTerm></TableHead>}
+                    <TableHead className="h-8 text-xs text-right"><DefTerm term="CRE / (T1+T2)">CRE / Capital</DefTerm></TableHead>
+                    <TableHead className="h-8 text-xs text-right"><DefTerm term="Const / (T1+T2)">Const / Capital</DefTerm></TableHead>
+                    <TableHead className="h-8 text-xs text-right"><DefTerm term="Reserve Coverage">Reserve</DefTerm></TableHead>
+                    <TableHead className="h-8 text-xs text-right"><DefTerm term="ROA">ROA</DefTerm></TableHead>
+                    <TableHead className="h-8 text-xs text-right"><DefTerm term="NIM">NIM</DefTerm></TableHead>
+                    <TableHead className="h-8 text-xs"><DefTerm term="Capital Used">Capital</DefTerm></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>

@@ -2,6 +2,8 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { CartesianGrid, Legend, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { DefTerm } from '@/components/DefTerm'
+import { Tooltip as HoverTip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { InstitutionDetailSections } from '@/components/InstitutionProfileDrawer'
 import {
   loadBsBank, formatQuarter, formatThousands, formatPct, formatScore, stressTone, TIER_LABEL, TIER_TONE,
@@ -38,7 +40,7 @@ function PanelChart({ panel, points }: { panel: Panel; points: Array<Record<stri
   const fmt = (v: unknown) => (typeof v === 'number' ? (panel.unit === 'score' ? v.toFixed(1) : `${v.toFixed(decimals)}%`) : '—')
   return (
     <div className="rounded-md border border-slate-200/80 p-3">
-      <p className="text-xs font-semibold text-slate-700">{panel.title}</p>
+      <p className="text-xs font-semibold text-slate-700"><DefTerm term={`bank-card:${panel.title.split(" (")[0]}`}>{panel.title}</DefTerm></p>
       <p className="text-[11px] text-slate-500 leading-snug mb-1">{panel.hint}</p>
       <ResponsiveContainer width="100%" height={170} debounce={0}>
         <LineChart data={points} margin={{ top: 10, right: panel.references ? 34 : 12, bottom: 0, left: -12 }}>
@@ -72,6 +74,19 @@ function num(v: unknown): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? v : null
 }
 
+// Hover text for labels whose definition comes from the data (rule tests, metric formulas), not the glossary.
+function Hint({ text, children }: { text?: string | null; children: ReactNode }) {
+  if (!text) return <>{children}</>
+  return (
+    <HoverTip>
+      <TooltipTrigger asChild><span className="cursor-help border-b border-dashed border-muted-foreground/50">{children}</span></TooltipTrigger>
+      <TooltipContent side="top" className="max-w-sm text-left font-normal" sideOffset={6}>{text}</TooltipContent>
+    </HoverTip>
+  )
+}
+const D = ({ k, children }: { k: string; children: ReactNode }) => <DefTerm term={`bank-card:${k}`}>{children}</DefTerm>
+
+const SUB_TERM: Record<string, string> = { condition: 'bank-stress:Condition', deterioration: 'bank-stress:Deterior.', cre_exposure: 'bank-stress:CRE' }
 const SECTION_IDS = ['drivers', 'charts', 'rules', 'components', 'quarterly', 'fdic'] as const
 // Every section starts closed so the score tiles and flags stay in view; a click opens the one you want. Collapsed sections do not render,
 // so the FDIC detail only loads when someone asks for it.
@@ -118,6 +133,7 @@ export function BankStressDrawer({ cert, name, onClose, definitions }: { cert: n
   const flagLabel = (id: string) => definitions?.flags.find((f) => f.id === id)?.label ?? definitions?.watch_flags.find((f) => f.id === id)?.label ?? id
   const bandLabel = (key: string | null) => definitions?.peer_bands.find((b) => b.key === key)?.label ?? key ?? '—'
   const metricDef = (key: string) => definitions?.metrics.find((m) => m.key === key)
+  const driverDef = (id: string) => { for (const comps of Object.values(definitions?.components ?? {})) { const c = comps.find((x) => x.id === id); if (c) return metricDef(c.metric)?.formula } return undefined }
 
   return (
     <Dialog open={cert != null} onOpenChange={(open) => { if (!open) onClose() }}>
@@ -144,18 +160,18 @@ export function BankStressDrawer({ cert, name, onClose, definitions }: { cert: n
           <div className="mt-4 space-y-4">
             <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
               {[
-                { label: 'Composite', value: latest.composite },
-                { label: 'Condition', value: latest.condition },
-                { label: 'Deterioration', value: latest.deterioration },
-                { label: 'CRE exposure', value: latest.cre_exposure },
+                { label: 'Composite', term: 'bank-stress:Composite', value: latest.composite },
+                { label: 'Condition', term: 'bank-stress:Condition', value: latest.condition },
+                { label: 'Deterioration', term: 'bank-stress:Deterior.', value: latest.deterioration },
+                { label: 'CRE exposure', term: 'bank-stress:CRE', value: latest.cre_exposure },
               ].map((t) => (
                 <div key={t.label} className={`rounded-md border border-slate-200 px-3 py-2 ${stressTone(t.value)}`}>
-                  <p className="text-[10px] uppercase tracking-wide opacity-70">{t.label}</p>
+                  <p className="text-[10px] uppercase tracking-wide opacity-70"><DefTerm term={t.term}>{t.label}</DefTerm></p>
                   <p className="text-xl font-semibold tabular-nums">{formatScore(t.value)}</p>
                 </div>
               ))}
               <div className="rounded-md border border-slate-200 px-3 py-2">
-                <p className="text-[10px] uppercase tracking-wide text-slate-500">Rank · {formatQuarter(latest.repdte)}</p>
+                <p className="text-[10px] uppercase tracking-wide text-slate-500"><D k="Rank">Rank · {formatQuarter(latest.repdte)}</D></p>
                 <p className="text-sm font-semibold tabular-nums text-slate-900">{latest.rank ?? '—'} <span className="text-slate-400 font-normal">of {latest.cohort_size.toLocaleString()}</span></p>
                 <p className="text-[11px] text-slate-500 tabular-nums">{latest.rank_in_band ?? '—'} of {latest.band_size.toLocaleString()} in band · {formatPct(latest.completeness, 0)} complete</p>
                 {latest.excluded_reason && <p className="text-[11px] text-amber-700">not ranked: {latest.excluded_reason.replace('_', ' ')}</p>}
@@ -176,34 +192,34 @@ export function BankStressDrawer({ cert, name, onClose, definitions }: { cert: n
               <button type="button" className="text-primary hover:underline" onClick={() => setOpenSections(new Set())}>Collapse all</button>
             </div>
 
-            <Section id="drivers" title="Top drivers" open={isOpen} toggle={toggle}>
+            <Section id="drivers" title={<D k="Top drivers">Top drivers</D>} open={isOpen} toggle={toggle}>
               <div className="grid md:grid-cols-3 gap-2">
                 {latest.top_drivers.map((d) => (
                   <div key={d.id} className="rounded-md border border-slate-200 px-3 py-2">
-                    <p className="text-[11px] text-slate-600">{d.label}</p>
+                    <p className="text-[11px] text-slate-600"><Hint text={driverDef(d.id)}>{d.label}</Hint></p>
                     <p className="text-sm font-semibold tabular-nums text-slate-900">{d.percentile.toFixed(0)}<span className="text-xs font-normal text-slate-500">th pct</span> <span className="text-xs font-normal text-slate-500">· {d.value == null ? '—' : d.value.toFixed(2)}</span></p>
                   </div>
                 ))}
               </div>
             </Section>
 
-            <Section id="charts" title="Trend charts" open={isOpen} toggle={toggle}>
+            <Section id="charts" title={<D k="Trend charts">Trend charts</D>} open={isOpen} toggle={toggle}>
               {PANELS.map((p) => <PanelChart key={p.title} panel={p} points={points} />)}
             </Section>
 
-            <Section id="rules" title="Which stress rules the bank tripped, quarter by quarter" open={isOpen} toggle={toggle}>
+            <Section id="rules" title={<D k="Rules">Which stress rules the bank tripped, quarter by quarter</D>} open={isOpen} toggle={toggle}>
               <p className="text-[11px] text-slate-500 mb-1">One row per rule, one column per quarter, oldest on the left. A red cell means the rule tripped that quarter; read across a row to see whether a problem is new or has persisted, read down a column to see how many rules fired at once. Hover a rule for its exact threshold.</p>
               <table className="text-[11px] w-full">
                 <thead>
                   <tr className="text-slate-500">
-                    <th className="text-left font-medium py-1 pr-2">Rule</th>
+                    <th className="text-left font-medium py-1 pr-2"><D k="Rule">Rule</D></th>
                     {detail.history.map((h) => <th key={h.repdte} className="text-center font-medium py-1 whitespace-nowrap">{formatQuarter(h.repdte)}</th>)}
                   </tr>
                 </thead>
                 <tbody>
                   {(definitions?.flags ?? []).map((f, i) => (
                     <tr key={f.id} className="border-t border-slate-100">
-                      <td className="py-1 pr-2 text-slate-700 whitespace-nowrap" title={f.rule}><span className="text-slate-400 mr-1">{i + 1}.</span>{f.label}</td>
+                      <td className="py-1 pr-2 text-slate-700 whitespace-nowrap"><span className="text-slate-400 mr-1">{i + 1}.</span><Hint text={f.rule}>{f.label}</Hint></td>
                       {detail.history.map((h) => {
                         const on = h.flags.includes(f.id)
                         return (
@@ -215,36 +231,36 @@ export function BankStressDrawer({ cert, name, onClose, definitions }: { cert: n
                     </tr>
                   ))}
                   <tr className="border-t border-slate-200 font-medium">
-                    <td className="py-1 pr-2 text-slate-700">Rules tripped</td>
+                    <td className="py-1 pr-2 text-slate-700"><D k="Rules tripped">Rules tripped</D></td>
                     {detail.history.map((h) => <td key={h.repdte} className="text-center py-1 tabular-nums">{h.flag_count}</td>)}
                   </tr>
                   <tr>
-                    <td className="py-1 pr-2 text-slate-700">Tier</td>
+                    <td className="py-1 pr-2 text-slate-700"><D k="Tier">Tier</D></td>
                     {detail.history.map((h) => <td key={h.repdte} className="text-center py-1"><span className={`rounded border px-1 py-0.5 text-[10px] ${TIER_TONE[h.tier]}`}>{TIER_LABEL[h.tier]}</span></td>)}
                   </tr>
                   <tr>
-                    <td className="py-1 pr-2 text-slate-700">Composite</td>
+                    <td className="py-1 pr-2 text-slate-700"><D k="Composite row">Composite</D></td>
                     {detail.history.map((h) => <td key={h.repdte} className={`text-center py-1 tabular-nums font-medium ${stressTone(h.composite)}`}>{formatScore(h.composite)}</td>)}
                   </tr>
                   <tr>
-                    <td className="py-1 pr-2 text-slate-700">CRE seller signal</td>
+                    <td className="py-1 pr-2 text-slate-700"><D k="CRE seller signal">CRE seller signal</D></td>
                     {detail.history.map((h) => <td key={h.repdte} className="text-center py-1">{h.cre_seller_signal ? <span className="rounded bg-red-600 text-white px-1 py-0.5 text-[10px]">yes</span> : <span className="text-slate-300">—</span>}</td>)}
                   </tr>
                 </tbody>
               </table>
             </Section>
 
-            <Section id="components" title={`Component percentiles · ${formatQuarter(latest.repdte)}`} open={isOpen} toggle={toggle}>
+            <Section id="components" title={<D k="Component percentiles">Component percentiles · {formatQuarter(latest.repdte)}</D>} open={isOpen} toggle={toggle}>
               <div className="grid md:grid-cols-3 gap-3 text-[11px]">
                 {Object.entries(definitions?.components ?? {}).map(([sub, comps]) => (
                   <div key={sub}>
-                    <p className="font-medium text-slate-700 capitalize mb-1">{sub.replace('_', ' ')} <span className="text-slate-400 font-normal">({Math.round((definitions?.weights[sub] ?? 0) * 100)}%)</span></p>
+                    <p className="font-medium text-slate-700 capitalize mb-1"><DefTerm term={SUB_TERM[sub] ?? ''}>{sub.replace('_', ' ')}</DefTerm> <span className="text-slate-400 font-normal">({Math.round((definitions?.weights[sub] ?? 0) * 100)}%)</span></p>
                     {comps.map((c) => {
                       const p = latest.components?.[c.id]
                       const v = num((latest as BsHistoryRow)[c.id])
                       return (
-                        <div key={c.id} className="flex items-center gap-2 py-0.5" title={metricDef(c.metric)?.formula}>
-                          <span className="w-40 truncate text-slate-600">{c.label}</span>
+                        <div key={c.id} className="flex items-center gap-2 py-0.5">
+                          <span className="w-40 truncate text-slate-600"><Hint text={metricDef(c.metric)?.formula}>{c.label}</Hint></span>
                           <span className="flex-1 h-1.5 rounded bg-slate-100"><span className="block h-1.5 rounded bg-red-400" style={{ width: `${p ?? 0}%` }} /></span>
                           <span className="w-8 text-right tabular-nums">{p == null ? '—' : p.toFixed(0)}</span>
                           <span className="w-14 text-right tabular-nums text-slate-500">{v == null ? '—' : v.toFixed(2)}</span>
@@ -256,9 +272,9 @@ export function BankStressDrawer({ cert, name, onClose, definitions }: { cert: n
               </div>
             </Section>
 
-            <Section id="quarterly" title="Quarterly figures ($ thousands)" open={isOpen} toggle={toggle}>
+            <Section id="quarterly" title={<D k="Quarterly figures">Quarterly figures ($ thousands)</D>} open={isOpen} toggle={toggle}>
               <table className="text-[11px] w-full">
-                <thead><tr className="text-slate-500"><th className="text-left font-medium py-1">Quarter</th><th className="text-right font-medium">Net income</th><th className="text-right font-medium">Provision</th><th className="text-right font-medium">Net charge-offs</th><th className="text-right font-medium">CRE NCO</th><th className="text-right font-medium">Loan-sale G/L</th><th className="text-right font-medium">OREO G/L</th><th className="text-right font-medium">Dividends</th><th className="text-right font-medium">Prov. coverage</th><th className="text-right font-medium" title="Loans held for sale at quarter-end (balance, and the part 90+ days late or nonaccrual)">Held for sale</th></tr></thead>
+                <thead><tr className="text-slate-500"><th className="text-left font-medium py-1"><Hint text="Calendar quarter the Call Report covers, oldest at the bottom.">Quarter</Hint></th><th className="text-right font-medium"><D k="Net income">Net income</D></th><th className="text-right font-medium"><D k="Provision">Provision</D></th><th className="text-right font-medium"><D k="Net charge-offs">Net charge-offs</D></th><th className="text-right font-medium"><D k="CRE NCO">CRE NCO</D></th><th className="text-right font-medium"><D k="Loan-sale G/L">Loan-sale G/L</D></th><th className="text-right font-medium"><D k="OREO G/L">OREO G/L</D></th><th className="text-right font-medium"><D k="Dividends">Dividends</D></th><th className="text-right font-medium"><D k="Prov. coverage">Prov. coverage</D></th><th className="text-right font-medium"><D k="Held for sale">Held for sale</D></th></tr></thead>
                 <tbody>
                   {[...detail.history].reverse().map((h) => {
                     const creNco = [h.q_NTRECONS, h.q_NTREMULT, h.q_NTRENROT].map(num)
@@ -287,7 +303,7 @@ export function BankStressDrawer({ cert, name, onClose, definitions }: { cert: n
             </Section>
 
             {/* From the former FDIC Data Analytics drawer: capital/earnings verdict, quarter table, acquisitions, balance-sheet actions. */}
-            <Section id="fdic" title="FDIC detail — capital, acquisitions and balance-sheet actions" open={isOpen} toggle={toggle}>
+            <Section id="fdic" title={<D k="FDIC detail">FDIC detail — capital, acquisitions and balance-sheet actions</D>} open={isOpen} toggle={toggle}>
               <div className="space-y-3">
                 <InstitutionDetailSections cert={String(detail.bank.cert)} hideTrendCharts />
               </div>
