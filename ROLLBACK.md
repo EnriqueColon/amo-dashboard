@@ -1,6 +1,6 @@
 # Rollback — Complaints pipeline audit fixes, centred cards, expandable bank card (3 Nov 2026)
 
-**State:** code only, plus the Complaints data loaded from the audited first week and the daily cron (`30 11 * * * run_complaints_daily.sh`)
+**State (DEPLOYED 3 Nov 2026 14:40 UTC, origin/main `4022813`; old bundle in `/root/dist.before_audit_push`):** code, plus the Complaints data loaded from the audited first week (29 cases, 24 extractions) and the daily cron (`30 11 * * * run_complaints_daily.sh`)
 re-enabled. Fixes: `collector/complaints_extract.py` (rider rule in the prompt, `normalize_address` spacing), `collector/complaints_address.py`
 (re-reads of one page count once), test `collector/tests/check_complaints_address_vote.py`. UI: `BankStressDrawer.tsx` and `EntityDetailPanel.tsx`
 are centred cards, bank card sections are collapsible, `lib/glossary/bank-stress.ts` has the `bank-card:*` definitions, "Beta" is now "Open testing".
