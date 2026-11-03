@@ -125,6 +125,38 @@ function sheetFields(row: Row, res: any, address: string | null): SheetField[] {
   ]
 }
 
+const usd0 = (v: number | null | undefined) => (v == null ? 'unknown' : v.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }))
+const FLAG_WORDS: Record<string, string> = {
+  address_unresolved: 'the property address readings disagree',
+  address_missing: 'the complaint gives no property street address',
+  principal_missing: 'the unpaid principal could not be found',
+  reinstatement_unreadable: 'the mortgage pages are unreadable, so the reinstatement clause could not be checked',
+  no_note_extracted: 'no promissory note was found',
+}
+
+/** Plain-English reason for the result chip, built from the same fields the rules use (never a separate guess). */
+function resultReason(row: Row, res: any, notes: any[]): string {
+  if (row.complaint_status === 'complaint_not_public')
+    return 'The Clerk lists a complaint entry for this case but has attached no document yet, so there is nothing to read. The tool checks again every week for 8 weeks.'
+  if (!res) return 'The complaint is downloaded and waiting to be read. It is read in the next daily run.'
+  if (res.is_mortgage_foreclosure === false)
+    return 'Not a mortgage foreclosure: ' + (res.foreclosure_reason || 'the complaint does not seek to foreclose a mortgage securing a note') + ' Only mortgage foreclosures are tested against the criteria.'
+  const big = notes.filter(n => n.meets_amount)
+  const top = notes.length ? Math.max(...notes.map(n => n.test_principal ?? 0)) || null : null
+  const clauseOn = (n: any) => `the mortgage contains the borrower's right-to-reinstate clause${n.right_to_reinstate_page ? ` (page ${n.right_to_reinstate_page})` : ''}`
+  if (res.computed_meets_criteria === true) {
+    const n = big.find(x => x.right_to_reinstate_clause === false) ?? big[0]
+    return `Qualifies: the unpaid principal of ${usd0(n?.test_principal ?? top)} is at least $500,000 and the mortgage has no right-to-reinstate clause${n?.right_to_reinstate_page ? ` (checked on page ${n.right_to_reinstate_page}; riders included)` : ''}.`
+  }
+  if (res.computed_meets_criteria === false) {
+    if (!big.length)
+      return `Does not qualify: the largest unpaid principal demanded is ${usd0(top)}, below the $500,000 threshold.`
+    return `Does not qualify: the unpaid principal of ${usd0(big[0].test_principal)} meets the $500,000 threshold, but ${clauseOn(big[0])}, so the borrower can reinstate the loan.`
+  }
+  const why = [...new Set<string>((res.review_flags ?? []).map((f: string) => FLAG_WORDS[f]).filter(Boolean))]
+  return 'Cannot tell yet: ' + (why.length ? why.join('; ') : 'a value the test needs could not be read') + '. It is on the review list.'
+}
+
 function shape(row: Row, detail = false) {
   const res = row.result_json ? JSON.parse(row.result_json) : null
   const notes: any[] = res?.notes ?? []
@@ -140,6 +172,7 @@ function shape(row: Row, detail = false) {
     status: row.complaint_status === 'downloaded' ? (res ? 'extracted' : 'downloaded') : row.complaint_status,
     plaintiff: res?.plaintiff ?? null,
     is_foreclosure: res ? res.is_mortgage_foreclosure !== false : null,
+    result_reason: resultReason(row, res, notes),
     verdict: res == null ? 'pending' : verdict === true ? 'qualifies' : verdict === false ? 'no' : 'unclear',
     principal,
     default_date: notes[0]?.default_date ?? null,

@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Gavel, ChevronDown, ChevronRight, AlertTriangle, Download, FileText } from 'lucide-react';
 
 // Complaints (beta): Miami-Dade foreclosure complaints, case types RPMF-Commercial and RPMF-Non-Homestead.
@@ -23,6 +24,7 @@ type Row = {
   address: string | null; address_source: string | null; properties: number; notes: number;
   flags: string[]; needs_review: boolean; review_reasons: string[];
   review: { decision: string; address: string | null; note: string | null } | null;
+  result_reason?: string;
   sheet: Field[];
 };
 type Summary = {
@@ -58,13 +60,21 @@ const clamp = (lines: number): React.CSSProperties => ({
 });
 
 function ResultChip({ r }: { r: Row }) {
-  const base = 'inline-block rounded-full px-2.5 py-0.5 text-xs font-medium whitespace-nowrap';
-  if (r.status === 'complaint_not_public') return <span className={`${base} bg-muted text-muted-foreground`}>No public complaint</span>;
-  if (r.is_foreclosure === false) return <span className={`${base} bg-muted text-muted-foreground`}>Not a mortgage foreclosure</span>;
-  if (r.verdict === 'qualifies') return <span className={`${base} bg-green-500/15 text-green-600`}>Qualifies</span>;
-  if (r.verdict === 'unclear') return <span className={`${base} bg-amber-500/15 text-amber-600`}>Cannot tell</span>;
-  if (r.verdict === 'no') return <span className={`${base} bg-muted text-foreground/70`}>Does not qualify</span>;
-  return <span className={`${base} bg-muted text-muted-foreground`}>Waiting to be read</span>;
+  const base = 'inline-block rounded-full px-2.5 py-0.5 text-xs font-medium whitespace-nowrap cursor-help';
+  let cls = 'bg-muted text-muted-foreground', text = 'Waiting to be read';
+  if (r.status === 'complaint_not_public') text = 'No public complaint';
+  else if (r.is_foreclosure === false) text = 'Not a mortgage foreclosure';
+  else if (r.verdict === 'qualifies') { cls = 'bg-green-500/15 text-green-600'; text = 'Qualifies'; }
+  else if (r.verdict === 'unclear') { cls = 'bg-amber-500/15 text-amber-600'; text = 'Cannot tell'; }
+  else if (r.verdict === 'no') { cls = 'bg-muted text-foreground/70'; text = 'Does not qualify'; }
+  const chip = <span className={`${base} ${cls}`}>{text}</span>;
+  if (!r.result_reason) return chip;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{chip}</TooltipTrigger>
+      <TooltipContent side="top" className="max-w-sm text-left font-normal text-sm leading-snug" sideOffset={6}>{r.result_reason}</TooltipContent>
+    </Tooltip>
+  );
 }
 
 function ReviewBox({ row, onDone }: { row: Row; onDone: () => void }) {

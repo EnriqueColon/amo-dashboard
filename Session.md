@@ -119,3 +119,5 @@ Pick up at: grouping of same-day bulk filings (yes/no), then feed ordering date,
 - **Labels:** the Complaints tab is badged "Open testing" (was Beta).
 - **Complaints tab:** two views (Summary and Spreadsheet), the old Lido sheet's columns, CSV download, PDF link.
 - Not yet covered by the hover/card rules: chart legends, the main Bank Stress table's secondary tables and other pages' tables. Candidates for a follow-up pass.
+
+- **Result pills explain themselves (3 Nov 2026).** Hover over Qualifies / Does not qualify / Not a mortgage foreclosure / Cannot tell / No public complaint shows the reason in words, built from the same values the rules use.
