@@ -4275,6 +4275,11 @@ Owner wants a new pipeline: Miami-Dade Clerk circuit-civil foreclosure complaint
     1. **IPRoyal Pay-As-You-Go Residential Proxy** (One-time purchase, 2 GB at ~$12.50, non-expiring data, configured for US -> Florida sticky session in `STEALTH_PROXY_POOL`).
     2. **CapSolver** (`CAPSOLVER_API_KEY`, primary AI solver) + **2Captcha** (`TWOCAPTCHA_API_KEY`, human fallback solver).
   - **Next step tomorrow once owner has the 3 keys (`STEALTH_PROXY_POOL`, `CAPSOLVER_API_KEY`, `TWOCAPTCHA_API_KEY`):** Wire `StealthBrowserPool` into `collector/hillsborough_complaints.py` so that on the droplet it searches by `case_number`, downloads the actual **Complaint (`COMP`) PDF** into `complaints_pdfs/`, and runs `complaints_extract.py` (`gpt-5.5`) to extract the verified **Unpaid Principal Balance** and all 41 fields automatically.
+  - **Architectural requirement (owner, 3 Nov 2026): build this as a reusable multi-county framework.** Every new county (Hillsborough first, then Broward, Palm Beach, Orange, Duval, etc.) must plug into the same 3-step template without duplicating logic:
+    1. **County Case Discovery + Optional Official-Records Pre-Screen** (county-specific adapter: e.g. Clerk CSV, Lis Pendens `LP` feed, or portal search -> writes to `foreclosure_cases` with `county='<COUNTY>'`).
+    2. **Shared `StealthBrowserPool` Complaint PDF Fetcher** (`collector/stealth_pool.py` using the same IPRoyal Florida residential proxy + CapSolver -> 2Captcha waterfall, isolated per-domain circuit breaker & session state `state_<domain>_<proxy>.json` -> saves `complaints_pdfs/<COUNTY>_<case_number>.pdf`).
+    3. **Shared Reader + `gpt-5.5` Extractor + Address Voter + UI/Email/QC** (`complaints_reader.py` -> `complaints_extract.py` -> `complaints_address.py` -> `server/complaints.ts`, completely county-agnostic).
+
 
 
 
