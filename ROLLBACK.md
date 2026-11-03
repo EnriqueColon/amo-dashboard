@@ -1,3 +1,27 @@
+# Rollback — Complaints pipeline audit fixes, centred cards, expandable bank card (3 Nov 2026)
+
+**State:** code only, plus the Complaints data loaded from the audited first week and the daily cron (`30 11 * * * run_complaints_daily.sh`)
+re-enabled. Fixes: `collector/complaints_extract.py` (rider rule in the prompt, `normalize_address` spacing), `collector/complaints_address.py`
+(re-reads of one page count once), test `collector/tests/check_complaints_address_vote.py`. UI: `BankStressDrawer.tsx` and `EntityDetailPanel.tsx`
+are centred cards, bank card sections are collapsible, `lib/glossary/bank-stress.ts` has the `bank-card:*` definitions, "Beta" is now "Open testing".
+
+**Revert:**
+
+    # stop new data first: comment out the cron line
+    crontab -l | sed 's|^\(30 11 \* \* \* /opt/amo-dashboard/collector/run_complaints_daily.sh\)|#PAUSED \1|' | crontab -
+    # code
+    cd /opt/amo-dashboard && git revert <commit range for 3 Nov 2026>   # or git checkout <previous sha>
+    npm run build        # BEFORE restart, or PM2 relaunches the old bundle
+    pm2 restart amo-dashboard
+    # data (only if the Complaints rows must go): tables foreclosure_cases, foreclosure_extractions, foreclosure_reviews, foreclosure_audits
+    # backups from the 3 Nov clear: foreclosure_*_bak_20261103 (the 36 original extractions and 41 cases). PDFs: /opt/amo-dashboard/complaints_pdfs
+
+Nothing here touches the assignment, Broward, Hillsborough or bank tables. A previous crontab is saved as
+`collector/crontab.before_complaints_pause.<timestamp>`. The scratch copy of the audited week stays at `/opt/amo-dashboard/complaints_week/`
+(DB before the rider fix: `week.db.before_rider_fix`).
+
+---
+
 # Rollback — transaction-type labels renamed (2 Nov 2026)
 
 `ORIGINATION` -> `INTO_INSTITUTION`, `INSTITUTIONAL_OUT` -> `OUT_OF_INSTITUTION`, `PRIVATE` -> `NON_INSTITUTIONAL` in `txn_type`.

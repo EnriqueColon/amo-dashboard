@@ -85,8 +85,10 @@ def repair_property(pdf_path: str, prop: dict, model: str, api_key: str) -> dict
     votes = {}
     for n, a in readings:
         votes.setdefault(street_key(a), []).append(n)
-    ranked = sorted(votes.items(), key=lambda kv: -len(kv[1]))
-    settled = lambda r: bool(r) and len(r[0][1]) >= 2 and (len(r) == 1 or len(r[0][1]) > len(r[1][1]))
+    # A 300-dpi re-read of the same page by the same model is not an independent witness: count each source once.
+    n_votes = lambda v: len({x.replace(" 300dpi", "") for x in v})
+    ranked = sorted(votes.items(), key=lambda kv: -n_votes(kv[1]))
+    settled = lambda r: bool(r) and n_votes(r[0][1]) >= 2 and (len(r) == 1 or n_votes(r[0][1]) > n_votes(r[1][1]))
     if not settled(ranked):
         # No clear winner: read both pages again at higher resolution and let those readings vote too.
         for src, page_key in (("mortgage", "address_mortgage_page"), ("note", "address_note_page")):
@@ -100,7 +102,7 @@ def repair_property(pdf_path: str, prop: dict, model: str, api_key: str) -> dict
                 if a and "?" not in a and street_key(a):
                     readings.insert(0, (f"image {src} 300dpi", a))
                     votes.setdefault(street_key(a), []).append(f"image {src} 300dpi")
-        ranked = sorted(votes.items(), key=lambda kv: -len(kv[1]))
+        ranked = sorted(votes.items(), key=lambda kv: -n_votes(kv[1]))
     prop["address_votes"] = {k: v for k, v in ranked}
     if settled(ranked):
         win = ranked[0][0]

@@ -409,3 +409,26 @@ Not built: automatic alerting (email or push) when a run fails; the tab shows it
 - **Newly read from the complaint:** Document Title (as printed), Priority # (1 if every other interest is stated subordinate to the plaintiff's lien) and Pages Processed (no cap now; the old sheet capped at 50). Complaints read before this change show these three as empty until they are read again (about $6 for the current 33).
 - **Layout:** Summary view (one clear row per complaint: case, plaintiff, property address, unpaid principal, default date, reinstatement clause, result; larger type and spacing; click for the full record, grouped Case / Parties / Property / Loan / Default / Amounts / Criteria / Source, long texts full width, link to open the complaint PDF) and Spreadsheet view (all columns in the sheet's order, sideways scroll, case number pinned). **Download CSV** exports the same columns for the current tab (`/api/complaints/export.csv`). The PDF is served from `/api/complaints/:id/pdf` behind the dashboard login.
 - Checked in the browser on a scratch server with the 38 reviewed complaints. Not deployed.
+
+---
+
+## 23. First-week audit and fixes (3 Nov 2026)
+
+**Why.** The owner saw numbers that looked wrong and suspected the process. Collection and extraction were checked separately.
+
+**Collection (discovery and download).** The Clerk's own site and the collector agree. Non-Homestead filed 2 Nov: 5 on the site, 5 collected. Commercial 2 Nov: 0 on the site, 0 collected (an early suspicion of a gap was a misreading). Over 26 Oct to 3 Nov the collector's searches returned the same counts as the Clerk's own search for both case codes (27185 Commercial 5, 27187 Non-Homestead 29). The Clerk lists other RPMF codes (Homestead 27186, Other Action 27188, amount-tiered legacy codes); only the two approved types are collected. All 24 downloaded PDFs were the original complaint (not an amended complaint or other filing). Complaint documents can appear days after filing: four of five 2 Nov cases were "not public" on 3 Nov and had documents the next day, which the weekly retry covers.
+
+**Extraction.** Four independent reviewers read the 24 PDFs first, then compared with the tool. Result: 23 of 24 verdicts right, 4 qualifying confirmed, 1 false negative, 1 wrong address digit.
+
+| Case | Finding | Cause | Fix |
+|---|---|---|---|
+| 2026-021952-CA-01 (Helm Bank, $1,681,591.80) | Said "reinstatement clause present" (not qualifying). A 1-4 Family Rider on page 31 says "BORROWER'S RIGHT TO REINSTATE DELETED. Section 19 is deleted." Should qualify. | Prompt did not say riders can delete the clause | Prompt rule "RIDERS COUNT" in `complaints_extract.py`. Re-read: now qualifies. A full-page OCR of the three other high-principal exclusions (022022, 022247, 022265) found no deleting rider. |
+| 2026-022247-CA-01 | Address 17465 NW 91 Ct; exhibits say 17466 | The text readings were split by "NW.91" vs "NW 91", and four page-image reads (two pages, each re-read at 300 dpi) of one blotchy digit counted as four witnesses | `normalize_address` splits direction+number; a 300 dpi re-read of a page counts as the same witness (`complaints_address.py`). Re-read: 17466. |
+
+Minor, not fixed (no verdict affected): 2026-021795 shows maturity 7 Sep as the default date where the complaint's "Default Date" is 19 Sep; 021938 default date ambiguous (1 Mar interest start vs 1 Apr missed payment); 021896 Note ZIP 33164 vs 33161 and 022065 ZIP differences are reported as "exhibit addresses agree"; Onyx (022023) principal $1,584,948.45 is right but the stored original principal $2.2M is the note's face amount, the complaint says $1.55M funded. Onyx has no street address anywhere in the filing (legal description and folio 30-5823-000-0810 only): correctly left blank and queued for review.
+
+**Qualifying after the audit (5):** Helm Bank 021952, Citibank 022271 ($980,584.40), Paz and Prado 021966 ($760,000), Onyx Group 022023 ($1,584,948.45, address needed), Ribeiro da Silva 021795 ($1,840,787.96). The last one's address comes from the complaint body because the mortgage exhibit carries only a legal description.
+
+**Regression test:** `collector/tests/check_complaints_address_vote.py` (street-key variants, the exact failed vote, the rider rule present in the prompt).
+
+**Daily running.** `run_complaints_daily.sh` (cron 11:30 UTC, flock-guarded) runs `complaints_collect.py --days 10 --extract`: search, download, retry "not public" weekly for 8 weeks, read, extract, repair addresses, store; no manual step. Cron was paused 3 Nov while this audit ran and is re-enabled at deploy. Control after the 24 checked complaints: the monthly 10-complaint human audit on the Collection Log tab.

@@ -52,6 +52,11 @@ principal_by_defendant. If it states deferred principal separately, give it in d
 4. right_to_reinstate_clause = true only if the MORTGAGE exhibit itself contains the uniform clause titled \
 "Borrower's Right to Reinstate After Acceleration" (or equivalent wording); false if you read the mortgage \
 pages and it is absent; null if the mortgage pages are missing or unreadable. Give the page. \
+RIDERS COUNT: a rider recorded with the mortgage (1-4 Family Rider, PUD Rider, condominium rider, etc.) can \
+delete the clause, e.g. 'E. "BORROWER'S RIGHT TO REINSTATE" DELETED. Section 19 is deleted.' If any rider \
+in the mortgage exhibit deletes or replaces the reinstatement section, the answer is FALSE even though the \
+uniform clause is printed earlier in the document. Read every rider page before answering, and quote the \
+deleting sentence in the notes. \
 fannie_freddie_form = true if the loan documents carry the "Fannie Mae/Freddie Mac UNIFORM INSTRUMENT" footer. \
 sba_mentioned = true if the word SBA / Small Business Administration appears in the loan documents.
 5. One entry in "notes" per promissory note being foreclosed and one entry in "properties" per property \
@@ -169,6 +174,7 @@ def normalize_address(a):
     if not a:
         return None
     s = re.sub(r"\b(\d{5})-\d{4}\b", r"\1", a.upper().replace(".", "").replace(",", " "))
+    s = re.sub(r"\b(NE|NW|SE|SW|N|S|E|W)(\d)", r"\1 \2", s)  # OCR joins 'NW.91' / 'NW91' for 'NW 91'
     s = re.sub(r"\b(APT|UNIT|STE|SUITE|NO)\b\.?\s*#?", "#", s)
     s = re.sub(r"#\s+", "#", s)
     toks = [_DIR.get(t, _SUFFIX.get(t, t)) for t in s.split()]
