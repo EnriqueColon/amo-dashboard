@@ -228,7 +228,7 @@ export default function Complaints() {
       <div className="flex items-center gap-2.5 flex-wrap">
         <Gavel size={18} className="text-primary" />
         <h1 className="text-xl font-semibold">Complaints</h1>
-        <span className="text-xs px-2 py-0.5 rounded bg-primary/15 text-primary font-medium">Beta</span>
+        <span className="text-xs px-2 py-0.5 rounded bg-primary/15 text-primary font-medium">Open testing</span>
         <span className="text-sm text-muted-foreground ml-1">
           Miami-Dade foreclosure complaints (RPMF-Commercial and RPMF-Non-Homestead), read from the Clerk's records
         </span>

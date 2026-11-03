@@ -7,7 +7,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
 import { Gavel, CheckCircle, AlertTriangle, XCircle } from 'lucide-react';
 
-// Quality control for the Complaints (beta) tab, shown on the Collection Log tab.
+// Quality control for the Complaints (open testing) tab, shown on the Collection Log tab.
 // Two questions: did we collect everything (runs, coverage, errors, spend), and is what we read correct
 // (automatic consistency checks, plus a monthly sample a person checks against the complaint).
 
@@ -78,8 +78,8 @@ export default function ComplaintsQc() {
     <section className="rounded-lg border border-border/60 p-4 space-y-5" data-testid="complaints-qc">
       <div className="flex items-center gap-2 flex-wrap">
         <Gavel size={15} className="text-primary" />
-        <h2 className="text-base font-semibold">Complaints (beta): collection and accuracy</h2>
-        <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/15 text-primary font-medium">Beta</span>
+        <h2 className="text-base font-semibold">Complaints (open testing): collection and accuracy</h2>
+        <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/15 text-primary font-medium">Open testing</span>
         <span className={`ml-auto text-xs font-medium flex items-center gap-1 ${h.cls}`}>
           {data.health === 'ok' ? <CheckCircle size={13} /> : data.health === 'never_run' ? null : <AlertTriangle size={13} />}
           {h.text}{data.hours_since_last_ok_run != null ? ` (last good run ${data.hours_since_last_ok_run} h ago)` : ''}

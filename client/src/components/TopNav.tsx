@@ -45,7 +45,7 @@ const MENUS: Menu[] = [
     key: 'data', label: 'Data', items: [
       { href: '/assignments', icon: FileText, label: 'Raw Assignments' },
       // UCC Filings and Clean Transactions are document views, not analyses (owner, 29 Oct 2026).
-      { href: '/complaints', icon: Gavel, label: 'Complaints', badge: 'Beta' },
+      { href: '/complaints', icon: Gavel, label: 'Complaints', badge: 'Open testing' },
       { href: '/ucc', icon: FileSignature, label: 'UCC Filings' },
       { href: '/clean-events', icon: CheckCircle, label: 'Clean Transactions' },
       { href: '/entities', icon: Building2, label: 'Entities' },

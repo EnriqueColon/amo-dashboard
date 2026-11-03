@@ -749,7 +749,7 @@ export function buildRollupReport(db: Database.Database, sendDate: string): Roll
     watchTable);
 
   const complaints = buildComplaintsSection(db, sendDate, { esc, fmtMoney, trunc, MUTED, HAIR, INK, dashboardUrl: DASHBOARD_URL });
-  const complaintsSection = complaints ? section('Foreclosure complaints (beta)', complaints.sub, complaints.body) : '';
+  const complaintsSection = complaints ? section('Foreclosure complaints (open testing)', complaints.sub, complaints.body) : '';
 
   const coverageLine = counties.map(c => `${COUNTY_LABEL[c]} through ${fmtDay(asOf[c])}`).join(' · ');
 
