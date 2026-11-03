@@ -199,3 +199,36 @@ Two separate services, both run by the Florida Courts E-Filing Authority through
 - **Broward court documents (complaints):** [Broward Clerk FAQ](https://www.browardclerk.org/Web2/CaseSearchECA/FrequentQuestions/): anonymous users see only redacted documents online; an account (free to register) widens access by user type; certified copies are sold; the **Commercial Data Access (API)** service (subscription plus notarized registration, price not published, contact `publicaccesshelpdesk@browardclerk.org`) covers non-confidential case data but **the Clerk says it does not provide document images**.
 - **Other routes that include Broward:** Trellis (Broward listed with documents; untested), the statewide Public Access System (5-day window, CAPTCHA, human login), and CaseAccess (case data, unverified).
 - **Path for Broward, as it stands:** (1) free daily discovery from `LP` records, filtered to non-association plaintiffs, giving case number and the linked mortgage; (2) complaint via Trellis or the statewide site, or a person downloading from the Clerk's case portal after registering; (3) our reader on the PDF. Step 2 is the open decision, same as Hillsborough.
+
+---
+
+## 13. The unpaid-balance requirement — a gate for every county (owner, 3 Nov 2026)
+
+**Rule:** a county goes live on the Complaints tab only when we have a route that delivers the **complaint** (or a document that states the unpaid principal) and the extracted figure has been checked against the PDF. Until then the county can list cases but must show "unpaid balance not available" and **never "Qualifies"**.
+
+**Where the unpaid principal can come from**
+
+| Source | Has unpaid principal? | When | Free? |
+|---|---|---|---|
+| **Complaint** (the paragraph that says what is still owed on the note, plus any payoff or demand letter in its exhibits) | **Yes** | At filing | Depends on route (below) |
+| Affidavit of amounts due, motion for summary judgment | Yes | Weeks to months later | Via the court file |
+| Final judgment, notice of sale (auction sites) | Judgment amount (includes interest and fees) | Months later | Often free |
+| Lis pendens | **No** | At filing | Free in Official Records |
+| Recorded mortgage | **No**; gives the **original** loan amount | Years earlier | Free in Official Records |
+| Property-data vendors (ATTOM etc.) | Not shown to carry it | — | Paid |
+
+**What the mortgage can safely do:** unpaid principal is normally no larger than the original loan, so "original loan under $500,000" can **exclude** a case early (to save document fetches). It cannot qualify one (deferred balances, capitalized interest and modifications break the rule: in the first-week audit the stated $2.2M face amount on one note was $1.55M funded). Label it "original", never "unpaid".
+
+**Complaint routes by county (as of 3 Nov 2026)**
+
+| County | Route that returns the complaint | Status |
+|---|---|---|
+| Miami-Dade | Clerk's OCS, our own login | Working, audited |
+| Hillsborough | Trellis (text and unpaid principal seen in one case); statewide Public Access System (free, human, CAPTCHA, 5 days); HOVER by hand | None automated yet |
+| Broward | Trellis (untested); statewide site; Clerk's portal by hand; the free FTP has only recorded documents | None automated yet |
+| Palm Beach | Trellis; statewide site. Note: the county's FTP feed (see `PALM_BEACH_EXPANSION_SCOPE.md`) is **Official Records**, not court files, so it would not deliver complaints | None |
+| Duval, Orange, Monroe | Trellis; statewide site | None |
+
+**Acceptance test per county before go-live:** 10 recent mortgage foreclosures, complaint obtained through the chosen route, our reader's unpaid principal compared with the PDF by hand; at least 9 of 10 exact, and every miss explained. Repeat monthly using the existing 10-complaint audit on the Collection Log tab.
+
+**Decision still open:** which complaint route to pay for or staff (Trellis API, the free statewide site with a person, or a person on each Clerk's portal). Nothing is built until it is chosen.
