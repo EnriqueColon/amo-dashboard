@@ -30,13 +30,23 @@ import { getDb } from './db'
 const MODEL = process.env.COMPLAINTS_MODEL || 'gpt-5.5'
 
 function ensureReviewTable() {
-  getDb().exec(`
+  const db = getDb()
+  db.exec(`
     CREATE TABLE IF NOT EXISTS foreclosure_audits (
       case_id TEXT PRIMARY KEY, verdict TEXT NOT NULL, wrong_fields TEXT, note TEXT, audited_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS foreclosure_reviews (
       case_id TEXT PRIMARY KEY, decision TEXT NOT NULL, address TEXT, note TEXT, reviewed_at TEXT NOT NULL
     );`)
+  if (tablesExist()) {
+    const cols = new Set((db.prepare(`PRAGMA table_info(foreclosure_cases)`).all() as { name: string }[]).map(c => c.name))
+    if (!cols.has('county')) {
+      db.exec(`ALTER TABLE foreclosure_cases ADD COLUMN county TEXT NOT NULL DEFAULT 'MIAMI-DADE'`)
+    }
+    if (!cols.has('metadata_json')) {
+      db.exec(`ALTER TABLE foreclosure_cases ADD COLUMN metadata_json TEXT`)
+    }
+  }
 }
 
 function tablesExist(): boolean {
@@ -47,14 +57,14 @@ function tablesExist(): boolean {
 
 type Row = {
   case_id: string; case_number: string; case_type: string; filing_date: string | null; case_style: string | null
-  complaint_status: string; complaint_pdf: string | null; note: string | null
+  complaint_status: string; complaint_pdf: string | null; note: string | null; county: string | null
   result_json: string | null; extracted_at: string | null
   decision: string | null; review_address: string | null; review_note: string | null
 }
 
 const BASE_SQL = `
   SELECT c.case_id, c.case_number, c.case_type, c.filing_date, c.case_style, c.complaint_status,
-         c.complaint_pdf, c.note, e.result_json, e.extracted_at,
+         c.complaint_pdf, c.note, c.county, e.result_json, e.extracted_at,
          r.decision, r.address AS review_address, r.note AS review_note
   FROM foreclosure_cases c
   LEFT JOIN foreclosure_extractions e ON e.case_id = c.case_id AND e.model = ?
@@ -83,7 +93,7 @@ function sheetFields(row: Row, res: any, address: string | null): SheetField[] {
     f('Case', 'case_number', 'Case Number', row.case_number),
     f('Case', 'case_type', 'Clerk Case Type', row.case_type),
     f('Case', 'document_title', 'Document Title', res?.document_title, true),
-    f('Case', 'county', 'County', res?.county_court),
+    f('Case', 'county', 'County', res?.county_court ?? row.county ?? 'MIAMI-DADE'),
     f('Case', 'date_filed', 'Date Filed', res?.date_filed ?? row.filing_date),
     f('Case', 'clerk_filing_date', 'Clerk Filing Date', row.filing_date),
     f('Parties', 'plaintiff', 'Plaintiff', res?.plaintiff, true),
@@ -138,7 +148,12 @@ const FLAG_WORDS: Record<string, string> = {
 function resultReason(row: Row, res: any, notes: any[]): string {
   if (row.complaint_status === 'complaint_not_public')
     return 'The Clerk lists a complaint entry for this case but has attached no document yet, so there is nothing to read. The tool checks again every week for 8 weeks.'
-  if (!res) return 'The complaint is downloaded and waiting to be read. It is read in the next daily run.'
+  if (!res) {
+    if (row.county && row.county !== 'MIAMI-DADE' && row.complaint_status === 'pending') {
+      return 'Unpaid balance not available yet: case discovered from the county civil filings index; awaiting the complaint document to verify the unpaid principal and reinstatement clause.'
+    }
+    return 'The complaint is downloaded and waiting to be read. It is read in the next daily run.'
+  }
   if (res.is_mortgage_foreclosure === false)
     return 'Not a mortgage foreclosure: ' + (res.foreclosure_reason || 'the complaint does not seek to foreclose a mortgage securing a note') + ' Only mortgage foreclosures are tested against the criteria.'
   const big = notes.filter(n => n.meets_amount)
@@ -168,6 +183,7 @@ function shape(row: Row, detail = false) {
   const address = row.decision === 'address_entered' ? row.review_address : first.property_address ?? null
   const out: any = {
     case_id: row.case_id, case_number: row.case_number, case_type: row.case_type,
+    county: row.county ?? 'MIAMI-DADE',
     filing_date: row.filing_date, case_style: row.case_style,
     status: row.complaint_status === 'downloaded' ? (res ? 'extracted' : 'downloaded') : row.complaint_status,
     plaintiff: res?.plaintiff ?? null,
