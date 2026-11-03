@@ -163,3 +163,28 @@ Trellis lists 58 Florida counties with documents (Alachua through Washington, in
 - Unknown: price, API terms, whether automated storage and re-reading is allowed, completeness against each Clerk's own counts, how many of each county's cases are commercial/non-homestead mortgage foreclosures (the case-type labels differ by county).
 
 **Next:** get Trellis's API and price terms for these counties, then run the 5 to 10 case comparison in §9 per county, starting with Hillsborough.
+
+---
+
+## 11. Statewide Florida options on the E-Filing Portal (researched 3 Nov 2026; nothing signed up for)
+
+Two separate services, both run by the Florida Courts E-Filing Authority through the Florida Courts E-Filing Portal (`myflcourtaccess.com`). An account on the Portal is required for both; I did not create one.
+
+**A. CaseAccess (case search)** — [Florida Bar News, 12 Oct 2026](https://www.floridabar.org/the-florida-bar-news/new-service-offers-statewide-case-search-through-e-filing-portal/)
+- $20 a month or $200 a year. Attorneys, legal professionals and "public researchers". Needs an active Portal account. Powered by the Comprehensive Case Information System (CCIS), clerk-sourced, "all 67 Florida counties", **daily updates**.
+- Says it is "a research tool and is not the official court record." Public case information stays available from each Clerk.
+- **Not stated:** search fields, case types, whether documents or only case data are shown, whether bulk or automated use is allowed. Would be the discovery layer for counties with no free daily file (Palm Beach, Duval, Orange, Monroe) if it lists case type, parties and case number. **Unverified.**
+
+**B. Public Access System for new circuit civil complaints (free)** — settlement-driven; [Florida Bar News, 2022](https://www.floridabar.org/the-florida-bar-news/e-filing-authority-to-debut-new-public-access-site-october-29/); requirements in the Authority's 7 Sep 2022 change order (`cms.myflcourtaccess.com/uploads/2022/09/Public-Review-Queue-Change-Order-v6-1.pdf`)
+- **What it gives:** the **non-confidential case-initiating documents (complaints)** of **e-filed Circuit Civil (CA)** cases from **all counties**, as **PDF**, available **within 5 minutes of submission**, **before the Clerk processes them**.
+- **Free**, 24x7, needs a free Portal account. **Filtered by county, newest first. Kept 5 calendar days.**
+- **Not usable by a program:** a **CAPTCHA** is shown before documents can be viewed, and login locks after three failed tries. Do not automate; a person must pass it.
+- **Documents are watermarked** "not processed or accepted by the Clerk". Navigation shows only submission number, county and document type (e.g. Complaint); the design has **no case-type filter** and no query beyond a "Search Criteria" field. The case number is added after the Clerk accepts the filing.
+- **Scope limits:** e-filed Circuit Civil only (no County Civil/CC); only filings marked non-confidential by the filer.
+- **Caveat:** these requirements come from a 2022 design document and a 2022 article. I could not confirm in 2026 that the site still runs as described, the retention window, the current layout, or the Authority's terms of use.
+
+**What this could mean for us**
+- B is the first **free, statewide, all-county, same-day source of complaint PDFs**, and no vendor or county deal is needed. It is also the only route found that includes counties like Palm Beach and Duval without a feed.
+- Constraints: a **human** logs in and passes the CAPTCHA; the **5-day window** means a person must collect at least every few days (daily is safer); with **no case-type filter**, every Circuit Civil complaint from the county comes through, not only foreclosures. Our reader could triage them automatically (page 1 mentions foreclosure, "mortgage", the plaintiff), but each PDF would still have to be downloaded.
+- To check on a real account (owner, 20 minutes): the **"Filings Access"** link (reported at the top right after login); what the list shows per row; whether PDFs can be selected and downloaded in bulk or one by one; how many Hillsborough filings appear per day; how far back the list goes; and the terms of use for storing and reusing the documents.
+- Combining A and B could be the cheapest statewide stack: A for the case list (if it shows case type), B for the complaint PDFs. Neither is confirmed.
