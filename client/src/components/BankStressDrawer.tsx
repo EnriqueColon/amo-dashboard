@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
+import { ChevronDown, ChevronRight } from 'lucide-react'
 import { CartesianGrid, Legend, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { InstitutionDetailSections } from '@/components/InstitutionProfileDrawer'
@@ -71,10 +72,33 @@ function num(v: unknown): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? v : null
 }
 
+const SECTION_IDS = ['drivers', 'charts', 'rules', 'components', 'quarterly', 'fdic'] as const
+// Every section starts closed so the score tiles and flags stay in view; a click opens the one you want. Collapsed sections do not render,
+// so the FDIC detail only loads when someone asks for it.
+const DEFAULT_OPEN = new Set<string>()
+
+function Section({ id, title, open, toggle, children }: { id: string; title: ReactNode; open: (id: string) => boolean; toggle: (id: string) => void; children: ReactNode }) {
+  const isOpen = open(id)
+  return (
+    <section className="rounded-md border border-slate-200">
+      <button type="button" onClick={() => toggle(id)} aria-expanded={isOpen}
+        className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50">
+        {isOpen ? <ChevronDown className="h-4 w-4 shrink-0 text-slate-500" /> : <ChevronRight className="h-4 w-4 shrink-0 text-slate-500" />}
+        <span>{title}</span>
+      </button>
+      {isOpen && <div className="border-t border-slate-100 px-3 py-3">{children}</div>}
+    </section>
+  )
+}
+
 export function BankStressDrawer({ cert, name, onClose, definitions }: { cert: number | null; name?: string; onClose: () => void; definitions: BsDefinitions | null }) {
   const [detail, setDetail] = useState<BsBankDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [openSections, setOpenSections] = useState<Set<string>>(() => new Set(DEFAULT_OPEN))
+  const isOpen = (id: string) => openSections.has(id)
+  const toggle = (id: string) => setOpenSections((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n })
+  useEffect(() => { setOpenSections(new Set(DEFAULT_OPEN)) }, [cert])
 
   useEffect(() => {
     if (cert == null) { setDetail(null); setError(null); return }
@@ -146,8 +170,13 @@ export function BankStressDrawer({ cert, name, onClose, definitions }: { cert: n
               {latest.merger_quarter ? <span className="rounded border border-slate-200 bg-slate-50 text-slate-600 px-2 py-0.5 text-[11px]">merger quarter — trends suppressed</span> : null}
             </div>
 
-            <div>
-              <p className="text-xs font-semibold text-slate-700 mb-1">Top drivers</p>
+            <div className="flex items-center justify-end gap-3 text-[11px]">
+              <span className="text-slate-500 mr-auto">Pick what to look at:</span>
+              <button type="button" className="text-primary hover:underline" onClick={() => setOpenSections(new Set(SECTION_IDS))}>Expand all</button>
+              <button type="button" className="text-primary hover:underline" onClick={() => setOpenSections(new Set())}>Collapse all</button>
+            </div>
+
+            <Section id="drivers" title="Top drivers" open={isOpen} toggle={toggle}>
               <div className="grid md:grid-cols-3 gap-2">
                 {latest.top_drivers.map((d) => (
                   <div key={d.id} className="rounded-md border border-slate-200 px-3 py-2">
@@ -156,14 +185,13 @@ export function BankStressDrawer({ cert, name, onClose, definitions }: { cert: n
                   </div>
                 ))}
               </div>
-            </div>
+            </Section>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <Section id="charts" title="Trend charts" open={isOpen} toggle={toggle}>
               {PANELS.map((p) => <PanelChart key={p.title} panel={p} points={points} />)}
-            </div>
+            </Section>
 
-            <div>
-              <p className="text-xs font-semibold text-slate-700 mb-0.5">Which stress rules the bank tripped, quarter by quarter</p>
+            <Section id="rules" title="Which stress rules the bank tripped, quarter by quarter" open={isOpen} toggle={toggle}>
               <p className="text-[11px] text-slate-500 mb-1">One row per rule, one column per quarter, oldest on the left. A red cell means the rule tripped that quarter; read across a row to see whether a problem is new or has persisted, read down a column to see how many rules fired at once. Hover a rule for its exact threshold.</p>
               <table className="text-[11px] w-full">
                 <thead>
@@ -204,10 +232,9 @@ export function BankStressDrawer({ cert, name, onClose, definitions }: { cert: n
                   </tr>
                 </tbody>
               </table>
-            </div>
+            </Section>
 
-            <div>
-              <p className="text-xs font-semibold text-slate-700 mb-1">Component percentiles · {formatQuarter(latest.repdte)}</p>
+            <Section id="components" title={`Component percentiles · ${formatQuarter(latest.repdte)}`} open={isOpen} toggle={toggle}>
               <div className="grid md:grid-cols-3 gap-3 text-[11px]">
                 {Object.entries(definitions?.components ?? {}).map(([sub, comps]) => (
                   <div key={sub}>
@@ -227,10 +254,9 @@ export function BankStressDrawer({ cert, name, onClose, definitions }: { cert: n
                   </div>
                 ))}
               </div>
-            </div>
+            </Section>
 
-            <div>
-              <p className="text-xs font-semibold text-slate-700 mb-1">Quarterly figures ($ thousands)</p>
+            <Section id="quarterly" title="Quarterly figures ($ thousands)" open={isOpen} toggle={toggle}>
               <table className="text-[11px] w-full">
                 <thead><tr className="text-slate-500"><th className="text-left font-medium py-1">Quarter</th><th className="text-right font-medium">Net income</th><th className="text-right font-medium">Provision</th><th className="text-right font-medium">Net charge-offs</th><th className="text-right font-medium">CRE NCO</th><th className="text-right font-medium">Loan-sale G/L</th><th className="text-right font-medium">OREO G/L</th><th className="text-right font-medium">Dividends</th><th className="text-right font-medium">Prov. coverage</th><th className="text-right font-medium" title="Loans held for sale at quarter-end (balance, and the part 90+ days late or nonaccrual)">Held for sale</th></tr></thead>
                 <tbody>
@@ -258,13 +284,14 @@ export function BankStressDrawer({ cert, name, onClose, definitions }: { cert: n
                   })}
                 </tbody>
               </table>
-            </div>
+            </Section>
 
             {/* From the former FDIC Data Analytics drawer: capital/earnings verdict, quarter table, acquisitions, balance-sheet actions. */}
-            <div className="space-y-3">
-              <p className="text-xs font-semibold text-slate-700">FDIC detail — capital, acquisitions and balance-sheet actions</p>
-              <InstitutionDetailSections cert={String(detail.bank.cert)} hideTrendCharts />
-            </div>
+            <Section id="fdic" title="FDIC detail — capital, acquisitions and balance-sheet actions" open={isOpen} toggle={toggle}>
+              <div className="space-y-3">
+                <InstitutionDetailSections cert={String(detail.bank.cert)} hideTrendCharts />
+              </div>
+            </Section>
 
             {detail.aom_canonical_names.length > 0 && (
               <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
