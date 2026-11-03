@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { CartesianGrid, Legend, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { InstitutionDetailSections } from '@/components/InstitutionProfileDrawer'
 import {
   loadBsBank, formatQuarter, formatThousands, formatPct, formatScore, stressTone, TIER_LABEL, TIER_TONE,
@@ -96,11 +96,11 @@ export function BankStressDrawer({ cert, name, onClose, definitions }: { cert: n
   const metricDef = (key: string) => definitions?.metrics.find((m) => m.key === key)
 
   return (
-    <Sheet open={cert != null} onOpenChange={(open) => { if (!open) onClose() }}>
-      <SheetContent side="right" className="w-full sm:max-w-3xl overflow-y-auto">
-        <SheetHeader>
-          <SheetTitle className="text-lg">{detail?.bank.name ?? name ?? `Cert ${cert}`}</SheetTitle>
-          <SheetDescription asChild>
+    <Dialog open={cert != null} onOpenChange={(open) => { if (!open) onClose() }}>
+      <DialogContent className="w-[96vw] sm:max-w-4xl max-h-[90vh] overflow-y-auto overflow-x-hidden grid-cols-[minmax(0,1fr)]">
+        <DialogHeader>
+          <DialogTitle className="text-lg">{detail?.bank.name ?? name ?? `Cert ${cert}`}</DialogTitle>
+          <DialogDescription asChild>
             <div className="text-xs text-slate-500">
               {detail && (
                 <>cert {detail.bank.cert} · {detail.bank.city ? `${detail.bank.city}, ` : ''}{detail.bank.state ?? '—'} · {formatThousands(detail.bank.assets_k)} assets · {bandLabel(latest?.peer_band ?? null)} band
@@ -110,8 +110,8 @@ export function BankStressDrawer({ cert, name, onClose, definitions }: { cert: n
                 </>
               )}
             </div>
-          </SheetDescription>
-        </SheetHeader>
+          </DialogDescription>
+        </DialogHeader>
 
         {loading && <p className="text-sm text-slate-500 mt-4">Loading…</p>}
         {error && <p className="text-sm text-red-700 mt-4">{error}</p>}
@@ -275,7 +275,7 @@ export function BankStressDrawer({ cert, name, onClose, definitions }: { cert: n
             )}
           </div>
         )}
-      </SheetContent>
-    </Sheet>
+      </DialogContent>
+    </Dialog>
   )
 }

@@ -54,3 +54,6 @@ research_uploads/
 intel.db
 intel.db-shm
 intel.db-wal
+
+# local complaints test pull (PDFs + scratch DB)
+local_complaints_week/

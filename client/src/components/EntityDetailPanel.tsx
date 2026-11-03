@@ -205,12 +205,12 @@ export default function EntityDetailPanel({ entityName, onClose, onNavigate }: P
   const subCount = tab === 'sub-entities' && !subLoading ? uniqueRawNames.size : null;
 
   return (
-    <div className="fixed inset-0 z-50 flex">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       {/* Backdrop */}
-      <div className="flex-1 bg-black/40" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
 
-      {/* Panel */}
-      <div className="w-full max-w-3xl bg-background border-l border-border flex flex-col h-full overflow-hidden shadow-2xl">
+      {/* Card, centred on the screen */}
+      <div className="relative w-full max-w-4xl max-h-[90vh] bg-background border border-border rounded-xl flex flex-col overflow-hidden shadow-2xl">
 
         {/* ── Panel header ─────────────────────────────────────────────── */}
         <div className="flex items-start justify-between px-5 py-4 border-b border-border shrink-0">
