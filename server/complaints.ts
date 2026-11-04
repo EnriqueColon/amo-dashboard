@@ -146,6 +146,8 @@ const FLAG_WORDS: Record<string, string> = {
 
 /** Plain-English reason for the result chip, built from the same fields the rules use (never a separate guess). */
 function resultReason(row: Row, res: any, notes: any[]): string {
+  if (!res && row.complaint_status === 'below_band_threshold')
+    return `Does not qualify: the Clerk filed this case in a claim band under $250,000 (${row.case_type}), which cannot reach the $500,000 threshold. This is the Clerk's filing band, not a reading of the complaint, so the complaint was not downloaded or read.`
   if (row.complaint_status === 'complaint_not_public')
     return 'The Clerk lists a complaint entry for this case but has attached no document yet, so there is nothing to read. The tool checks again every week for 8 weeks.'
   if (!res) {
@@ -189,7 +191,7 @@ function shape(row: Row, detail = false) {
     plaintiff: res?.plaintiff ?? null,
     is_foreclosure: res ? res.is_mortgage_foreclosure !== false : null,
     result_reason: resultReason(row, res, notes),
-    verdict: res == null ? 'pending' : verdict === true ? 'qualifies' : verdict === false ? 'no' : 'unclear',
+    verdict: res == null ? (row.complaint_status === 'below_band_threshold' ? 'no' : 'pending') : verdict === true ? 'qualifies' : verdict === false ? 'no' : 'unclear',
     principal,
     default_date: notes[0]?.default_date ?? null,
     right_to_reinstate_clause: notes[0]?.right_to_reinstate_clause ?? null,

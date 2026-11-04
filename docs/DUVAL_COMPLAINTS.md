@@ -7,7 +7,7 @@
 
 - Duval's Clerk publishes court cases on **CORE** (`core.duvalclerk.com`). A signed-in user can search Circuit Civil cases by case type and file date, open a case, and view each filed document as a PDF.
 - The collector does what the Miami-Dade one does: **find** the Commercial and Non-Homestead Residential foreclosures, **download** the complaint, then hand it to the shared reader and extractor, so the same fields (the old sheet's columns, the nine approved rules) come out.
-- **Only the "$250,000 or More" claim band is fetched.** Only that band can hold $500,000 of unpaid principal. Lower bands are stored as `below_band_threshold` (so they are counted) but never downloaded; `--include-lower-band` fetches them too. This is the same rule Hillsborough uses.
+- **Only the "$250,000 or More" claim band is downloaded and read.** Only that band can hold $500,000 of unpaid principal. **Owner decision (4 Nov 2026):** cases in the lower bands are still brought in and listed, and the Complaints tab states plainly that they do not qualify ("the Clerk filed this case in a claim band under $250,000"); they are not downloaded or read. This is the Clerk's filing band, not a reading of the complaint. (`--include-lower-band` still exists to download them if that ever changes.) The same wording now applies to Hillsborough's lower-band cases.
 - Cases are stored with `county = 'DUVAL'` and case id `DU:<Clerk caseID>`. Miami-Dade and Hillsborough rows are untouched.
 
 ## What was found on the site (4 Nov 2026)
@@ -71,5 +71,5 @@ Per the owner's rule (Hillsborough scope §13), Duval stays off "Qualifies" unti
 
 1. **Register the CORE account** (Registration Agreement to View Records Online) so unreleased complaints can be requested? Read the agreement's terms on automated use first.
 2. **Run unattended on the droplet** with the owner's login stored in `.env`? Confirm the Clerk allows a shared account to run unattended.
-3. **Lower claim bands** ($50,001–$249,999): fetch them too (about double the reading cost) or only sample?
+3. ~~Lower claim bands~~ — decided 4 Nov 2026: list them as "does not qualify", do not download.
 4. **Counties' order:** Duval before or after the Hillsborough document route?
