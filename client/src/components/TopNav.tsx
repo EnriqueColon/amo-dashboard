@@ -28,7 +28,6 @@ const MENUS: Menu[] = [
     key: 'analysis', label: 'Analysis', items: [
       // Overview moved here from Home (owner, 4 Nov 2026).
       { href: '/overview', icon: BarChart2, label: 'Overview' },
-      { href: '/targets', icon: Crosshair, label: 'Targets' },
       { href: '/bank-stress', icon: Gauge, label: 'Bank Stress & FDIC', badge: 'New' },
       { href: '/private-credit', icon: Shield, label: 'Private Credit' },
       { href: '/credit-facilities', icon: Landmark, label: 'Lending Relationships' },
@@ -51,6 +50,8 @@ const MENUS: Menu[] = [
       { href: '/ucc', icon: FileSignature, label: 'UCC Filings' },
       { href: '/clean-events', icon: CheckCircle, label: 'Clean Transactions' },
       { href: '/entities', icon: Building2, label: 'Entities' },
+      // Targets moved here from Analysis (owner, 4 Nov 2026).
+      { href: '/targets', icon: Crosshair, label: 'Targets' },
       { href: '/collection-log', icon: ClipboardList, label: 'Collection Log' },
     ],
   },
