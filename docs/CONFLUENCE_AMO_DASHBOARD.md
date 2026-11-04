@@ -284,7 +284,7 @@ Counties**. It is global — it applies to every page and persists across naviga
 
 ### 4.3 The pages
 
-**Since 4 Nov 2026 (owner's request) the tool opens on Target Reporting.** The Home menu holds
+**Since 4 Nov 2026 (owner's request; live 15:17 UTC, `f3d507f`) the tool opens on Target Reporting.** The Home menu holds
 **Target Reporting** (the former Reporting page, renamed; address still `/reporting`) and Ask the
 Data; **Overview moved to the Analysis menu**. `/` and the logo both go to Target Reporting.
 
