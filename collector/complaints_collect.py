@@ -97,6 +97,22 @@ def now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def ensure_county_schema(conn: sqlite3.Connection) -> None:
+    """Make sure foreclosure_cases / foreclosure_runs exist and carry the multi-county columns.
+
+    Miami-Dade created the tables with no county; every county after it adds rows with its own
+    `county` ('HILLSBOROUGH', 'DUVAL', ...) and a prefixed case_id. Shared by every county collector.
+    """
+    conn.executescript(SCHEMA)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(foreclosure_cases)").fetchall()}
+    if "county" not in cols:
+        conn.execute("ALTER TABLE foreclosure_cases ADD COLUMN county TEXT NOT NULL DEFAULT 'MIAMI-DADE'")
+    if "metadata_json" not in cols:
+        conn.execute("ALTER TABLE foreclosure_cases ADD COLUMN metadata_json TEXT")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_fc_county ON foreclosure_cases(county)")
+    conn.commit()
+
+
 def connect() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH, timeout=60)
     conn.execute("PRAGMA journal_mode=WAL")

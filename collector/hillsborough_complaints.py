@@ -138,24 +138,9 @@ def ensure_county_schema(conn: sqlite3.Connection) -> None:
     """
     Ensures `foreclosure_cases` and `foreclosure_runs` exist and adds the `county`
     and `metadata_json` columns if migrating from the Miami-Dade-only schema.
+    (The shared implementation lives in complaints_collect; every county uses it.)
     """
-    conn.executescript(complaints_collect.SCHEMA)
-    cols = {
-        r[1]
-        for r in conn.execute("PRAGMA table_info(foreclosure_cases)").fetchall()
-    }
-    if "county" not in cols:
-        conn.execute(
-            "ALTER TABLE foreclosure_cases ADD COLUMN county TEXT NOT NULL DEFAULT 'MIAMI-DADE'"
-        )
-    if "metadata_json" not in cols:
-        conn.execute(
-            "ALTER TABLE foreclosure_cases ADD COLUMN metadata_json TEXT"
-        )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_fc_county ON foreclosure_cases(county)"
-    )
-    conn.commit()
+    complaints_collect.ensure_county_schema(conn)
 
 
 def match_target_case_type(desc: str) -> Optional[Tuple[str, str, bool]]:

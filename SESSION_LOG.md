@@ -4,6 +4,20 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-11-04 — DUVAL COUNTY COMPLAINTS COLLECTOR BUILT (offline-tested; NOT deployed, NOT scheduled)
+
+Owner: "Build it" for Duval complaints, with their own CORE login (never typed or seen by Claude; they signed in in the browser pane). Full write-up: `docs/DUVAL_COMPLAINTS.md`.
+
+- **Site facts (verified live through the signed-in browser session):** CORE is ASP.NET AJAX; sign-in `InteractiveLogin` returns a token; calls are JSON POSTs to `/internal/CoreWebSvc.asmx/<Method>` (`CaseSearchBegin`, `CaseSearchUpdate` page:N, `GetCaseById`); results arrive as `BodyHtml`. Documents are `GET /court/case/<caseID>/docket/<docID>/content.pdf` with the cookie. Search: CaseType `CA` + CaseTypeList (Commercial 488,489,490; Non-Homestead 494,495,496) + FileDate `MM/DD/YYYY-MM/DD/YYYY`; 25 cases a page. Complaint PDFs are SCANS (header stamp only has text), OCR reads them well. Most documents are VOR (clerk releases each by hand); public-access accounts cannot request.
+- **Bot Check:** the portal can return a reCAPTCHA (`CaptchaChallenge`). It never did in this work. The client raises `BotCheckError` and the run stops (exit 3); nothing solves or works around it.
+- **Built:** `duval_session.py` (sign-in + calls, creds from `DUVAL_CORE_USER`/`DUVAL_CORE_PASS`, never logged), `duval_complaints.py` (discover, band rule = only "$250,000 or More" fetched, fetch, VOR retry weekly 8 weeks, county `DUVAL`, id `DU:<id>`, metadata_json), `run_duval_complaints_daily.sh` (cron line in the header, NOT installed), `tests/check_duval_complaints.py` + fixtures (real captured case markup; passes). Shared `complaints_collect.ensure_county_schema` now backs both Hillsborough and Duval (its checks pass).
+- **Mistake to remember:** my first document click used coordinates from a stale screenshot and opened the summons (D9) instead of the complaint; the owner caught it. Confirm the docket line by document id/row, not position, before clicking.
+- **NOT verified:** the Python sign-in against the live site (needs the owner to run `duval_session.py` with their credentials in their own shell); what an unreleased image looks like in the HTML; extraction accuracy on Duval complaints (gate: hand-check 20-40 before Duval can show "Qualifies").
+- **Not done:** no run-log row (foreclosure_runs has no county column); no dashboard county filter; nothing deployed or scheduled. Test PDF (case 26-CA-7533 complaint) is in the owner's `~/Downloads`.
+- **Owner decisions open:** register the CORE account (Registration Agreement) to request releases; allow an unattended droplet login (check the Clerk's terms); lower claim bands; order vs the Hillsborough document route.
+
+---
+
 ## 2026-11-02 (evening) — F1 DEPLOYED + VERIFIED; TRANSACTION-TYPE LABELS RENAMED (owner-approved)
 
 - **F1 live.** Backup `backup_pre_type_persist.db` -> pull `1caf4df` -> build -> restart -> `reseed_entity_types.py` (7,091 rows) -> `normalize.py` 16:20-~19:00 UTC ("Preserved 7,095 AI verdicts, 2 overrides") -> cache-clearing restart (env intact, /login 200). Live vs rehearsal: entity_nodes OTHER 3,687 / TRUST 3,347 / PC 2,366 / BANK 2,154 / SERVICER 1,329, no NULL types; MARKET_TRANSFER 63,017 ($247.9B) vs 63,001; old INTO_INSTITUTION 2,677 ($13.77B vs $13.74B); PC filings 12,255 / 2,366 names. Small count drift = new documents since the rehearsal copy. Before (wiped, what the dashboard showed): 47,209 / $184.2B, 12,168 / $35.6B, 6,838 / 92.
