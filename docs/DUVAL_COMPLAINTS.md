@@ -1,6 +1,6 @@
 # Duval County Foreclosure Complaints — Collector
 
-**Status:** built and tested offline (4 Nov 2026) · **NOT deployed, NOT scheduled** · live sign-in not yet exercised by the collector
+**Status:** built, tested offline, and run live by the owner (4 Nov 2026: sign-in, search of 20 cases, 2 complaints downloaded and checked) · **NOT deployed, NOT scheduled**
 **Code:** `collector/duval_session.py`, `collector/duval_complaints.py`, `collector/run_duval_complaints_daily.sh`, `collector/tests/check_duval_complaints.py` (+ fixtures)
 
 ## In plain English
@@ -53,7 +53,9 @@ Production would need `DUVAL_CORE_USER` / `DUVAL_CORE_PASS` added to `/opt/amo-d
 
 - **Verified live (through the signed-in browser session, 4 Nov 2026):** the search payload, paging, case-open payload, the document URL and download, the HTML structure parsed by the code, and that none of these calls raised a Bot Check.
 - **Verified offline (`check_duval_complaints.py`, no network):** the search/case parsers on real captured markup, band rules, which docket line is the complaint, storage and idempotence next to a Miami-Dade-schema table, fetch outcomes (downloaded / not released / no complaint line), and that a Bot Check stops the run.
-- **Not verified:** the Python sign-in itself (`InteractiveLogin`) and the cookie flow outside a browser; an unreleased image's HTML; extraction quality on Duval complaints beyond 3 OCR'd pages (the gate below applies).
+- **Verified live by the owner's own run (4 Nov 2026, their terminal, their login):** the Python sign-in; a one-week search (20 cases: 16 below the $250,000 band, 4 in band); fetch of 2 complaints (Oceanus, 35 pages; McClendon, 86 pages). Page counts matched the docket, the headers carried the right case numbers, and OCR of a page read the complaint body.
+- **Two things the live run taught:** (1) the case page served to the collector's session gives each image a click handler (`beginImageJob(caseID, docketID, ...)`), not a `content.pdf` link, so the URL is built from the IDs (every released complaint was first misread as unreleased); (2) the first document request came back as a non-PDF until the collector also set the cookies the site's own page script sets after sign-in (`token`, `accessType`, `displayName`) and sent a referrer. Which of the two changes fixed it was not isolated.
+- **Not verified:** what an unreleased image looks like in the HTML (every complaint seen so far was released); extraction accuracy on Duval complaints (nothing has been extracted yet; the gate below applies); behavior over many consecutive days (the Clerk could still raise a Bot Check under a daily schedule).
 
 ## Gate before Duval shows "Qualifies"
 
