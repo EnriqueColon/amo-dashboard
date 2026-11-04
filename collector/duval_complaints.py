@@ -111,6 +111,16 @@ class _Builder(HTMLParser):
         self.cur.order.append(data)
 
 
+def _raw_html(node: "_Node", limit: int = 700) -> str:
+    """Compact markup of a node, for notes that explain why a link was not found."""
+    def ser(n):
+        if isinstance(n, str):
+            return re.sub(r"\s+", " ", n)
+        attrs = "".join(f' {k}="{v}"' for k, v in n.attrs.items() if k in ("href", "class", "id", "title", "onclick"))
+        return f"<{n.tag}{attrs}>" + "".join(ser(c) for c in n.order) + f"</{n.tag}>"
+    return ser(node)[:limit]
+
+
 def parse_html(html: str) -> _Node:
     b = _Builder()
     b.feed(html or "")
@@ -232,7 +242,10 @@ def parse_case_html(html: str) -> dict:
                 continue
             tds = [t for t in tb.children[0].children if t.tag == "td"]
             line = re.match(r"\s*(\d+)", tds[0].get_text())
-            a = next((x for x in find_all(tb, tag="a") if "content.pdf" in x.attrs.get("href", "")), None)
+            # the image cell's link; prefer the documented content.pdf form, but take any link in the cell
+            cell = first(tb, cls="docketImageContainer")
+            links = [x for x in find_all(cell if cell is not None else tb, tag="a") if x.attrs.get("href")]
+            a = next((x for x in links if "content.pdf" in x.attrs["href"].lower()), links[0] if links else None)
             state =" ".join(s.get_text() for s in find_all(tb, tag="span")
                              if "ImageLine" in s.attrs.get("id", "") and s.get_text())
             pages = None
@@ -242,6 +255,7 @@ def parse_case_html(html: str) -> dict:
             out["dockets"].append({
                 "line": int(line.group(1)) if line else None, "description": desc.get_text(),
                 "pages": pages, "href": a.attrs["href"] if a else None, "image_state": state or None,
+                "cell_html": None if a else _raw_html(tb),
                 "entered": iso_us(tds[2].get_text()) if len(tds) > 2 else None})
     return out
 
@@ -333,6 +347,10 @@ def fetch_one(conn, core, row) -> str:
         din = entry["line"]
         if not entry["href"]:
             status, note = "complaint_not_public", f"Complaint not released yet ({entry['image_state'] or 'no image link'})"
+            if entry["image_state"] and re.search(r"available|ready to view|public access", entry["image_state"], re.I):
+                # the Clerk says it is available but we found no link: keep the raw markup so the cause is visible
+                note += " | NO LINK FOUND: " + (entry.get("cell_html") or "")[:400]
+                print(f"  WARNING {row['case_number']}: complaint marked available but no link found")
         else:
             data = core.pdf(entry["href"])
             if not data.startswith(b"%PDF"):
