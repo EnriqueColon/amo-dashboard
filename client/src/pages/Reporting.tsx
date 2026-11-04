@@ -1,5 +1,5 @@
-import { useState, useRef } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { useQuery, useMutation, useQueryClient, useInfiniteQuery, useQueries } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import DocLink from '@/components/DocLink';
 import { DefTerm } from '@/components/DefTerm';
@@ -11,7 +11,7 @@ import {
   LayoutList, Search, X, ChevronLeft, ChevronRight,
   CheckCircle, Clock, ExternalLink, Download,
   BarChart2, TrendingUp, TrendingDown, Users, PieChart,
-  ArrowUpRight, ChevronDown, ChevronUp, Crosshair, Printer, Rss, Table2, Gavel,
+  ArrowUpRight, ChevronDown, ChevronUp, Crosshair, Printer, Table2, Gavel, Star, Plus,
 } from 'lucide-react';
 import EntityDetailPanel from '@/components/EntityDetailPanel';
 import {
@@ -23,7 +23,7 @@ import CrossCountyNote from '@/components/CrossCountyNote';
 import { CountyCell } from '@/components/CountyCell';
 import { FilterHint } from '@/components/FilterHint';
 import {
-  CATEGORY_DEFS, DOC_TYPE_DEFS, REVIEW_DEFS, TARGETS_ONLY_DEF, DIRECTION_DEFS,
+  CATEGORY_DEFS, DOC_TYPE_DEFS, REVIEW_DEFS, DIRECTION_DEFS,
   CHART_VIEW_DEFS, PARTICIPANT_VIEW_DEFS,
 } from '@/lib/filterDefinitions';
 
@@ -717,121 +717,296 @@ function useReviewMutations() {
   return { reviewMutation: review, unreviewMutation: unreview };
 }
 
-// ── Activity feed card (open testing) ────────────────────────────────────────
-// Its own card below the table (owner, 4 Nov 2026: "the table and the feed
-// should be separate cards"), with its own pages and its own scroll area so 50
-// cards do not push the rest of the page down. Same filters and data as the
-// table; one feed even when several firms each get their own table.
-function ActivityFeed({ filterQs }: { filterQs: string }) {
-  const [page, setPageState] = useState(1);
-  const [profile, setProfile] = useState<string | null>(null);
-  const listRef = useRef<HTMLDivElement>(null);
-  const setPage = (f: (p: number) => number) => { setPageState(f); listRef.current?.scrollTo({ top: 0 }); };
+// ── Feed streams (open testing) ──────────────────────────────────────────────
+// Social layout (owner, 4 Nov 2026): the feed is the middle column, loaded 50
+// at a time as you scroll. Each loaded page n also asks for the complaints
+// filed in [oldest date on page n, oldest date on page n-1), so every complaint
+// appears exactly once, next to the assignments of its dates.
+const minRecDate = (rs: any[]) => rs.reduce((m: string, r: any) => (!m || (r.rec_date && r.rec_date < m) ? r.rec_date : m), '');
+
+function useEndless(onReach: () => void, enabled: boolean) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || !enabled) return;
+    const io = new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) onReach(); }, { rootMargin: '600px' });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [onReach, enabled]);
+  return ref;
+}
+
+function FeedStream({ filterQs, includeComplaints, onOpenEntity }: {
+  filterQs: string;
+  includeComplaints: boolean;
+  onOpenEntity: (n: string) => void;
+}) {
   const { reviewMutation, unreviewMutation } = useReviewMutations();
-
-  const qs = `?page=${page}&limit=50${filterQs}`;
-  const { data, isLoading } = useQuery({
-    queryKey: ['/api/reporting', qs],
-    queryFn: () => apiRequest('GET', `/api/reporting${qs}`).then(r => r.json()),
-    placeholderData: (prev: any) => prev,
+  const q = useInfiniteQuery({
+    queryKey: ['/api/reporting', 'stream', filterQs],
+    queryFn: ({ pageParam }) => apiRequest('GET', `/api/reporting?page=${pageParam}&limit=50${filterQs}`).then(r => r.json()),
+    initialPageParam: 1,
+    getNextPageParam: (last: any) => (last.page < last.pages ? last.page + 1 : undefined),
   });
-
-  // Foreclosure complaints mixed into the feed. Page n shows the complaints
-  // filed in [oldest date on page n, oldest date on page n-1), so every date is
-  // covered exactly once: page 1 has no upper bound, the last page no lower.
-  // They describe no assignment, so the review / document-type / "Shows"
-  // filters (all about assignments) hide them; search and firm filters apply
-  // to the plaintiff.
-  const [showComplaints, setShowComplaintsState] = useState<boolean>(() => {
-    try { return localStorage.getItem(COMPLAINTS_KEY) !== '0'; } catch { return true; }
-  });
-  const setShowComplaints = (v: boolean) => {
-    setShowComplaintsState(v);
-    try { localStorage.setItem(COMPLAINTS_KEY, v ? '1' : '0'); } catch { /* private window */ }
-  };
+  const pages: any[] = q.data?.pages || [];
   const fp = new URLSearchParams(filterQs);
-  const complaintsBlocked = !!(fp.get('reviewed') || fp.get('doc_type') || fp.get('category'));
-  const prevQs = `?page=${page - 1}&limit=50${filterQs}`;
-  const { data: prevData } = useQuery({
-    queryKey: ['/api/reporting', prevQs],
-    queryFn: () => apiRequest('GET', `/api/reporting${prevQs}`).then(r => r.json()),
-    enabled: page > 1,
+
+  const complaintQueries = useQueries({
+    queries: pages.map((pg, i) => {
+      const cq = new URLSearchParams();
+      const from = pg.page < pg.pages ? minRecDate(pg.rows) : '';
+      const toBefore = i > 0 ? minRecDate(pages[i - 1].rows) : '';
+      if (from) cq.set('from', from);
+      if (toBefore) cq.set('to_before', toBefore);
+      for (const k of ['search', 'start_date', 'end_date', 'targets']) if (fp.get(k)) cq.set(k, fp.get(k)!);
+      if (fp.get('min_amount')) cq.set('min_principal', fp.get('min_amount')!);
+      fp.getAll('entities').forEach(e => cq.append('entities', e));
+      cq.set('cfns', (pg.rows || []).map((r: any) => r.cfn).join(','));
+      return {
+        queryKey: ['/api/reporting/feed-complaints', cq.toString()],
+        queryFn: () => apiRequest('GET', `/api/reporting/feed-complaints?${cq.toString()}`).then(r => r.json()),
+        staleTime: 60_000,
+      };
+    }),
   });
-  const rows: any[] = data?.rows || [];
-  const minDate = (rs: any[]) => rs.reduce((m: string, r: any) => (!m || (r.rec_date && r.rec_date < m) ? r.rec_date : m), '');
-  const from = data && page < data.pages ? minDate(rows) : '';
-  const to = page > 1 ? minDate(prevData?.rows || []) : '';
-  const feedQs = new URLSearchParams();
-  if (from) feedQs.set('from', from);
-  if (to) feedQs.set('to_before', to);
-  if (fp.get('search')) feedQs.set('search', fp.get('search')!);
-  fp.getAll('entities').forEach(e => feedQs.append('entities', e));
-  feedQs.set('cfns', rows.map(r => r.cfn).join(','));
-  const feedReady = !!data && (page === 1 || !!prevData);
-  const { data: feedExtra } = useQuery({
-    queryKey: ['/api/reporting/feed-complaints', feedQs.toString()],
-    queryFn: () => apiRequest('GET', `/api/reporting/feed-complaints?${feedQs.toString()}`).then(r => r.json()),
-    enabled: feedReady,
-  });
-  const cfnMatches: Record<string, any[]> = feedExtra?.cfn_matches || {};
-  const complaintItems: any[] = showComplaints && !complaintsBlocked ? (feedExtra?.complaints || []) : [];
-  const feedItems = [
+
+  const cfnMatches: Record<string, any[]> = {};
+  const seenCase = new Set<string>();
+  const complaints: any[] = [];
+  for (const cqr of complaintQueries) {
+    Object.assign(cfnMatches, cqr.data?.cfn_matches || {});
+    if (includeComplaints) for (const c of cqr.data?.complaints || []) {
+      if (!seenCase.has(c.case_id)) { seenCase.add(c.case_id); complaints.push(c); }
+    }
+  }
+  const rows = pages.flatMap(p => p.rows || []);
+  const items = [
     ...groupRows(rows).map(g => ({ kind: 'aom' as const, date: String(g[0].rec_date || ''), key: g[0].cfn, g })),
-    ...complaintItems.map(c => ({ kind: 'complaint' as const, date: String(c.filing_date || ''), key: `c-${c.case_id}`, c })),
+    ...complaints.map(c => ({ kind: 'complaint' as const, date: String(c.filing_date || ''), key: `c-${c.case_id}`, c })),
   ].sort((a, b) => b.date.localeCompare(a.date));
 
+  const more = useCallback(() => { if (q.hasNextPage && !q.isFetchingNextPage) q.fetchNextPage(); }, [q.hasNextPage, q.isFetchingNextPage, q.fetchNextPage]);
+  const sentinel = useEndless(more, !!q.hasNextPage);
+
+  if (q.isLoading) return <div className="space-y-2.5">{Array(4).fill(0).map((_, i) => <Skeleton key={i} className="h-28 w-full rounded-xl" />)}</div>;
+  if (!items.length) return <p className="px-4 py-10 text-center text-muted-foreground text-xs bg-card border border-border rounded-xl">Nothing here under the current filters.</p>;
+  const total = pages[0]?.total ?? 0;
   return (
-    <div className="bg-card border border-border rounded-lg overflow-hidden print:hidden">
-      <div className="flex items-center justify-between gap-2 flex-wrap px-3 py-2 border-b border-border bg-muted/20">
-        <h3 className="text-xs font-semibold flex items-center gap-1.5">
-          <Rss size={11} className="text-primary" />Activity feed
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/15 text-primary font-medium">Open testing</span>
-          {data && <span className="font-normal text-muted-foreground ml-1">{data.total.toLocaleString()} transaction{data.total === 1 ? '' : 's'}</span>}
-        </h3>
-      </div>
-      <div className="px-3 py-2 border-b border-border bg-primary/5 text-[11px] text-muted-foreground">
-        We're trying a feed layout for the same filings as the table above. Click any firm's name to open its profile. Try it out and tell us what you'd change.
-      </div>
-
-      {feedExtra?.active && (
-        <div className="px-3 py-1.5 border-b border-border flex items-center gap-2 flex-wrap text-[11px] print:hidden">
-          <label className="inline-flex items-center gap-1.5 cursor-pointer">
-            <input type="checkbox" checked={showComplaints} onChange={e => setShowComplaints(e.target.checked)} className="h-3 w-3" />
-            <Gavel size={11} className="text-red-700" />Show foreclosure complaints in the feed
-          </label>
-          {showComplaints && complaintsBlocked && (
-            <span className="text-muted-foreground">Hidden while the Review, Shows or Document filters are set; those only apply to assignments.</span>
-          )}
-          {showComplaints && !complaintsBlocked && (
-            <span className="text-muted-foreground">{complaintItems.length} on this page</span>
-          )}
-        </div>
-      )}
-
-      <div ref={listRef} className="p-3 space-y-2.5 bg-muted/10 max-h-[75vh] overflow-y-auto">
-          {isLoading
-            ? Array(4).fill(0).map((_, i) => <Skeleton key={i} className="h-28 w-full rounded-xl" />)
-            : feedItems.map(it => it.kind === 'complaint'
-              ? <ComplaintCard key={it.key} c={it.c} onOpenEntity={setProfile} />
-              : (
-                <FeedCard key={it.key} group={it.g}
-                  foreclosures={dedupeCases(it.g.flatMap((r: any) => cfnMatches[r.cfn] || []))}
-                  onOpenEntity={setProfile}
-                  onReview={c => reviewMutation.mutate(c)}
-                  onUnreview={c => unreviewMutation.mutate(c)} />
-              ))}
-          {!isLoading && !data?.rows?.length && (
-            <p className="px-4 py-10 text-center text-muted-foreground text-xs">No records found.</p>
-          )}
-      </div>
-
-
-      <Pager page={page} setPage={setPage} data={data} />
-
-      {profile && <EntityDetailPanel key={profile} entityName={profile} onClose={() => setProfile(null)} onNavigate={setProfile} />}
+    <div className="space-y-2.5">
+      {items.map(it => it.kind === 'complaint'
+        ? <ComplaintCard key={it.key} c={it.c} onOpenEntity={onOpenEntity} />
+        : <FeedCard key={it.key} group={it.g}
+            foreclosures={dedupeCases(it.g.flatMap((r: any) => cfnMatches[r.cfn] || []))}
+            onOpenEntity={onOpenEntity}
+            onReview={c => reviewMutation.mutate(c)}
+            onUnreview={c => unreviewMutation.mutate(c)} />)}
+      <div ref={sentinel} />
+      <p className="text-center text-[11px] text-muted-foreground py-2">
+        {q.isFetchingNextPage ? 'Loading more…'
+          : q.hasNextPage ? <button onClick={more} className="text-primary hover:underline">Load more</button>
+          : `That's all ${total.toLocaleString()} filing${total === 1 ? '' : 's'}.`}
+        {' '}<span className="opacity-70">Showing {rows.length.toLocaleString()} of {total.toLocaleString()}.</span>
+      </p>
     </div>
   );
 }
+
+// Foreclosures tab: complaints only, newest first, 30 more each time you
+// reach the bottom (the full list is small and comes in one request).
+function ComplaintsStream({ qs, onOpenEntity }: { qs: string; onOpenEntity: (n: string) => void }) {
+  const [shown, setShown] = useState(30);
+  const { data, isLoading } = useQuery({
+    queryKey: ['/api/reporting/feed-complaints', 'all', qs],
+    queryFn: () => apiRequest('GET', `/api/reporting/feed-complaints?${qs}`).then(r => r.json()),
+  });
+  const list: any[] = [...(data?.complaints || [])].sort((a, b) => String(b.filing_date || '').localeCompare(String(a.filing_date || '')));
+  const more = useCallback(() => setShown(n => n + 30), []);
+  const sentinel = useEndless(more, shown < list.length);
+  if (isLoading) return <div className="space-y-2.5">{Array(3).fill(0).map((_, i) => <Skeleton key={i} className="h-28 w-full rounded-xl" />)}</div>;
+  if (data && !data.active) return <p className="px-4 py-10 text-center text-muted-foreground text-xs bg-card border border-border rounded-xl">Foreclosure complaints are not collected in this database.</p>;
+  if (!list.length) return <p className="px-4 py-10 text-center text-muted-foreground text-xs bg-card border border-border rounded-xl">No foreclosure complaints under the current filters.</p>;
+  return (
+    <div className="space-y-2.5">
+      {list.slice(0, shown).map(c => <ComplaintCard key={c.case_id} c={c} onOpenEntity={onOpenEntity} />)}
+      <div ref={sentinel} />
+      <p className="text-center text-[11px] text-muted-foreground py-2">
+        {shown < list.length ? <button onClick={more} className="text-primary hover:underline">Load more</button> : `That's all ${list.length} complaint${list.length === 1 ? '' : 's'}.`}
+      </p>
+    </div>
+  );
+}
+
+// ── Side-column cards ─────────────────────────────────────────────────────────
+function SideCard({ title, icon: Icon, children, action }: { title: string; icon: any; children: React.ReactNode; action?: React.ReactNode }) {
+  return (
+    <div className="bg-card border border-border rounded-xl p-3">
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <p className="text-xs font-semibold flex items-center gap-1.5"><Icon size={12} className="text-primary" />{title}</p>
+        {action}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function FollowingCard({ targets, onOpenEntity, onShowForYou }: { targets: any[]; onOpenEntity: (n: string) => void; onShowForYou: () => void }) {
+  // Busiest in the last 90 days first, then most recently active.
+  const top = [...targets].sort((a, b) =>
+    ((b.txns_90d ?? 0) - (a.txns_90d ?? 0)) || String(b.last_activity ?? '').localeCompare(String(a.last_activity ?? ''))).slice(0, 8);
+  return (
+    <SideCard title="Following" icon={Crosshair}
+      action={<a href="#/targets" className="text-[10px] text-muted-foreground hover:text-foreground">Manage</a>}>
+      {top.length === 0 ? (
+        <p className="text-[11px] text-muted-foreground">You aren't following any firms yet. Use + Follow on a firm under "Firms to watch".</p>
+      ) : (
+        <ul className="space-y-1">
+          {top.map(t => (
+            <li key={t.entity} className="flex items-center justify-between gap-2 text-[11px]">
+              <button onClick={() => onOpenEntity(t.entity)} className="truncate text-left hover:text-primary hover:underline" title={t.entity}>{t.entity}</button>
+              <span className="text-muted-foreground shrink-0 tabular-nums" title={t.txns_90d ? 'Filings in the last 90 days' : 'Most recent filing'}>
+                {t.txns_90d ? `${t.txns_90d} · 90d` : t.last_activity ? `last ${t.last_activity}` : '—'}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {targets.length > 0 && (
+        <button onClick={onShowForYou} className="mt-2 text-[11px] text-primary hover:underline">
+          See activity from your {targets.length.toLocaleString()} target{targets.length === 1 ? '' : 's'}
+        </button>
+      )}
+    </SideCard>
+  );
+}
+
+function TrendingCard({ dateQ, onOpenEntity }: { dateQ: string; onOpenEntity: (n: string) => void }) {
+  const [mode, setMode] = useState<'active' | 'buyers' | 'sellers'>('active');
+  const { data, isLoading } = useQuery({
+    queryKey: ['/api/reporting/participants', dateQ],
+    queryFn: () => apiRequest('GET', `/api/reporting/participants${dateQ ? '?' + dateQ : ''}`).then(r => r.json()),
+  });
+  const rows: any[] = (mode === 'sellers' ? data?.topSellers : mode === 'buyers' ? data?.topBuyers : data?.mostActive) || [];
+  const val = (r: any) => (mode === 'sellers' ? r.transfers_out : mode === 'buyers' ? r.transfers_in : r.total);
+  return (
+    <SideCard title="Trending firms" icon={TrendingUp}>
+      <div className="flex gap-1 mb-2">
+        {([['active', 'Most active'], ['buyers', 'Buyers'], ['sellers', 'Sellers']] as const).map(([k, l]) => (
+          <button key={k} onClick={() => setMode(k)}
+            className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors ${mode === k ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}>{l}</button>
+        ))}
+      </div>
+      {isLoading ? <Skeleton className="h-28 w-full" /> : (
+        <ol className="space-y-1">
+          {rows.slice(0, 6).map((r, i) => (
+            <li key={r.entity} className="flex items-center gap-2 text-[11px]">
+              <span className="text-muted-foreground w-3 text-right shrink-0">{i + 1}</span>
+              <button onClick={() => onOpenEntity(r.entity)} className="truncate flex-1 text-left hover:text-primary hover:underline" title={r.entity}>{r.entity}</button>
+              <span className="tabular-nums font-medium shrink-0">{(val(r) ?? 0).toLocaleString()}</span>
+            </li>
+          ))}
+          {rows.length === 0 && <li className="text-[11px] text-muted-foreground">No activity in this period.</li>}
+        </ol>
+      )}
+    </SideCard>
+  );
+}
+
+function VolumeCard({ chartQ, open, onToggle }: { chartQ: string; open: boolean; onToggle: () => void }) {
+  const { data } = useQuery({
+    queryKey: ['/api/reporting/chart', 'monthly', chartQ],
+    queryFn: () => apiRequest('GET', `/api/reporting/chart?type=monthly${chartQ ? '&' + chartQ : ''}`).then(r => r.json()),
+  });
+  const rows: any[] = Array.isArray(data) ? data.slice(-12) : [];
+  const max = Math.max(1, ...rows.map(r => r.count || 0));
+  return (
+    <SideCard title="Monthly volume" icon={BarChart2}
+      action={<button onClick={onToggle} className="text-[10px] text-primary hover:underline">{open ? 'Hide charts' : 'Full charts'}</button>}>
+      {rows.length ? (
+        <>
+          <div className="flex items-end gap-0.5 h-16">
+            {rows.map(r => (
+              <div key={r.period} className="flex-1 bg-primary/60 hover:bg-primary rounded-sm" style={{ height: `${Math.max(4, (r.count / max) * 100)}%` }}
+                title={`${r.period}: ${Number(r.count).toLocaleString()} filings`} />
+            ))}
+          </div>
+          <div className="flex justify-between text-[9px] text-muted-foreground mt-1"><span>{rows[0].period}</span><span>{rows[rows.length - 1].period}</span></div>
+        </>
+      ) : <p className="text-[11px] text-muted-foreground">No filings in this period.</p>}
+    </SideCard>
+  );
+}
+
+function PeriodStatsCard({ filingsQs, complaintsQs }: { filingsQs: string; complaintsQs: string }) {
+  const { data: all } = useQuery({
+    queryKey: ['/api/reporting', 'stats-all', filingsQs],
+    queryFn: () => apiRequest('GET', `/api/reporting?page=1&limit=1${filingsQs}`).then(r => r.json()),
+  });
+  const pendingQs = filingsQs.replace(/&reviewed=[^&]*/, '') + '&reviewed=no';
+  const { data: pending } = useQuery({
+    queryKey: ['/api/reporting', 'stats-pending', pendingQs],
+    queryFn: () => apiRequest('GET', `/api/reporting?page=1&limit=1${pendingQs}`).then(r => r.json()),
+  });
+  const { data: fc } = useQuery({
+    queryKey: ['/api/reporting/feed-complaints', 'all', complaintsQs],
+    queryFn: () => apiRequest('GET', `/api/reporting/feed-complaints?${complaintsQs}`).then(r => r.json()),
+  });
+  const big = (fc?.complaints || []).filter((c: any) => c.verdict === 'qualifies').length;
+  const Row = ({ label, value, hint }: { label: string; value: any; hint: string }) => (
+    <div className="flex items-center justify-between text-[11px] py-0.5" title={hint}>
+      <span className="text-muted-foreground">{label}</span><span className="font-semibold tabular-nums">{value ?? '—'}</span>
+    </div>
+  );
+  return (
+    <SideCard title="This period" icon={Clock}>
+      <Row label="Filings" value={all?.total?.toLocaleString()} hint="Assignments under the current filters" />
+      <Row label="Not reviewed yet" value={pending?.total?.toLocaleString()} hint="Of those, filings nobody has marked reviewed" />
+      {fc?.active && <Row label="Foreclosure complaints" value={fc.complaints.length.toLocaleString()} hint="Complaints filed in the period" />}
+      {fc?.active && <Row label="…that qualify" value={big.toLocaleString()} hint="Unpaid principal at least $500,000 and no right-to-reinstate clause (Complaints tab rule)" />}
+    </SideCard>
+  );
+}
+
+function FirmsToWatchCard({ dateQ, targets, onOpenEntity }: { dateQ: string; targets: any[]; onOpenEntity: (n: string) => void }) {
+  const qc = useQueryClient();
+  const { data } = useQuery({
+    queryKey: ['/api/reporting/participants', dateQ],
+    queryFn: () => apiRequest('GET', `/api/reporting/participants${dateQ ? '?' + dateQ : ''}`).then(r => r.json()),
+  });
+  const following = new Set(targets.map(t => String(t.entity).toUpperCase()));
+  const picks = ((data?.mostActive || []) as any[]).filter(r => !following.has(String(r.entity).toUpperCase())).slice(0, 4);
+  const follow = useMutation({
+    mutationFn: (entity: string) => apiRequest('POST', '/api/targets', { entity }).then(r => r.json()),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['/api/targets'] }),
+  });
+  if (!picks.length) return null;
+  return (
+    <SideCard title="Firms to watch" icon={Star}>
+      <p className="text-[10px] text-muted-foreground mb-1.5">Busy this period and not on your targets yet.</p>
+      <ul className="space-y-1">
+        {picks.map(r => (
+          <li key={r.entity} className="flex items-center justify-between gap-2 text-[11px]">
+            <button onClick={() => onOpenEntity(r.entity)} className="truncate text-left hover:text-primary hover:underline" title={r.entity}>{r.entity}</button>
+            <button onClick={() => follow.mutate(r.entity)} disabled={follow.isPending}
+              className="shrink-0 inline-flex items-center gap-0.5 text-primary hover:underline" title="Add to your Targets">
+              <Plus size={10} />Follow
+            </button>
+          </li>
+        ))}
+      </ul>
+    </SideCard>
+  );
+}
+
+const FEED_TABS = [
+  ['foryou', 'For you'],
+  ['all', 'All activity'],
+  ['foreclosures', 'Foreclosures'],
+  ['big', 'Big tickets'],
+  ['table', 'Table'],
+] as const;
+type FeedTab = typeof FEED_TABS[number][0];
+const TAB_KEY = 'reporting:tab';
+const BIG_TICKET = 5_000_000;
 
 // ── Filing table (one instance per selected entity when 2+ are chosen) ───────
 // filterQs carries all active filters (search, dates, review, targets, entity)
@@ -1017,7 +1192,25 @@ export default function Reporting() {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate]     = useState('');
   const [reviewed, setReviewed]   = useState('');
-  const [targetsOnly, setTargetsOnly] = useState(() => params.get('targets') === '1');
+  // Feed tab. "For you" = firms on the Targets list, so the old "Targets only"
+  // scope is now the tab; /reporting?targets=1 (Targets page links) opens it.
+  const [tab, setTabState] = useState<FeedTab>(() => {
+    if (params.get('targets') === '1') return 'foryou';
+    try { const t = localStorage.getItem(TAB_KEY); if (t && FEED_TABS.some(([k]) => k === t)) return t as FeedTab; } catch { /* private window */ }
+    return 'all';
+  });
+  const setTab = (t: FeedTab) => { setTabState(t); try { localStorage.setItem(TAB_KEY, t); } catch { /* private window */ } };
+  const targetsOnly = tab === 'foryou';
+  const [profile, setProfile] = useState<string | null>(null);
+  const [showCharts, setShowCharts] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [showComplaints, setShowComplaintsState] = useState<boolean>(() => {
+    try { return localStorage.getItem(COMPLAINTS_KEY) !== '0'; } catch { return true; }
+  });
+  const setShowComplaints = (v: boolean) => {
+    setShowComplaintsState(v);
+    try { localStorage.setItem(COMPLAINTS_KEY, v ? '1' : '0'); } catch { /* private window */ }
+  };
   const [entities, setEntities]   = useState<string[]>([]);
   // '' = both sides; 'assignor' = filings the selection sold/assigned out;
   // 'assignee' = filings it acquired. Applies to the filing tables + CSV export.
@@ -1068,8 +1261,8 @@ export default function Reporting() {
   const docTypeCounts = countsData?.docTypeCounts as Record<string, number> | undefined;
 
   const applySearch = () => setApplied(search);
-  const clearAll    = () => { setSearch(''); setApplied(''); setStartDate(''); setEndDate(''); setReviewed(''); setTargetsOnly(false); setEntities([]); setEntityRole(''); setDocType(''); setCategory(''); };
-  const hasFilters  = applied || startDate || endDate || reviewed || targetsOnly || entities.length > 0 || docType || category;
+  const clearAll    = () => { setSearch(''); setApplied(''); setStartDate(''); setEndDate(''); setReviewed(''); setEntities([]); setEntityRole(''); setDocType(''); setCategory(''); };
+  const hasFilters  = applied || startDate || endDate || reviewed || entities.length > 0 || docType || category;
 
   const handleExport = () => {
     window.location.href = `/api/reporting/export-report${exportQs}`;
@@ -1077,19 +1270,31 @@ export default function Reporting() {
 
   const handlePrint = () => window.print();
 
+  // Complaints describe no assignment, so assignment-only filters hide them.
+  const complaintsBlocked = !!(reviewed || docType || category);
+  const pill = (on: boolean, dim = false) =>
+    `h-6 px-2 rounded-full border text-[10px] font-medium transition-colors ${on ? 'bg-primary text-primary-foreground border-primary' : dim ? 'border-border text-muted-foreground/40 hover:text-muted-foreground' : 'border-border text-muted-foreground hover:text-foreground'}`;
+  const sideDateQ = [startDate && `start_date=${startDate}`, endDate && `end_date=${endDate}`, targetsOnly && 'targets=1', docType && `doc_type=${docType}`, category && `category=${category}`].filter(Boolean).join('&');
+  const complaintsQ = new URLSearchParams();
+  if (applied) complaintsQ.set('search', applied);
+  if (startDate) complaintsQ.set('start_date', startDate);
+  if (endDate) complaintsQ.set('end_date', endDate);
+  if (targetsOnly) complaintsQ.set('targets', '1');
+  entities.forEach(e => complaintsQ.append('entities', e));
+  const streamQs = filterQs + entitiesQ + roleQ + (tab === 'big' ? `&min_amount=${BIG_TICKET}` : '');
+
   return (
     // w-full: inside the flex-column <main>, mx-auto alone sizes this to its
     // content, and a long single-line name in the feed then widens the page.
     <div className="p-4 space-y-4 max-w-screen-2xl mx-auto w-full">
 
       {/* Header */}
-      <div className="flex items-center justify-between print:hidden">
-        <div>
-          <div className="flex items-center gap-2">
-            <LayoutList size={15} className="text-primary" />
-            <h1 className="text-lg font-semibold">Reporting</h1>
-            <span className="text-xs text-muted-foreground ml-1">{countyLabel(county)}</span>
-          </div>
+      <div className="flex items-center justify-between flex-wrap gap-2 print:hidden">
+        <div className="flex items-center gap-2 flex-wrap">
+          <LayoutList size={15} className="text-primary" />
+          <h1 className="text-lg font-semibold">Reporting</h1>
+          <span className="text-xs text-muted-foreground ml-1">{countyLabel(county)}</span>
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/15 text-primary font-medium" title="New layout we're testing. Tell us what you'd change.">Open testing</span>
         </div>
         <div className="flex gap-1.5">
           {entities.length > 0 && (
@@ -1104,147 +1309,192 @@ export default function Reporting() {
         </div>
       </div>
 
-      {/* Report builder — entity selection + date presets */}
-      <div className="bg-card border border-border rounded-lg p-3 space-y-2 print:hidden">
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <h2 className="text-sm font-semibold flex items-center gap-1.5">
-            <Crosshair size={12} className="text-primary" />Dynamic Report
-          </h2>
-          <div className="flex items-center gap-1 flex-wrap">
-            {DATE_PRESETS.map(([label, preset]) => {
-              const r = presetRange(preset);
-              const active = startDate === r.start && endDate === r.end;
-              return (
-                <button key={label}
-                  onClick={() => { setStartDate(r.start); setEndDate(r.end); }}
-                  className={`h-6 px-2 rounded-full border text-[10px] font-medium transition-colors ${active ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}>
-                  {label}
-                </button>
-              );
-            })}
-            {targetCount > 0 && (
-              <button onClick={useMyTargets}
-                className="h-6 px-2 rounded-full border border-border text-[10px] font-medium text-muted-foreground hover:text-foreground transition-colors">
-                Use my Targets
-              </button>
-            )}
-          </div>
-        </div>
-        <EntityPicker selected={entities} onChange={setEntitySelection} />
-        {entities.length === 0 && (
-          <p className="text-[11px] text-muted-foreground">
-            Pick one or more entities to generate a focused report — KPIs, activity timeline, counterparties, and a summary table. The filing table and CSV export below follow the same selection.
-          </p>
-        )}
-        {entities.length > 0 && (
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-[11px] text-muted-foreground">Direction:</span>
-            {([['', 'All activity'], ['assignor', 'Sold / assigned out'], ['assignee', 'Acquired']] as const).map(([val, label]) => (
-              <FilterHint key={val} def={DIRECTION_DEFS[val]}>
-                <button onClick={() => setEntityRole(val)}
-                  className={`h-6 px-2 rounded-full border text-[10px] font-medium transition-colors ${entityRole === val ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}>
-                  {label}
-                </button>
-              </FilterHint>
-            ))}
-            <span className="text-[10px] text-muted-foreground/70">applies to the filing tables and CSV export</span>
-          </div>
-        )}
-      </div>
+      {/* Social layout (owner, 4 Nov 2026): filters and followed firms on the
+          left, the feed in the middle, trending firms and totals on the right.
+          Below xl the right column folds into the middle; below lg everything
+          stacks, filters first. */}
+      <div className="grid grid-cols-1 lg:grid-cols-[230px_minmax(0,1fr)] xl:grid-cols-[230px_minmax(0,1fr)_270px] gap-4 items-start">
 
-      {/* Entity report (only when entities are selected) */}
-      <EntityReport entities={entities} startDate={startDate} endDate={endDate} />
-
-      {/* Market-wide charts (hidden when a specific report is active) */}
-      {entities.length === 0 && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <DynamicChart startDate={startDate} endDate={endDate} targetsOnly={targetsOnly} docType={docType} category={category} />
-          <ParticipantStats startDate={startDate} endDate={endDate} targetsOnly={targetsOnly} docType={docType} category={category} />
-        </div>
-      )}
-
-      {/* Filters */}
-      <div className="bg-card border border-border rounded-lg p-3 space-y-2 print:hidden">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
-          <div className="lg:col-span-2">
-            <Input placeholder="Search CFN, assignor, or assignee…" value={search}
+        {/* ── Left: search, filters, following ── */}
+        <aside className="space-y-3 print:hidden lg:sticky lg:top-0 lg:max-h-[calc(100vh-5rem)] lg:overflow-y-auto">
+          <SideCard title="Search" icon={Search}>
+            <Input placeholder="Firm, CFN, case number…" value={search}
               onChange={e => setSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && applySearch()}
               className="h-7 text-xs" />
-          </div>
-          <Input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="h-7 text-xs" />
-          <Input type="date" value={endDate}   onChange={e => setEndDate(e.target.value)}   className="h-7 text-xs" />
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-[11px] text-muted-foreground">Review:</span>
-          {[['', 'All'], ['no', 'Pending'], ['yes', 'Reviewed']].map(([val, label]) => (
-            <FilterHint key={val} def={REVIEW_DEFS[val]}>
-              <button onClick={() => setReviewed(val)}
-                className={`h-6 px-2 rounded-full border text-[10px] font-medium transition-colors ${reviewed === val ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}>
-                {label}
+            <div className="flex gap-1.5 mt-2">
+              <Button size="sm" onClick={applySearch} className="h-6 text-[11px] gap-1 flex-1"><Search size={10} />Search</Button>
+              {hasFilters && <Button size="sm" variant="ghost" onClick={clearAll} className="h-6 text-[11px] gap-1 text-muted-foreground"><X size={10} />Clear all</Button>}
+            </div>
+          </SideCard>
+
+          {/* Below lg the filters and Following fold away so the feed is not
+              pushed a full screen down. */}
+          <button onClick={() => setFiltersOpen(o => !o)}
+            className="lg:hidden w-full flex items-center justify-between bg-card border border-border rounded-xl px-3 py-2 text-xs font-semibold">
+            <span className="flex items-center gap-1.5"><LayoutList size={12} className="text-primary" />Filters and following{hasFilters ? ' (on)' : ''}</span>
+            {filtersOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          </button>
+          <div className={`${filtersOpen ? 'block' : 'hidden'} lg:block space-y-3`}>
+          <SideCard title="Filters" icon={LayoutList}>
+            <p className="text-[10px] text-muted-foreground mb-1">Time</p>
+            <div className="flex flex-wrap gap-1 mb-1.5">
+              {DATE_PRESETS.map(([label, preset]) => {
+                const r = presetRange(preset);
+                return (
+                  <button key={label} onClick={() => { setStartDate(r.start); setEndDate(r.end); }}
+                    className={pill(startDate === r.start && endDate === r.end)}>{label}</button>
+                );
+              })}
+            </div>
+            <div className="grid grid-cols-2 gap-1 mb-2.5">
+              <Input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="h-6 text-[10px] px-1" aria-label="From date" />
+              <Input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="h-6 text-[10px] px-1" aria-label="To date" />
+            </div>
+
+            <p className="text-[10px] text-muted-foreground mb-1">Show</p>
+            <div className="flex flex-wrap gap-1 mb-1">
+              {CATEGORY_OPTIONS.map(([val, label]) => (
+                <FilterHint key={val || 'loan'} def={CATEGORY_DEFS[val]}>
+                  <button onClick={() => setCategory(val)} className={pill(category === val)}>{label}</button>
+                </FilterHint>
+              ))}
+              <button onClick={() => setShowComplaints(!showComplaints)} className={`${pill(showComplaints)} inline-flex items-center gap-1`}
+                title="Mix foreclosure complaints into the feed">
+                <Gavel size={9} />Complaints
               </button>
-            </FilterHint>
-          ))}
-          <span className="text-[11px] text-muted-foreground ml-2">Shows:</span>
-          {CATEGORY_OPTIONS.map(([val, label]) => (
-            <FilterHint key={val || 'loan'} def={CATEGORY_DEFS[val]}>
-              <button onClick={() => setCategory(val)}
-                className={`h-6 px-2 rounded-full border text-[10px] font-medium transition-colors ${category === val ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}>
-                {label}
-              </button>
-            </FilterHint>
-          ))}
-          <span className="text-[11px] text-muted-foreground ml-2">Document:</span>
-          {DOC_TYPE_OPTIONS.map(([val, label]) => {
-            const n = docTypeCounts?.[val];
-            // A type with nothing under the current filters is left clickable but
-            // dimmed and labelled 0 — Broward's AST reads 0 in a Miami-Dade scope,
-            // and saying so is more use than hiding the option and leaving the
-            // reader to wonder where it went.
-            const empty = n === 0;
-            return (
-              <FilterHint key={val} def={DOC_TYPE_DEFS[val]}
-                extra={n === undefined ? undefined : `${n.toLocaleString()} filing${n === 1 ? '' : 's'} under the current filters`}>
-                <button onClick={() => setDocType(val)}
-                  className={`h-6 px-2 rounded-full border text-[10px] font-medium transition-colors ${docType === val ? 'bg-primary text-primary-foreground border-primary' : empty ? 'border-border text-muted-foreground/40 hover:text-muted-foreground' : 'border-border text-muted-foreground hover:text-foreground'}`}>
-                  {label}{n !== undefined && <span className="ml-1 opacity-60 tabular-nums">{n.toLocaleString()}</span>}
-                </button>
-              </FilterHint>
-            );
-          })}
-          <span className="text-[11px] text-muted-foreground ml-2">Scope:</span>
-          <FilterHint def={TARGETS_ONLY_DEF}
-            extra={targetCount === 0 ? 'You have no targets yet.' : `${targetCount} compan${targetCount === 1 ? 'y' : 'ies'} on your watchlist.`}>
-            <button onClick={() => setTargetsOnly(v => !v)}
-              className={`h-6 px-2 rounded-full border text-[10px] font-medium transition-colors inline-flex items-center gap-1 ${targetsOnly ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}>
-              <Crosshair size={9} />Targets only{targetCount > 0 && ` (${targetCount})`}
-            </button>
-          </FilterHint>
-          <div className="ml-auto flex gap-1.5">
-            <Button size="sm" onClick={applySearch} className="h-7 text-xs gap-1"><Search size={11} />Search</Button>
-            {hasFilters && <Button size="sm" variant="ghost" onClick={clearAll} className="h-7 text-xs gap-1 text-muted-foreground"><X size={11} />Clear</Button>}
+            </div>
+            {showComplaints && complaintsBlocked && (
+              <p className="text-[10px] text-muted-foreground mb-1">Complaints are hidden while Review, Document or a non-default Show filter is set; those only apply to assignments.</p>
+            )}
+
+            <p className="text-[10px] text-muted-foreground mb-1 mt-2">Document</p>
+            <div className="flex flex-wrap gap-1 mb-2">
+              {DOC_TYPE_OPTIONS.map(([val, label]) => {
+                const n = docTypeCounts?.[val];
+                return (
+                  <FilterHint key={val} def={DOC_TYPE_DEFS[val]}
+                    extra={n === undefined ? undefined : `${n.toLocaleString()} filing${n === 1 ? '' : 's'} under the current filters`}>
+                    <button onClick={() => setDocType(val)} className={pill(docType === val, n === 0)}>
+                      {label}{n !== undefined && <span className="ml-1 opacity-60 tabular-nums">{n.toLocaleString()}</span>}
+                    </button>
+                  </FilterHint>
+                );
+              })}
+            </div>
+
+            <p className="text-[10px] text-muted-foreground mb-1">Review</p>
+            <div className="flex flex-wrap gap-1">
+              {[['', 'All'], ['no', 'Pending'], ['yes', 'Reviewed']].map(([val, label]) => (
+                <FilterHint key={val} def={REVIEW_DEFS[val]}>
+                  <button onClick={() => setReviewed(val)} className={pill(reviewed === val)}>{label}</button>
+                </FilterHint>
+              ))}
+            </div>
+          </SideCard>
+
+          <FollowingCard targets={targets || []} onOpenEntity={setProfile} onShowForYou={() => setTab('foryou')} />
           </div>
-        </div>
+        </aside>
+
+        {/* ── Middle: report builder, tabs, feed ── */}
+        <section className="space-y-3 min-w-0">
+          <div className="bg-card border border-border rounded-xl p-3 space-y-2 print:hidden">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <h2 className="text-sm font-semibold flex items-center gap-1.5">
+                <Crosshair size={12} className="text-primary" />Build a report
+              </h2>
+              {targetCount > 0 && (
+                <button onClick={useMyTargets} className={pill(false)}>Use my Targets</button>
+              )}
+            </div>
+            <EntityPicker selected={entities} onChange={setEntitySelection} />
+            {entities.length === 0 && (
+              <p className="text-[11px] text-muted-foreground">
+                Pick one or more firms for a focused report: KPIs, activity timeline, counterparties and a summary table. The feed, table and Excel download follow the same selection.
+              </p>
+            )}
+            {entities.length > 0 && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-[11px] text-muted-foreground">Direction:</span>
+                {([['', 'All activity'], ['assignor', 'Sold / assigned out'], ['assignee', 'Acquired']] as const).map(([val, label]) => (
+                  <FilterHint key={val} def={DIRECTION_DEFS[val]}>
+                    <button onClick={() => setEntityRole(val)} className={pill(entityRole === val)}>{label}</button>
+                  </FilterHint>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <EntityReport entities={entities} startDate={startDate} endDate={endDate} />
+
+          {showCharts && entities.length === 0 && (
+            <div className="grid grid-cols-1 2xl:grid-cols-2 gap-3">
+              <DynamicChart startDate={startDate} endDate={endDate} targetsOnly={targetsOnly} docType={docType} category={category} />
+              <ParticipantStats startDate={startDate} endDate={endDate} targetsOnly={targetsOnly} docType={docType} category={category} />
+            </div>
+          )}
+
+          {/* Right-column cards, folded in below xl */}
+          <div className="hidden sm:grid xl:hidden grid-cols-2 gap-3 print:hidden">
+            <TrendingCard dateQ={sideDateQ} onOpenEntity={setProfile} />
+            <PeriodStatsCard filingsQs={filterQs + entitiesQ + roleQ} complaintsQs={complaintsQ.toString()} />
+          </div>
+
+          {/* Tabs */}
+          {/* overflow-y-hidden: each tab's -mb-px overlap otherwise gives the
+              strip a 1px vertical scrollbar */}
+          <div className="flex border-b border-border overflow-x-auto overflow-y-hidden print:hidden">
+            {FEED_TABS.map(([key, label]) => (
+              <button key={key} onClick={() => setTab(key)}
+                className={`px-3 py-2 text-xs font-medium border-b-2 -mb-px whitespace-nowrap transition-colors ${tab === key ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}`}
+                title={key === 'foryou' ? 'Only firms on your Targets list'
+                  : key === 'big' ? 'Loan amount (or unpaid principal) of $5 million or more'
+                  : key === 'foreclosures' ? 'Foreclosure complaints only'
+                  : key === 'table' ? 'The classic table, 50 per page' : 'Everything under the current filters'}>
+                {label}
+                {key === 'foryou' && targetCount > 0 && <span className="ml-1 text-muted-foreground">({targetCount})</span>}
+              </button>
+            ))}
+          </div>
+
+          {tab === 'table' ? (
+            entities.length >= 2 ? (
+              <div className="space-y-4">
+                {entities.map(e => (
+                  <TransactionsTable
+                    key={`${e}|${filterQs}${roleQ}`}
+                    title={e}
+                    filterQs={`${filterQs}&entities=${encodeURIComponent(e)}${roleQ}`}
+                    exportQs={`?search=${encodeURIComponent(applied)}&start_date=${startDate}&end_date=${endDate}&reviewed=${reviewed}${targetsQ}&entities=${encodeURIComponent(e)}${roleQ}`}
+                  />
+                ))}
+              </div>
+            ) : (
+              <TransactionsTable key={filterQs + entitiesQ + roleQ} filterQs={filterQs + entitiesQ + roleQ} />
+            )
+          ) : tab === 'foreclosures' ? (
+            <ComplaintsStream key={complaintsQ.toString()} qs={complaintsQ.toString()} onOpenEntity={setProfile} />
+          ) : tab === 'foryou' && targetCount === 0 ? (
+            <p className="px-4 py-10 text-center text-muted-foreground text-xs bg-card border border-border rounded-xl">
+              "For you" shows activity from firms you follow. Follow firms from "Firms to watch" or the Targets page.
+            </p>
+          ) : (
+            <FeedStream key={streamQs} filterQs={streamQs}
+              includeComplaints={showComplaints && !complaintsBlocked}
+              onOpenEntity={setProfile} />
+          )}
+        </section>
+
+        {/* ── Right: trending, volume, totals, firms to watch ── */}
+        <aside className="hidden xl:block space-y-3 print:hidden xl:sticky xl:top-0 xl:max-h-[calc(100vh-5rem)] xl:overflow-y-auto">
+          <TrendingCard dateQ={sideDateQ} onOpenEntity={setProfile} />
+          <VolumeCard chartQ={sideDateQ} open={showCharts} onToggle={() => setShowCharts(v => !v)} />
+          <PeriodStatsCard filingsQs={filterQs + entitiesQ + roleQ} complaintsQs={complaintsQ.toString()} />
+          <FirmsToWatchCard dateQ={sideDateQ} targets={targets || []} onOpenEntity={setProfile} />
+        </aside>
       </div>
 
-      {/* Filing tables — one per entity when 2+ are selected, otherwise a single
-          combined table (with the entity filter applied if exactly 1 is chosen) */}
-      {entities.length >= 2 ? (
-        <div className="space-y-4">
-          {entities.map(e => (
-            <TransactionsTable
-              key={`${e}|${filterQs}${roleQ}`}
-              title={e}
-              filterQs={`${filterQs}&entities=${encodeURIComponent(e)}${roleQ}`}
-              exportQs={`?search=${encodeURIComponent(applied)}&start_date=${startDate}&end_date=${endDate}&reviewed=${reviewed}${targetsQ}&entities=${encodeURIComponent(e)}${roleQ}`}
-            />
-          ))}
-        </div>
-      ) : (
-        <TransactionsTable key={filterQs + entitiesQ + roleQ} filterQs={filterQs + entitiesQ + roleQ} />
-      )}
-
-      {/* Activity feed (open testing): its own card, under the table(s) */}
-      <ActivityFeed key={`feed|${filterQs}${entitiesQ}${roleQ}`} filterQs={filterQs + entitiesQ + roleQ} />
+      {profile && <EntityDetailPanel key={profile} entityName={profile} onClose={() => setProfile(null)} onNavigate={setProfile} />}
     </div>
   );
 }

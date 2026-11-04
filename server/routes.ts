@@ -1987,6 +1987,9 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     const docType   = docTypeParam(req.query);
     const category  = categoryParam(req.query);
     const src       = categorySource(category);
+    // "Big tickets" tab of the Reporting feed: loan (or consideration) amount
+    // at least this many dollars.
+    const minAmount = Math.max(0, Number(req.query.min_amount) || 0);
 
     const county    = countyScope(req as any);
     const clauses: string[] = [];
@@ -2006,6 +2009,10 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     if (reviewed === 'yes') { clauses.push(`reviewed_at IS NOT NULL`); }
     if (reviewed === 'no')  { clauses.push(`reviewed_at IS NULL`); }
     if (targetsOnly) { clauses.push(TARGETS_MATCH); }
+    if (minAmount > 0) {
+      clauses.push(`(COALESCE(loan_amount, 0) >= ? OR COALESCE(consideration_amount, 0) >= ?)`);
+      params.push(minAmount, minAmount);
+    }
 
     // Always exclude self-assignments — not true transfers
     clauses.push(`txn_type != 'SELF_ASSIGN'`);

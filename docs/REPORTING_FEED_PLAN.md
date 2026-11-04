@@ -24,7 +24,23 @@ to try it and send suggestions.
 - Save and notes are left for a later pass (they need a new table).
 - Profiles open as a centred pop-up card, not a side drawer (owner rule, 3 Nov 2026).
 
-## Build order
+## Page layout (4 Nov 2026, owner approved a mockup)
+
+Social-media page, three columns (`Reporting.tsx`): **left** Search, Filters (time presets + dates,
+Show incl. a Complaints toggle, Document, Review) and Following (targets, busiest in 90 days, else
+last activity); **middle** "Build a report" (firm picker, Use my Targets, direction), the entity
+report when firms are picked, optional full charts, and tabs **For you** (Targets only; replaces the
+old "Targets only" pill; `?targets=1` opens it) / **All activity** / **Foreclosures** (complaints
+only) / **Big tickets** (loan or unpaid principal >= $5M; `min_amount` on `/api/reporting`,
+`min_principal` on feed-complaints) / **Table** (classic table, pages); feed tabs load 50 more as
+you scroll (`useInfiniteQuery`, complaints windowed per loaded page). **Right** Trending firms
+(most active / buyers / sellers), Monthly volume (opens full charts), This period (filings, not
+reviewed, complaints, qualifying), Firms to watch (busy, not followed, + Follow adds to Targets).
+Below xl the right column folds into the middle (Trending + This period, tablet only); below lg
+filters and Following fold behind a button. Owner choices: table as a tab, endless scroll, For you
+= targets only, big ticket = $5M. Supersedes the separate table / feed cards of earlier the same day.
+
+
 
 1. **Feed layout** — DONE (open testing). `FeedCard` + Feed | Table toggle in `TransactionsTable`
    (`client/src/pages/Reporting.tsx`). Firm names on each card already open the

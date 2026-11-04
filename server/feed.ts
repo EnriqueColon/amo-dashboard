@@ -5,6 +5,7 @@
  *   ?from=YYYY-MM-DD&to_before=YYYY-MM-DD  date window of the feed page, to_before exclusive
  *                                    (either omitted = open-ended)
  *   &search=…&entities=…&entities=…  the feed's own filters, applied to plaintiff / case / address
+ *   &start_date=&end_date=&targets=1&min_principal=  page date range, Targets only, Big tickets
  *   &cfns=A,B,C                       the assignments on the page, to flag foreclosures on them
  *   &county=…                         same scope rule as the rest of the API
  *
@@ -161,6 +162,16 @@ export function registerFeedRoutes(app: Express) {
     }
 
     // Complaints filed in the page's date window, under the feed's filters.
+    // start_date / end_date are the page's own date range; targets=1 keeps
+    // plaintiffs on the Targets list ("For you"); min_principal is the "Big
+    // tickets" threshold.
+    const startDate = String(req.query.start_date ?? '')
+    const endDate = String(req.query.end_date ?? '')
+    const minPrincipal = Math.max(0, Number(req.query.min_principal) || 0)
+    let targetNorms: string[] | null = null
+    if (req.query.targets === '1') {
+      targetNorms = (getDb().prepare(`SELECT entity FROM target_entities`).all() as { entity: string }[]).map(t => norm(t.entity))
+    }
     const from = String(req.query.from ?? '')
     const toBefore = String(req.query.to_before ?? '')
     const search = String(req.query.search ?? '').trim().toUpperCase()
@@ -169,6 +180,13 @@ export function registerFeedRoutes(app: Express) {
       const d = String(c.filing_date ?? '')
       if (from && d < from) return false
       if (toBefore && d >= toBefore) return false
+      if (startDate && d < startDate) return false
+      if (endDate && d > endDate) return false
+      if (minPrincipal && !((c.principal ?? 0) >= minPrincipal)) return false
+      if (targetNorms) {
+        const pn = norm(String(c.plaintiff ?? ''))
+        if (!targetNorms.some(t => t && (pn === t || pn.startsWith(t + ' ')))) return false
+      }
       if (search && ![c.plaintiff, c.case_style, c.case_number, c.address].some(v => String(v ?? '').toUpperCase().includes(search))) return false
       if (ents.length && !ents.some(e => c.plaintiff_entity === e || norm(String(c.plaintiff ?? '')).startsWith(norm(e) + ' '))) return false
       return true
