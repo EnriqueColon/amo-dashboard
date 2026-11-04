@@ -168,9 +168,14 @@ export default function EntityDetailPanel({ entityName, onClose, onNavigate }: P
 
   // Esc closes the card wherever keyboard focus is.
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    // A dialog opened from inside the card (the full bank card) handles its own
+    // Esc. Listen in the capture phase so that dialog is still in the DOM when we
+    // look for it; by the bubble phase it has already removed itself.
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !document.querySelector('[role="dialog"]')) onClose();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
   }, [onClose]);
 
   const { data, isLoading } = useQuery({
@@ -347,7 +352,7 @@ export default function EntityDetailPanel({ entityName, onClose, onNavigate }: P
 
               {/* Snapshot: target flag, parent, counties, $ volume, trend, latest
                   filings, UCC, credit facilities, complaints */}
-              <EntitySnapshot entityName={entityName} onNavigate={onNavigate} />
+              <EntitySnapshot entityName={entityName} entityType={node?.entity_type} onNavigate={onNavigate} />
 
               {/* What this entity does */}
               {!isLoading && (

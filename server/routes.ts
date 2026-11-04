@@ -3,6 +3,7 @@ import type { Server } from 'http';
 import { getDb } from './db';
 import { registerBankStressRoutes } from './bank-stress';
 import { registerComplaintsRoutes } from './complaints';
+import { registerEntityFdicRoutes } from './entity-fdic';
 import { registerFdicAnalyticsRoutes } from './fdic-analytics';
 import { registerIntelRoutes } from './intel/routes';
 import { registerChatRoutes } from './chat';
@@ -1455,6 +1456,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   // which was in turn removed on 2026-10-27 (stage 4 of the Bank Stress work).
   registerBankStressRoutes(app);
   registerComplaintsRoutes(app);
+  registerEntityFdicRoutes(app);
   registerFdicAnalyticsRoutes(app);
   registerChatRoutes(app);
 

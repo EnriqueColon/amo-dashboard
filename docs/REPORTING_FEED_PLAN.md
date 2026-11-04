@@ -1,6 +1,6 @@
 # Reporting tab — activity feed + entity profiles (plan)
 
-Status: **steps 1–2 built (open testing), not deployed**; steps 3–5 not started. Owner request, 4 Nov 2026.
+Status: **steps 1–3 built (open testing), not deployed**; steps 4–5 not started. Owner request, 4 Nov 2026.
 
 ## Goal
 
@@ -36,8 +36,21 @@ to try it and send suggestions.
    switch profile); UCC filings as lender/borrower; credit facilities; foreclosure complaints as
    plaintiff. UCC, facilities and complaints are matched on the START of the firm's name and are
    labelled "name match". Esc now closes the card.
-3. **FDIC section (banks)** — Bank Stress score/rank/tier and key FDIC figures from
-   `bank_stress.db`, link to the full bank card. Needs name → FDIC cert matching.
+3. **FDIC section (banks)** — DONE (open testing). `server/entity-fdic.ts`
+   (`GET/PUT/DELETE /api/entity/:name/fdic`) + `client/src/components/EntityFdicSection.tsx`, at the
+   top of the snapshot for firms typed BANK (or any firm linked by hand). Shows the FDIC charter,
+   holding company, assets, Bank Stress tier / score / rank / quarter / flags and six figures (Tier 1
+   leverage, CRE concentration, noncurrent loans, ROA, loans/deposits, uninsured deposits), with
+   "Open full bank card" (the Bank Stress card on top). Matching: active FDIC institutions whose
+   cleaned name equals the firm's, or starts with it; exact first, then largest assets. Shown as
+   "Suggested match" until someone clicks Confirm, picks another charter, or marks "Not an FDIC
+   bank"; decisions live in `entity_fdic_links` (main DB, created at server start) and always win.
+   Checked on the 20 busiest bank names on production: all 20 suggestions right.
+   **Do not use `fdic_institution_cache` for "which bank"**: it keeps an arbitrary charter when
+   names collide (US BANK -> Focus Bank, WELLS FARGO -> Wells Fargo National Bank West, JPMORGAN
+   CHASE -> a Dearborn charter, BANK OF AMERICA -> First National Bank of America). The Bank Stress
+   card's "In the county filings as" note reads `bank_entity_link`, which is seeded from that cache,
+   so it is wrong for those banks (open follow-up).
 4. **SEC section** — EDGAR filings + XBRL financials for public companies; Form ADV for advisers /
    private credit managers; EDGAR for funds. A firm can show FDIC and SEC together (bank + holding
    company). Needs name → CIK / CRD matching.
