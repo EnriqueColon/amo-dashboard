@@ -416,6 +416,7 @@ def main():
     ap.add_argument("--limit", type=int, help="fetch at most N documents")
     ap.add_argument("--include-lower-band", action="store_true", help="also fetch claims under $250,000")
     ap.add_argument("--extract", action="store_true", help="after fetching, read and extract new complaints")
+    ap.add_argument("--extract-only", action="store_true", help="read and extract already-downloaded complaints; no Clerk sign-in")
     ap.add_argument("--model", default=os.environ.get("COMPLAINTS_MODEL", "gpt-5.5"))
     ap.add_argument("--budget", type=float, default=float(os.environ.get("COMPLAINTS_DAILY_BUDGET_USD", "15")))
     a = ap.parse_args()
@@ -423,8 +424,12 @@ def main():
     conn = complaints_collect.connect()
     complaints_collect.ensure_county_schema(conn)
     try:
-        core = duval_session.Core()
-        if not a.fetch_only:
+        if a.extract_only:
+            a.extract, a.search_only, a.fetch_only = True, False, False
+            core = None
+        else:
+            core = duval_session.Core()
+        if not a.fetch_only and not a.extract_only:
             if a.days:
                 d_to, d_from = date.today() + timedelta(days=1), date.today() - timedelta(days=a.days)
             elif a.d_from and a.d_to:
@@ -434,7 +439,7 @@ def main():
             print(f"searching Duval {d_from}..{d_to - timedelta(days=1)}")
             found, new = search_range(conn, core, d_from, d_to, a.include_lower_band)
             print(f"cases found {found}, new {new}")
-        if not a.search_only:
+        if not a.search_only and not a.extract_only:
             print("fetch results:", fetch_pending(conn, core, a.limit))
         if a.extract:
             import complaints_extract
