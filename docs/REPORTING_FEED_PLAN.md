@@ -24,8 +24,8 @@ to try it and send suggestions.
 
 ## Build order
 
-1. **Feed layout** — DONE (open testing). `client/src/components/AssignmentFeed.tsx`, toggle in
-   `TransactionsTable` (`client/src/pages/Reporting.tsx`). Firm names on each card already open the
+1. **Feed layout** — DONE (open testing). `FeedCard` + Feed | Table toggle in `TransactionsTable`
+   (`client/src/pages/Reporting.tsx`). Firm names on each card already open the
    existing entity card (`EntityDetailPanel`) as a stop-gap until step 2.
 2. **Entity profile (our own data)** — DONE (open testing). `GET /api/entity/:name/snapshot`
    (`server/routes.ts`) + `client/src/components/EntitySnapshot.tsx`, shown at the top of the entity
