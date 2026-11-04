@@ -13,8 +13,10 @@ to try it and send suggestions.
 
 ## Decisions taken (4 Nov 2026)
 
-- Feed is the default view; the old table stays one click away (Feed | Table toggle, remembered
-  per browser).
+- ~~Feed is the default view with a Feed | Table toggle~~ — changed 4 Nov 2026 (owner: "the table
+  and the feed should be separate cards"): the table card is back as it was, and the feed is its
+  own card underneath ("Activity feed", Open testing) with its own pages and its own scroll area.
+  With 2+ firms selected there is one table per firm and one feed for all of them.
 - Same endpoint (`/api/reporting`), same filters, same 50-per-page pagination. No infinite scroll.
 - Filings on the same page with the same assignor, assignee and recording date are grouped into
   one card ("and N more"), so bulk MERS/servicer batches don't flood the feed.

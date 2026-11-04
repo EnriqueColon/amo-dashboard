@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import DocLink from '@/components/DocLink';
@@ -683,32 +683,51 @@ function dedupeCases(hits: any[]): any[] {
   return [...m.values()];
 }
 
-type ListView = 'feed' | 'table';
-const VIEW_KEY = 'reporting:list-view';
 const COMPLAINTS_KEY = 'reporting:feed-complaints';
-function readView(): ListView {
-  try { return localStorage.getItem(VIEW_KEY) === 'table' ? 'table' : 'feed'; } catch { return 'feed'; }
+
+// ── Pagination shared by the table and feed cards ──────────────────────────
+function Pager({ page, setPage, data }: { page: number; setPage: (f: (p: number) => number) => void; data: any }) {
+  if (!data || data.pages <= 1) return null;
+  return (
+    <div className="flex items-center justify-between px-3 py-2 border-t border-border bg-muted/10 print:hidden">
+      <span className="text-xs text-muted-foreground">
+        {((page - 1) * 50) + 1}–{Math.min(page * 50, data.total)} of {data.total.toLocaleString()}
+      </span>
+      <div className="flex items-center gap-1">
+        <Button size="sm" variant="ghost" disabled={page <= 1} onClick={() => setPage(() => 1)} className="h-6 px-1.5 text-xs">First</Button>
+        <Button size="sm" variant="ghost" disabled={page <= 1} onClick={() => setPage(p => p - 1)} className="h-6 w-6 p-0"><ChevronLeft size={12} /></Button>
+        <span className="text-xs text-muted-foreground px-1.5">{page}/{data.pages}</span>
+        <Button size="sm" variant="ghost" disabled={page >= data.pages} onClick={() => setPage(p => p + 1)} className="h-6 w-6 p-0"><ChevronRight size={12} /></Button>
+        <Button size="sm" variant="ghost" disabled={page >= data.pages} onClick={() => setPage(() => data.pages)} className="h-6 px-1.5 text-xs">Last</Button>
+      </div>
+    </div>
+  );
 }
 
-// ── Filing table (one instance per selected entity when 2+ are chosen) ───────
-// filterQs carries all active filters (search, dates, review, targets, entity)
-// as pre-encoded query fragments. Page + expanded-row state live here so each
-// table paginates independently; parents remount via `key` to reset on filter
-// changes.
-function TransactionsTable({ title, filterQs, exportQs }: {
-  title?: string;
-  filterQs: string;
-  exportQs?: string;
-}) {
+function useReviewMutations() {
   const qc = useQueryClient();
-  const [page, setPage]         = useState(1);
-  const [expanded, setExpanded] = useState<string | null>(null);
-  const [view, setViewState]    = useState<ListView>(readView);
-  const [profile, setProfile]   = useState<string | null>(null);
-  const setView = (v: ListView) => {
-    setViewState(v);
-    try { localStorage.setItem(VIEW_KEY, v); } catch { /* private window */ }
-  };
+  const review = useMutation({
+    mutationFn: (cfn: string) => apiRequest('PATCH', `/api/reporting/${cfn}/review`, { reviewed_by: 'user' }).then(r => r.json()),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['/api/reporting'] }),
+  });
+  const unreview = useMutation({
+    mutationFn: (cfn: string) => apiRequest('DELETE', `/api/reporting/${cfn}/review`).then(r => r.json()),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['/api/reporting'] }),
+  });
+  return { reviewMutation: review, unreviewMutation: unreview };
+}
+
+// ── Activity feed card (open testing) ────────────────────────────────────────
+// Its own card below the table (owner, 4 Nov 2026: "the table and the feed
+// should be separate cards"), with its own pages and its own scroll area so 50
+// cards do not push the rest of the page down. Same filters and data as the
+// table; one feed even when several firms each get their own table.
+function ActivityFeed({ filterQs }: { filterQs: string }) {
+  const [page, setPageState] = useState(1);
+  const [profile, setProfile] = useState<string | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const setPage = (f: (p: number) => number) => { setPageState(f); listRef.current?.scrollTo({ top: 0 }); };
+  const { reviewMutation, unreviewMutation } = useReviewMutations();
 
   const qs = `?page=${page}&limit=50${filterQs}`;
   const { data, isLoading } = useQuery({
@@ -736,7 +755,7 @@ function TransactionsTable({ title, filterQs, exportQs }: {
   const { data: prevData } = useQuery({
     queryKey: ['/api/reporting', prevQs],
     queryFn: () => apiRequest('GET', `/api/reporting${prevQs}`).then(r => r.json()),
-    enabled: view === 'feed' && page > 1,
+    enabled: page > 1,
   });
   const rows: any[] = data?.rows || [];
   const minDate = (rs: any[]) => rs.reduce((m: string, r: any) => (!m || (r.rec_date && r.rec_date < m) ? r.rec_date : m), '');
@@ -748,7 +767,7 @@ function TransactionsTable({ title, filterQs, exportQs }: {
   if (fp.get('search')) feedQs.set('search', fp.get('search')!);
   fp.getAll('entities').forEach(e => feedQs.append('entities', e));
   feedQs.set('cfns', rows.map(r => r.cfn).join(','));
-  const feedReady = view === 'feed' && !!data && (page === 1 || !!prevData);
+  const feedReady = !!data && (page === 1 || !!prevData);
   const { data: feedExtra } = useQuery({
     queryKey: ['/api/reporting/feed-complaints', feedQs.toString()],
     queryFn: () => apiRequest('GET', `/api/reporting/feed-complaints?${feedQs.toString()}`).then(r => r.json()),
@@ -761,52 +780,20 @@ function TransactionsTable({ title, filterQs, exportQs }: {
     ...complaintItems.map(c => ({ kind: 'complaint' as const, date: String(c.filing_date || ''), key: `c-${c.case_id}`, c })),
   ].sort((a, b) => b.date.localeCompare(a.date));
 
-  const reviewMutation = useMutation({
-    mutationFn: (cfn: string) => apiRequest('PATCH', `/api/reporting/${cfn}/review`, { reviewed_by: 'user' }).then(r => r.json()),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['/api/reporting'] }),
-  });
-  const unreviewMutation = useMutation({
-    mutationFn: (cfn: string) => apiRequest('DELETE', `/api/reporting/${cfn}/review`).then(r => r.json()),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['/api/reporting'] }),
-  });
-
   return (
-    <div className="bg-card border border-border rounded-lg overflow-hidden break-inside-avoid">
-      {/* Title bar: entity name (multi-entity mode), count, Feed | Table toggle */}
+    <div className="bg-card border border-border rounded-lg overflow-hidden print:hidden">
       <div className="flex items-center justify-between gap-2 flex-wrap px-3 py-2 border-b border-border bg-muted/20">
         <h3 className="text-xs font-semibold flex items-center gap-1.5">
-          {title ? <><Crosshair size={11} className="text-primary" />{title}</> : 'Assignments activity'}
+          <Rss size={11} className="text-primary" />Activity feed
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/15 text-primary font-medium">Open testing</span>
           {data && <span className="font-normal text-muted-foreground ml-1">{data.total.toLocaleString()} transaction{data.total === 1 ? '' : 's'}</span>}
         </h3>
-        <div className="flex items-center gap-2 print:hidden">
-          {exportQs && (
-            <button
-              onClick={() => { window.location.href = `/api/reporting/export${exportQs}`; }}
-              className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-foreground transition-colors">
-              <Download size={10} />CSV
-            </button>
-          )}
-          <div className="inline-flex rounded-md border border-border overflow-hidden text-[10px] font-medium">
-            {(['feed', 'table'] as const).map(v => (
-              <button key={v} onClick={() => setView(v)}
-                className={`px-2 h-6 inline-flex items-center gap-1 transition-colors ${view === v ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
-                {v === 'feed' ? <><Rss size={10} />Feed</> : <><Table2 size={10} />Table</>}
-              </button>
-            ))}
-          </div>
-        </div>
+      </div>
+      <div className="px-3 py-2 border-b border-border bg-primary/5 text-[11px] text-muted-foreground">
+        We're trying a feed layout for the same filings as the table above. Click any firm's name to open its profile. Try it out and tell us what you'd change.
       </div>
 
-      {view === 'feed' && (
-        <div className="px-3 py-2 border-b border-border bg-primary/5 flex items-start gap-2 text-[11px] print:hidden">
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/15 text-primary font-medium shrink-0">Open testing</span>
-          <span className="text-muted-foreground">
-            We're trying a feed layout for this list. Click any firm's name to open its profile. Try it out and tell us what you'd change; the old table is one click away under <span className="font-medium text-foreground">Table</span>.
-          </span>
-        </div>
-      )}
-
-      {view === 'feed' && feedExtra?.active && (
+      {feedExtra?.active && (
         <div className="px-3 py-1.5 border-b border-border flex items-center gap-2 flex-wrap text-[11px] print:hidden">
           <label className="inline-flex items-center gap-1.5 cursor-pointer">
             <input type="checkbox" checked={showComplaints} onChange={e => setShowComplaints(e.target.checked)} className="h-3 w-3" />
@@ -821,8 +808,7 @@ function TransactionsTable({ title, filterQs, exportQs }: {
         </div>
       )}
 
-      {view === 'feed' && (
-        <div className="p-3 space-y-2.5 bg-muted/10">
+      <div ref={listRef} className="p-3 space-y-2.5 bg-muted/10 max-h-[75vh] overflow-y-auto">
           {isLoading
             ? Array(4).fill(0).map((_, i) => <Skeleton key={i} className="h-28 w-full rounded-xl" />)
             : feedItems.map(it => it.kind === 'complaint'
@@ -837,12 +823,55 @@ function TransactionsTable({ title, filterQs, exportQs }: {
           {!isLoading && !data?.rows?.length && (
             <p className="px-4 py-10 text-center text-muted-foreground text-xs">No records found.</p>
           )}
-        </div>
-      )}
+      </div>
+
+
+      <Pager page={page} setPage={setPage} data={data} />
 
       {profile && <EntityDetailPanel key={profile} entityName={profile} onClose={() => setProfile(null)} onNavigate={setProfile} />}
+    </div>
+  );
+}
 
-      {view === 'table' && <div className="overflow-x-auto">
+// ── Filing table (one instance per selected entity when 2+ are chosen) ───────
+// filterQs carries all active filters (search, dates, review, targets, entity)
+// as pre-encoded query fragments. Page + expanded-row state live here so each
+// table paginates independently; parents remount via `key` to reset on filter
+// changes.
+function TransactionsTable({ title, filterQs, exportQs }: {
+  title?: string;
+  filterQs: string;
+  exportQs?: string;
+}) {
+  const [page, setPageState]    = useState(1);
+  const setPage = (f: (p: number) => number) => setPageState(f);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const { reviewMutation, unreviewMutation } = useReviewMutations();
+
+  const qs = `?page=${page}&limit=50${filterQs}`;
+  const { data, isLoading } = useQuery({
+    queryKey: ['/api/reporting', qs],
+    queryFn: () => apiRequest('GET', `/api/reporting${qs}`).then(r => r.json()),
+    placeholderData: (prev: any) => prev,
+  });
+
+  return (
+    <div className="bg-card border border-border rounded-lg overflow-hidden break-inside-avoid">
+      <div className="flex items-center justify-between gap-2 flex-wrap px-3 py-2 border-b border-border bg-muted/20">
+        <h3 className="text-xs font-semibold flex items-center gap-1.5">
+          {title ? <><Crosshair size={11} className="text-primary" />{title}</> : <><Table2 size={11} className="text-primary" />Assignments activity</>}
+          {data && <span className="font-normal text-muted-foreground ml-1">{data.total.toLocaleString()} transaction{data.total === 1 ? '' : 's'}</span>}
+        </h3>
+        {exportQs && (
+          <button
+            onClick={() => { window.location.href = `/api/reporting/export${exportQs}`; }}
+            className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-foreground transition-colors print:hidden">
+            <Download size={10} />CSV
+          </button>
+        )}
+      </div>
+
+      <div className="overflow-x-auto">
         <table className="w-full text-[11px] border-collapse">
           <thead>
             <tr className="bg-muted/40 border-b border-border text-muted-foreground">
@@ -953,23 +982,9 @@ function TransactionsTable({ title, filterQs, exportQs }: {
             )}
           </tbody>
         </table>
-      </div>}
+      </div>
 
-      {/* Pagination */}
-      {data && data.pages > 1 && (
-        <div className="flex items-center justify-between px-3 py-2 border-t border-border bg-muted/10 print:hidden">
-          <span className="text-xs text-muted-foreground">
-            {((page - 1) * 50) + 1}–{Math.min(page * 50, data.total)} of {data.total.toLocaleString()}
-          </span>
-          <div className="flex items-center gap-1">
-            <Button size="sm" variant="ghost" disabled={page <= 1} onClick={() => setPage(1)} className="h-6 px-1.5 text-xs">First</Button>
-            <Button size="sm" variant="ghost" disabled={page <= 1} onClick={() => setPage(p => p - 1)} className="h-6 w-6 p-0"><ChevronLeft size={12} /></Button>
-            <span className="text-xs text-muted-foreground px-1.5">{page}/{data.pages}</span>
-            <Button size="sm" variant="ghost" disabled={page >= data.pages} onClick={() => setPage(p => p + 1)} className="h-6 w-6 p-0"><ChevronRight size={12} /></Button>
-            <Button size="sm" variant="ghost" disabled={page >= data.pages} onClick={() => setPage(data.pages)} className="h-6 px-1.5 text-xs">Last</Button>
-          </div>
-        </div>
-      )}
+      <Pager page={page} setPage={setPage} data={data} />
     </div>
   );
 }
@@ -1227,6 +1242,9 @@ export default function Reporting() {
       ) : (
         <TransactionsTable key={filterQs + entitiesQ + roleQ} filterQs={filterQs + entitiesQ + roleQ} />
       )}
+
+      {/* Activity feed (open testing): its own card, under the table(s) */}
+      <ActivityFeed key={`feed|${filterQs}${entitiesQ}${roleQ}`} filterQs={filterQs + entitiesQ + roleQ} />
     </div>
   );
 }
