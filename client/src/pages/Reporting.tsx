@@ -11,7 +11,7 @@ import {
   LayoutList, Search, X, ChevronLeft, ChevronRight,
   CheckCircle, Clock, ExternalLink, Download,
   BarChart2, TrendingUp, TrendingDown, Users, PieChart,
-  ArrowUpRight, ChevronDown, ChevronUp, Crosshair, Printer, Rss, Table2,
+  ArrowUpRight, ChevronDown, ChevronUp, Crosshair, Printer, Rss, Table2, Gavel,
 } from 'lucide-react';
 import EntityDetailPanel from '@/components/EntityDetailPanel';
 import {
@@ -402,8 +402,9 @@ function ReviewButton({ row, onReview, onUnreview }: { row: any; onReview: (c: s
   );
 }
 
-function FeedCard({ group, onOpenEntity, onReview, onUnreview }: {
+function FeedCard({ group, foreclosures, onOpenEntity, onReview, onUnreview }: {
   group: any[];
+  foreclosures?: any[];
   onOpenEntity: (n: string) => void;
   onReview: (c: string) => void;
   onUnreview: (c: string) => void;
@@ -477,6 +478,8 @@ function FeedCard({ group, onOpenEntity, onReview, onUnreview }: {
             </div>
           ) : null}
 
+          {foreclosures && foreclosures.length > 0 && <ForeclosureFlag hits={foreclosures} assignee={r.assignee_canon} onOpenEntity={onOpenEntity} />}
+
           <div className="mt-2 flex items-center gap-1.5 flex-wrap">
             <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${CLASS_STYLE[cls] || 'bg-muted border-border text-muted-foreground'}`}>{cls}</span>
             {r.doc_type && <span className="inline-flex rounded-full border border-border px-2 py-0.5 text-[10px] text-muted-foreground">{r.doc_type}</span>}
@@ -537,8 +540,152 @@ function FeedCard({ group, onOpenEntity, onReview, onUnreview }: {
   );
 }
 
+// ── Foreclosure complaints in the feed ───────────────────────────────────────
+// Labels match the Complaints tab's result chip (pages/Complaints.tsx).
+function complaintResult(c: any): [string, string] {
+  if (c.status === 'complaint_not_public') return ['No public complaint', 'bg-muted text-muted-foreground'];
+  if (c.is_foreclosure === false) return ['Not a mortgage foreclosure', 'bg-muted text-muted-foreground'];
+  if (c.verdict === 'qualifies') return ['Qualifies', 'bg-green-500/15 text-green-700'];
+  if (c.verdict === 'unclear') return ['Cannot tell', 'bg-amber-500/15 text-amber-700'];
+  if (c.verdict === 'no') return ['Does not qualify', 'bg-muted text-foreground/70'];
+  return ['Waiting to be read', 'bg-muted text-muted-foreground'];
+}
+
+function ForeclosureFlag({ hits, assignee, onOpenEntity }: { hits: any[]; assignee?: string; onOpenEntity: (n: string) => void }) {
+  const n = (x: string) => (x || '').toUpperCase().replace(/[^A-Z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim().replace(/\bU S\b/g, 'US');
+  const sameFirm = (h: any) => !!assignee && !!h.plaintiff && (n(h.plaintiff) === n(assignee) || n(h.plaintiff).startsWith(n(assignee) + ' '));
+  return (
+    <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
+      {hits.map(h => (
+        <p key={h.case_id} className="flex items-center gap-1.5 flex-wrap">
+          <Gavel size={12} className="shrink-0" />
+          <span className="font-semibold">Foreclosure filed</span>
+          <span>on this property {h.filing_date}</span>
+          {h.plaintiff && <>by {h.plaintiff_entity
+            ? <button onClick={() => onOpenEntity(h.plaintiff_entity)} className="font-medium hover:underline">{h.plaintiff_entity}</button>
+            : <span className="font-medium">{h.plaintiff}</span>}</>}
+          <span className="font-mono">· {h.case_number}</span>
+          {h.principal > 0 && <span>· {fmtAmt(h.principal)} unpaid</span>}
+          {sameFirm(h) && <span className="font-medium">· the firm that received this assignment is foreclosing</span>}
+          <a href="#/complaints" className="underline">Open in Complaints</a>
+        </p>
+      ))}
+      <p className="text-[10px] text-red-700/80 mt-0.5">Matched on the property address (same street address and unit), not a verified link to this loan.</p>
+    </div>
+  );
+}
+
+function ComplaintCard({ c, onOpenEntity }: { c: any; onOpenEntity: (n: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [label, cls] = complaintResult(c);
+  const defendants: string[] = (c.defendants || []).map((d: any) => (typeof d === 'string' ? d : d?.name)).filter(Boolean);
+  const matches: any[] = c.aom_matches || [];
+  return (
+    <article className="bg-card border border-red-200/70 rounded-xl px-4 py-3 hover:border-red-300 transition-colors">
+      <div className="flex gap-3">
+        <div className="w-10 h-10 rounded-full shrink-0 flex items-center justify-center bg-red-100 text-red-700" title="Foreclosure complaint">
+          <Gavel size={16} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm leading-snug">
+            {c.plaintiff_entity
+              ? <EntityName name={c.plaintiff_entity} onOpen={onOpenEntity} />
+              : <span className="font-semibold">{c.plaintiff || 'Plaintiff not read yet'}</span>}
+            <span className="text-muted-foreground"> filed a foreclosure complaint</span>
+            {defendants.length > 0 && <>
+              <span className="text-muted-foreground"> against </span>
+              <span className="font-medium">{defendants[0]}</span>
+              {defendants.length > 1 && <span className="text-muted-foreground"> and {defendants.length - 1} more</span>}
+            </>}
+          </p>
+          {c.plaintiff_entity && c.plaintiff && (
+            <p className="text-[11px] text-muted-foreground truncate" title={c.plaintiff}>As filed: {c.plaintiff}</p>
+          )}
+          <p className="text-[11px] text-muted-foreground mt-0.5 flex items-center gap-1 flex-wrap">
+            <span className="text-red-700">Foreclosure complaint</span>
+            {c.case_type && <><span>·</span><span>{String(c.case_type).replace(/^RPMF-/, '')}</span></>}
+            <span>·</span><CountyCell county={c.county} />
+            <span>·</span><span>{fmtFeedDate(c.filing_date)}</span>
+            <span>·</span><span className="font-mono">{c.case_number}</span>
+          </p>
+
+          <div className="mt-2 rounded-lg bg-muted/40 px-3 py-2 flex items-center justify-between gap-3">
+            <div className="min-w-0 text-xs">
+              {c.address ? <p className="font-medium truncate" title={c.address}>{c.address}</p>
+                : <p className="text-muted-foreground italic">Property address not read</p>}
+              {c.default_date && <p className="text-[11px] text-muted-foreground">In default since {c.default_date}</p>}
+            </div>
+            {c.principal > 0 && (
+              <div className="text-right shrink-0">
+                <p className="text-lg font-semibold text-red-700 tabular-nums">{fmtAmt(c.principal)}</p>
+                <p className="text-[10px] text-muted-foreground">unpaid principal</p>
+              </div>
+            )}
+          </div>
+
+          <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+            <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold cursor-help ${cls}`} title={c.result_reason || ''}>{label}</span>
+            {c.aom_match_count > 0 && (
+              <span className="inline-flex rounded-full border border-border px-2 py-0.5 text-[10px] text-muted-foreground">
+                {c.aom_match_count} earlier assignment{c.aom_match_count === 1 ? '' : 's'} of this property
+              </span>
+            )}
+          </div>
+
+          <div className="mt-2 pt-2 border-t border-border/60 flex items-center gap-4 text-[11px] text-muted-foreground">
+            {c.pdf_url && (
+              <a href={c.pdf_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:text-primary transition-colors">
+                <ArrowUpRight size={12} />Complaint PDF
+              </a>
+            )}
+            <a href="#/complaints" className="inline-flex items-center gap-1 hover:text-primary transition-colors">
+              <Gavel size={12} />Open in Complaints
+            </a>
+            <button onClick={() => setOpen(o => !o)} className="inline-flex items-center gap-1 hover:text-primary transition-colors">
+              {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />}{open ? 'Hide details' : 'Details'}
+            </button>
+          </div>
+
+          {open && (
+            <div className="mt-2 pt-2 border-t border-border/60 text-xs space-y-2">
+              {c.result_reason && <p className="text-muted-foreground">{c.result_reason}</p>}
+              {defendants.length > 1 && <p><span className="text-muted-foreground">Defendants:</span> {defendants.join('; ')}</p>}
+              {matches.length > 0 && (
+                <div>
+                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Earlier assignments of this property (address match)</p>
+                  <ul className="divide-y divide-border/50">
+                    {matches.map(m => (
+                      <li key={m.cfn} className="py-1 flex items-center gap-2">
+                        <span className="text-muted-foreground shrink-0 w-[70px]">{m.rec_date}</span>
+                        <span className="truncate flex-1">
+                          <button className="hover:underline" onClick={() => onOpenEntity(m.assignor_canon)}>{m.assignor_canon}</button>
+                          <span className="text-muted-foreground"> → </span>
+                          <button className="hover:underline font-medium" onClick={() => onOpenEntity(m.assignee_canon)}>{m.assignee_canon}</button>
+                          {m.same_firm && <span className="ml-1 text-red-700" title="The firm that received this assignment is the one foreclosing">· same firm is foreclosing</span>}
+                        </span>
+                        <DocLink row={m} className="font-mono text-primary/70 hover:underline shrink-0">{m.cfn}</DocLink>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function dedupeCases(hits: any[]): any[] {
+  const m = new Map<string, any>();
+  for (const h of hits) m.set(h.case_id, h);
+  return [...m.values()];
+}
+
 type ListView = 'feed' | 'table';
 const VIEW_KEY = 'reporting:list-view';
+const COMPLAINTS_KEY = 'reporting:feed-complaints';
 function readView(): ListView {
   try { return localStorage.getItem(VIEW_KEY) === 'table' ? 'table' : 'feed'; } catch { return 'feed'; }
 }
@@ -569,6 +716,50 @@ function TransactionsTable({ title, filterQs, exportQs }: {
     queryFn: () => apiRequest('GET', `/api/reporting${qs}`).then(r => r.json()),
     placeholderData: (prev: any) => prev,
   });
+
+  // Foreclosure complaints mixed into the feed. Page n shows the complaints
+  // filed in [oldest date on page n, oldest date on page n-1), so every date is
+  // covered exactly once: page 1 has no upper bound, the last page no lower.
+  // They describe no assignment, so the review / document-type / "Shows"
+  // filters (all about assignments) hide them; search and firm filters apply
+  // to the plaintiff.
+  const [showComplaints, setShowComplaintsState] = useState<boolean>(() => {
+    try { return localStorage.getItem(COMPLAINTS_KEY) !== '0'; } catch { return true; }
+  });
+  const setShowComplaints = (v: boolean) => {
+    setShowComplaintsState(v);
+    try { localStorage.setItem(COMPLAINTS_KEY, v ? '1' : '0'); } catch { /* private window */ }
+  };
+  const fp = new URLSearchParams(filterQs);
+  const complaintsBlocked = !!(fp.get('reviewed') || fp.get('doc_type') || fp.get('category'));
+  const prevQs = `?page=${page - 1}&limit=50${filterQs}`;
+  const { data: prevData } = useQuery({
+    queryKey: ['/api/reporting', prevQs],
+    queryFn: () => apiRequest('GET', `/api/reporting${prevQs}`).then(r => r.json()),
+    enabled: view === 'feed' && page > 1,
+  });
+  const rows: any[] = data?.rows || [];
+  const minDate = (rs: any[]) => rs.reduce((m: string, r: any) => (!m || (r.rec_date && r.rec_date < m) ? r.rec_date : m), '');
+  const from = data && page < data.pages ? minDate(rows) : '';
+  const to = page > 1 ? minDate(prevData?.rows || []) : '';
+  const feedQs = new URLSearchParams();
+  if (from) feedQs.set('from', from);
+  if (to) feedQs.set('to_before', to);
+  if (fp.get('search')) feedQs.set('search', fp.get('search')!);
+  fp.getAll('entities').forEach(e => feedQs.append('entities', e));
+  feedQs.set('cfns', rows.map(r => r.cfn).join(','));
+  const feedReady = view === 'feed' && !!data && (page === 1 || !!prevData);
+  const { data: feedExtra } = useQuery({
+    queryKey: ['/api/reporting/feed-complaints', feedQs.toString()],
+    queryFn: () => apiRequest('GET', `/api/reporting/feed-complaints?${feedQs.toString()}`).then(r => r.json()),
+    enabled: feedReady,
+  });
+  const cfnMatches: Record<string, any[]> = feedExtra?.cfn_matches || {};
+  const complaintItems: any[] = showComplaints && !complaintsBlocked ? (feedExtra?.complaints || []) : [];
+  const feedItems = [
+    ...groupRows(rows).map(g => ({ kind: 'aom' as const, date: String(g[0].rec_date || ''), key: g[0].cfn, g })),
+    ...complaintItems.map(c => ({ kind: 'complaint' as const, date: String(c.filing_date || ''), key: `c-${c.case_id}`, c })),
+  ].sort((a, b) => b.date.localeCompare(a.date));
 
   const reviewMutation = useMutation({
     mutationFn: (cfn: string) => apiRequest('PATCH', `/api/reporting/${cfn}/review`, { reviewed_by: 'user' }).then(r => r.json()),
@@ -615,12 +806,30 @@ function TransactionsTable({ title, filterQs, exportQs }: {
         </div>
       )}
 
+      {view === 'feed' && feedExtra?.active && (
+        <div className="px-3 py-1.5 border-b border-border flex items-center gap-2 flex-wrap text-[11px] print:hidden">
+          <label className="inline-flex items-center gap-1.5 cursor-pointer">
+            <input type="checkbox" checked={showComplaints} onChange={e => setShowComplaints(e.target.checked)} className="h-3 w-3" />
+            <Gavel size={11} className="text-red-700" />Show foreclosure complaints in the feed
+          </label>
+          {showComplaints && complaintsBlocked && (
+            <span className="text-muted-foreground">Hidden while the Review, Shows or Document filters are set; those only apply to assignments.</span>
+          )}
+          {showComplaints && !complaintsBlocked && (
+            <span className="text-muted-foreground">{complaintItems.length} on this page</span>
+          )}
+        </div>
+      )}
+
       {view === 'feed' && (
         <div className="p-3 space-y-2.5 bg-muted/10">
           {isLoading
             ? Array(4).fill(0).map((_, i) => <Skeleton key={i} className="h-28 w-full rounded-xl" />)
-            : groupRows(data?.rows || []).map(g => (
-                <FeedCard key={g[0].cfn} group={g}
+            : feedItems.map(it => it.kind === 'complaint'
+              ? <ComplaintCard key={it.key} c={it.c} onOpenEntity={setProfile} />
+              : (
+                <FeedCard key={it.key} group={it.g}
+                  foreclosures={dedupeCases(it.g.flatMap((r: any) => cfnMatches[r.cfn] || []))}
                   onOpenEntity={setProfile}
                   onReview={c => reviewMutation.mutate(c)}
                   onUnreview={c => unreviewMutation.mutate(c)} />
@@ -854,7 +1063,9 @@ export default function Reporting() {
   const handlePrint = () => window.print();
 
   return (
-    <div className="p-4 space-y-4 max-w-screen-2xl mx-auto">
+    // w-full: inside the flex-column <main>, mx-auto alone sizes this to its
+    // content, and a long single-line name in the feed then widens the page.
+    <div className="p-4 space-y-4 max-w-screen-2xl mx-auto w-full">
 
       {/* Header */}
       <div className="flex items-center justify-between print:hidden">

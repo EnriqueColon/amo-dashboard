@@ -212,6 +212,26 @@ function shape(row: Row, detail = false) {
   return out
 }
 
+/**
+ * Every complaint as the Complaints tab summarises it, plus the defendants and
+ * PDF link, for the Reporting feed (server/feed.ts). null when the complaints
+ * tables do not exist (local dev DBs).
+ */
+export function complaintFeedRows(): any[] | null {
+  if (!tablesExist()) return null
+  return (getDb().prepare(BASE_SQL).all(MODEL) as Row[]).map(r => {
+    const { sheet, ...s } = shape(r)
+    const res = r.result_json ? JSON.parse(r.result_json) : null
+    const p0 = res?.properties?.[0] ?? {}
+    return {
+      ...s,
+      address: s.address ?? p0.address_mortgage ?? p0.address_note ?? p0.address_body ?? null,
+      defendants: Array.isArray(res?.defendants) ? res.defendants : [],
+      pdf_url: r.complaint_pdf ? `/api/complaints/${r.case_id}/pdf` : null,
+    }
+  })
+}
+
 export function registerComplaintsRoutes(app: Express) {
   ensureReviewTable()
   registerComplaintsQcRoutes(app) // first: '/api/complaints/qc' must not be read as a case id

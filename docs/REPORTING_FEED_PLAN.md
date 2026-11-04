@@ -52,6 +52,19 @@ to try it and send suggestions.
    card's "In the county filings as" note used to read `bank_entity_link` (seeded from that cache);
    since 4 Nov 2026 it reads `countyNamesForCert()` in `server/entity-fdic.ts` instead (saved
    decision, else the top suggestion, over every BANK-typed firm), fresh on every request.
+3a. **Foreclosure complaints in the feed** — DONE (open testing, 4 Nov 2026, owner: "both").
+   `server/feed.ts` (`GET /api/reporting/feed-complaints`) + `ComplaintCard` / `ForeclosureFlag` in
+   `Reporting.tsx`; `complaintFeedRows()` exported from `server/complaints.ts` (same summary and
+   result labels as the Complaints tab). (a) Complaint cards mixed into the feed by date: page n
+   shows complaints filed in [oldest date on page n, oldest date on page n-1), page 1 open above,
+   last page open below, so each complaint shows exactly once. Checkbox to hide them (remembered
+   per browser); hidden while the Review / Shows / Document filters are set (assignment-only
+   filters); search and firm filters apply to plaintiff / case / address. Plaintiff mapped to our
+   canonical firm (longest canonical name the plaintiff starts with, "U S" = "US") so it opens the
+   profile. (b) Assignment cards get a red "Foreclosure filed" box when a complaint is on the same
+   property; complaint cards list the earlier assignments of that property. Same property = same
+   county + street address + unit (or no unit on either side); complaints have no folio. "The firm
+   that received this assignment is foreclosing" when plaintiff = assignee (cleaned names).
 4. **SEC section** — EDGAR filings + XBRL financials for public companies; Form ADV for advisers /
    private credit managers; EDGAR for funds. A firm can show FDIC and SEC together (bank + holding
    company). Needs name → CIK / CRD matching.
