@@ -287,7 +287,7 @@ Counties**. It is global — it applies to every page and persists across naviga
 **Since 4 Nov 2026 (owner's request; live 15:17 UTC, `f3d507f`) the tool opens on Target Reporting.** The Home menu holds
 **Target Reporting** (the former Reporting page, renamed; address still `/reporting`) and Ask the
 Data; **Overview moved to the Analysis menu**. `/` and the logo both go to Target Reporting.
-**Targets moved from Analysis to the Data menu** (owner, 4 Nov 2026), after Entities.
+**Targets moved from Analysis to the Data menu** (owner, 4 Nov 2026; live 15:20 UTC, `ea49a15`), after Entities.
 
 Navigation is grouped into **Analysis**, **Intelligence** and **Data**. Since 29 Oct 2026 (owner's
 request) **UCC Filings** and **Clean Transactions** sit under Data with Raw Assignments, Entities and
