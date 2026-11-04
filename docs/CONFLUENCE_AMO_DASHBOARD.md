@@ -409,7 +409,8 @@ analytics header, a participant-activity breakdown and a time-series chart.
   company, assets, Bank Stress tier, score and rank, six key ratios, and a button to open the full
   bank card. The charter is a *suggested match* by name until someone clicks **Confirm this bank**,
   picks a different charter, or marks the firm **Not an FDIC bank**; those choices are saved and
-  shared with everyone. The old table is
+  shared with everyone. The Bank Stress card's *In the county filings as* note uses the same matching
+  (fixed 4 Nov 2026: it used to say, for example, that Focus Bank appears in our filings as US BANK). The old table is
   one click away (**Feed | Table** toggle above the list; your browser remembers the choice).
   Same filters, same 50 per page, same exports. It is labelled *Open testing* on the page: try it and
   send suggestions. Next steps (richer profile with FDIC data for banks, SEC data for filers, and

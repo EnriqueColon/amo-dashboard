@@ -17,6 +17,7 @@
  *   GET /api/bank-stress/bank/:cert
  */
 
+import { countyNamesForCert } from './entity-fdic'
 import type { Express, Request, Response } from 'express'
 import Database from 'better-sqlite3'
 import fs from 'fs'
@@ -270,7 +271,10 @@ export function registerBankStressRoutes(app: Express) {
     if (!/^\d{1,7}$/.test(cert)) return fail(res, 400, 'cert must be a numeric FDIC certificate number')
     const key = makeCacheKey('bank-stress:bank', { cert, v: meta.computed_at })
     const hit = getCached(key)
-    if (hit) { res.setHeader('X-BS-Cache', 'HIT'); return res.json(hit) }
+    // The firm names are read fresh on every request: a person can confirm or
+    // change a link on the profile card at any time, and the rest of this
+    // response stays cached for days.
+    if (hit) { res.setHeader('X-BS-Cache', 'HIT'); return res.json({ ...(hit as object), aom_canonical_names: countyNamesForCert(db, Number(cert)) }) }
     const cfg = parse<{ history_quarters?: number }>(meta.config_json, {})
     const limit = Number(cfg.history_quarters ?? 8)
     const history = db.prepare(`
@@ -288,7 +292,10 @@ export function registerBankStressRoutes(app: Express) {
     const latest = db.prepare('SELECT cert, name, state, hc_name, hc_owned, estymd, cblr, assets_k, rssdhcr FROM bank_metrics WHERE cert = ? ORDER BY repdte DESC LIMIT 1').get(Number(cert)) as Record<string, unknown>
     const inst = db.prepare('SELECT CITY AS city, BKCLASS AS bkclass, ACTIVE AS active FROM fdic_institutions WHERE CERT = ?').get(Number(cert)) as Record<string, unknown> | undefined
     const failure = db.prepare('SELECT FAILDATE AS faildate, RESTYPE AS restype FROM fdic_failures WHERE CERT = ? ORDER BY FAILDATE DESC LIMIT 1').get(Number(cert)) as Record<string, unknown> | undefined
-    const links = (db.prepare('SELECT canonical_name FROM bank_entity_link WHERE cert = ?').all(Number(cert)) as Array<{ canonical_name: string }>).map((r) => r.canonical_name)
+    // Our firm names that point at this charter. NOT bank_entity_link: it is
+    // seeded from fdic_institution_cache, which keeps an arbitrary charter on
+    // name collisions (US BANK -> Focus Bank). See server/entity-fdic.ts.
+    const links = countyNamesForCert(db, Number(cert))
     // Loans held for sale per quarter (balance, % of gross loans, troubled part) from the raw rows.
     const hfsRaw = new Map<string, Record<string, unknown>>()
     for (const r of db.prepare('SELECT REPDTE, LNLSSALE, NALNSALE, P9LNSALE, LNLSGR FROM fdic_financials_raw WHERE CERT = ?').all(Number(cert)) as Array<Record<string, unknown>>) hfsRaw.set(String(r.REPDTE), r)

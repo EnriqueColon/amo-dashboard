@@ -40,24 +40,64 @@ export function normBankName(s: string): string {
 }
 
 type Inst = { cert: number; name: string; city: string | null; state: string | null; assets_k: number | null; hc_name: string | null; norm: string }
-let instCache: { at: number; rows: Inst[] } | null = null
+let instCache: { at: number; rows: Inst[]; byFirstWord: Map<string, Inst[]> } | null = null
 
-function institutions(bs: Database.Database): Inst[] {
-  if (instCache && Date.now() - instCache.at < 6 * 3600_000) return instCache.rows
+function loadInstitutions(bs: Database.Database) {
+  if (instCache && Date.now() - instCache.at < 6 * 3600_000) return instCache
   const rows = (bs.prepare(`SELECT CERT AS cert, NAME AS name, CITY AS city, STALP AS state, ASSET AS assets_k, NAMEHCR AS hc_name
                              FROM fdic_institutions WHERE ACTIVE = 1`).all() as Omit<Inst, 'norm'>[])
     .map(r => ({ ...r, norm: normBankName(r.name) }))
-  instCache = { at: Date.now(), rows }
-  return rows
+  // A candidate's name starts with the firm's name, so it shares its first word.
+  const byFirstWord = new Map<string, Inst[]>()
+  for (const r of rows) {
+    const w = r.norm.split(' ')[0]
+    const list = byFirstWord.get(w)
+    if (list) list.push(r); else byFirstWord.set(w, [r])
+  }
+  instCache = { at: Date.now(), rows, byFirstWord }
+  return instCache
+}
+
+function institutions(bs: Database.Database): Inst[] {
+  return loadInstitutions(bs).rows
 }
 
 export function fdicCandidates(bs: Database.Database, entity: string) {
   const n = normBankName(entity)
   if (n.length < 3) return []
-  return institutions(bs)
+  return (loadInstitutions(bs).byFirstWord.get(n.split(' ')[0]) ?? [])
     .filter(i => i.norm === n || i.norm.startsWith(n + ' '))
     .map(i => ({ ...i, exact: i.norm === n }))
     .sort((a, b) => (Number(b.exact) - Number(a.exact)) || ((b.assets_k ?? 0) - (a.assets_k ?? 0)))
+}
+
+// Reverse lookup for the Bank Stress card's "In the county filings as" note:
+// which of our firm names point at this charter. Same rules as the profile card
+// (a saved decision wins, otherwise the top suggestion), over every firm typed
+// BANK plus every firm linked by hand. Built once and cached; any link change
+// clears it. Replaces bank_entity_link, which inherits fdic_institution_cache's
+// arbitrary picks (US BANK -> Focus Bank).
+let reverseCache: { at: number; byCert: Map<number, string[]> } | null = null
+
+export function countyNamesForCert(bs: Database.Database, cert: number): string[] {
+  if (!reverseCache || Date.now() - reverseCache.at > 6 * 3600_000) {
+    const db = getDb()
+    ensureTable(db)
+    const saved = new Map<string, { cert: number | null; status: string }>()
+    for (const r of db.prepare(`SELECT entity, cert, status FROM entity_fdic_links`).all() as any[]) saved.set(r.entity, r)
+    const names = new Set<string>(saved.keys())
+    for (const r of db.prepare(`SELECT entity FROM entity_nodes WHERE entity_type = 'BANK'`).all() as { entity: string }[]) names.add(r.entity)
+    const byCert = new Map<number, string[]>()
+    for (const name of names) {
+      const s = saved.get(name)
+      const c = s ? (s.status === 'confirmed' ? s.cert : null) : (fdicCandidates(bs, name)[0]?.cert ?? null)
+      if (c == null) continue
+      const list = byCert.get(c)
+      if (list) list.push(name); else byCert.set(c, [name])
+    }
+    reverseCache = { at: Date.now(), byCert }
+  }
+  return reverseCache.byCert.get(cert) ?? []
 }
 
 function ensureTable(db: Database.Database) {
@@ -123,6 +163,7 @@ export function registerEntityFdicRoutes(app: Express) {
     const body = (req.body ?? {}) as { cert?: unknown; not_bank?: unknown }
     const now = new Date().toISOString()
     if (body.not_bank === true) {
+      reverseCache = null
       db.prepare(`INSERT INTO entity_fdic_links (entity, cert, status, linked_at) VALUES (?, NULL, 'not_bank', ?)
                   ON CONFLICT(entity) DO UPDATE SET cert = NULL, status = 'not_bank', linked_at = excluded.linked_at`).run(entity, now)
       return res.json({ ok: true })
@@ -131,6 +172,7 @@ export function registerEntityFdicRoutes(app: Express) {
     if (!entity || !Number.isInteger(cert) || cert <= 0) return res.status(400).json({ error: 'cert (positive integer) or not_bank required' })
     const bs = openBankStressDb()
     if (bs && !institutions(bs).some(i => i.cert === cert)) return res.status(400).json({ error: `cert ${cert} is not an active FDIC institution` })
+    reverseCache = null
     db.prepare(`INSERT INTO entity_fdic_links (entity, cert, status, linked_at) VALUES (?, ?, 'confirmed', ?)
                 ON CONFLICT(entity) DO UPDATE SET cert = excluded.cert, status = 'confirmed', linked_at = excluded.linked_at`).run(entity, cert, now)
     res.json({ ok: true })
@@ -139,6 +181,7 @@ export function registerEntityFdicRoutes(app: Express) {
   // Back to the automatic suggestion.
   app.delete('/api/entity/:name/fdic', (req: Request, res: Response) => {
     const entity = decodeURIComponent(String(req.params.name ?? '')).trim()
+    reverseCache = null
     db.prepare(`DELETE FROM entity_fdic_links WHERE entity = ?`).run(entity)
     res.json({ ok: true })
   })

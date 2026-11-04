@@ -314,6 +314,7 @@ export function BankStressDrawer({ cert, name, onClose, definitions }: { cert: n
                 <p className="font-medium text-slate-700">In the county filings as</p>
                 <p>{detail.aom_canonical_names.join(' · ')}</p>
                 <p className="mt-1 text-slate-500">Look this name up on the Reporting tab to see its recorded loan sales — the validation path for this score.</p>
+                <p className="mt-1 text-slate-500">Matched on the bank's name unless someone confirmed it. To correct a match, open the firm's profile card (click its name on the Reporting tab) and use the FDIC section.</p>
               </div>
             )}
           </div>

@@ -49,8 +49,9 @@ to try it and send suggestions.
    **Do not use `fdic_institution_cache` for "which bank"**: it keeps an arbitrary charter when
    names collide (US BANK -> Focus Bank, WELLS FARGO -> Wells Fargo National Bank West, JPMORGAN
    CHASE -> a Dearborn charter, BANK OF AMERICA -> First National Bank of America). The Bank Stress
-   card's "In the county filings as" note reads `bank_entity_link`, which is seeded from that cache,
-   so it is wrong for those banks (open follow-up).
+   card's "In the county filings as" note used to read `bank_entity_link` (seeded from that cache);
+   since 4 Nov 2026 it reads `countyNamesForCert()` in `server/entity-fdic.ts` instead (saved
+   decision, else the top suggestion, over every BANK-typed firm), fresh on every request.
 4. **SEC section** — EDGAR filings + XBRL financials for public companies; Form ADV for advisers /
    private credit managers; EDGAR for funds. A firm can show FDIC and SEC together (bank + holding
    company). Needs name → CIK / CRD matching.
