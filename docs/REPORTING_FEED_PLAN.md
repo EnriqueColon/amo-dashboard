@@ -98,7 +98,14 @@ filters and Following fold behind a button. Owner choices: table as a tab, endle
    has none (needs SEC's bulk Form ADV data). Each identity: Confirm / pick a different one / none
    / reset. EDGAR's name search ranks poorly, so it only feeds the pick list. Upstream calls spaced
    (EDGAR 125 ms, IAPD 300 ms) and cached a day; answers cached 12 h, cleared on any link change.
-5. **News per firm** — company-specific news search (e.g. Google News query), cached for a day.
+5. **News per firm** — NOT BUILT. **Launch the weekend of 7-8 Nov 2026** (owner, 4 Nov: launch
+   when no one is using the test). Proposed design: a droplet cron (not on page load) that first
+   scans news we already ingest (TRD, public-mention feeds) for target names, then queries a free
+   source per followed firm (GDELT preferred; Google News RSS has unclear business-use terms; paid
+   API only if coverage is thin), every few hours for active targets and daily for quiet ones;
+   stores headlines in a table (deduped); shows news cards in the For you feed and on profile
+   cards; searches the confirmed SEC/FDIC name; per-firm news on/off and custom search term on
+   the Targets page.
 
 ## Matching names to FDIC / SEC ids (steps 3–4)
 
