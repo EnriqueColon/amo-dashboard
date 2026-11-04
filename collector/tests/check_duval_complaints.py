@@ -60,6 +60,14 @@ check(c["dockets"][2]["href"] == "/court/case/14486204/docket/237124795/content.
 check(c["dockets"][2]["pages"] == 30 and "VOR, Ready to view" in c["dockets"][2]["image_state"], f"complaint state {c['dockets'][2]}")
 check(c["dockets"][0]["href"] is None, "line 1 (case type) has no image")
 
+# the same docket served with a click handler instead of a link (what the Python session received live, 4 Nov 2026)
+handler_html = case_html.replace(
+    '<a href="/court/case/14486204/docket/237124795/content.pdf" id="c_DocketClerkGridView_c_DocketClerkGridView_ImageContainer_2" target="_blank">',
+    '<a id="c_DocketClerkGridView_c_DocketClerkGridView_ImageContainer_2" onclick="javascript:beginImageJob(14486204, 237124795, 0);" style="cursor:pointer">')
+hc = dc.parse_case_html(handler_html)
+check(hc["dockets"][2]["href"] == "/court/case/14486204/docket/237124795/content.pdf", f"click-handler row -> document URL: {hc['dockets'][2]['href']}")
+check(hc["dockets"][2]["cell_html"] is None, "no diagnostic markup kept when a URL was found")
+
 # --- which docket line is the complaint
 check(dc.pick_complaint(c["dockets"])["line"] == 3, "picks the original complaint, not the later amended one")
 check(dc.pick_complaint([d for d in c["dockets"] if d["line"] != 3 and d["line"] != 5]) is None, "no complaint line -> None")

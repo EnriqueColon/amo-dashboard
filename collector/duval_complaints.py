@@ -246,6 +246,16 @@ def parse_case_html(html: str) -> dict:
             cell = first(tb, cls="docketImageContainer")
             links = [x for x in find_all(cell if cell is not None else tb, tag="a") if x.attrs.get("href")]
             a = next((x for x in links if "content.pdf" in x.attrs["href"].lower()), links[0] if links else None)
+            href = a.attrs["href"] if a else None
+            if not href:
+                # Some responses give the image cell a click handler instead of a link:
+                #   onclick="javascript:beginImageJob(<caseID>, <docketID>, <simCtrl>)"
+                # The document itself is still /court/case/<caseID>/docket/<docketID>/content.pdf.
+                for x in find_all(cell if cell is not None else tb, tag="a"):
+                    jm = re.search(r"begin\w*\(\s*(\d+)\s*,\s*(\d+)", x.attrs.get("onclick", ""))
+                    if jm:
+                        href = f"/court/case/{jm.group(1)}/docket/{jm.group(2)}/content.pdf"
+                        break
             state =" ".join(s.get_text() for s in find_all(tb, tag="span")
                              if "ImageLine" in s.attrs.get("id", "") and s.get_text())
             pages = None
@@ -254,8 +264,8 @@ def parse_case_html(html: str) -> dict:
                 pages = int(pm.group(0)) if pm else None
             out["dockets"].append({
                 "line": int(line.group(1)) if line else None, "description": desc.get_text(),
-                "pages": pages, "href": a.attrs["href"] if a else None, "image_state": state or None,
-                "cell_html": None if a else _raw_html(tb),
+                "pages": pages, "href": href, "image_state": state or None,
+                "cell_html": None if href else _raw_html(tb),
                 "entered": iso_us(tds[2].get_text()) if len(tds) > 2 else None})
     return out
 
