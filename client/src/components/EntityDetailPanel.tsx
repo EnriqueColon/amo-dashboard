@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import CategoryBadge from './CategoryBadge';
 import ColHeader from './ColHeader';
 import DocLink from './DocLink';
+import EntitySnapshot from './EntitySnapshot';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   X, ArrowRight, TrendingUp, TrendingDown, Network,
@@ -164,6 +165,13 @@ export default function EntityDetailPanel({ entityName, onClose, onNavigate }: P
   const [pendingType, setPendingType] = useState('');
 
   const queryClient = useQueryClient();
+
+  // Esc closes the card wherever keyboard focus is.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
 
   const { data, isLoading } = useQuery({
     queryKey: ['/api/entity', entityName],
@@ -336,6 +344,10 @@ export default function EntityDetailPanel({ entityName, onClose, onNavigate }: P
           {/* OVERVIEW TAB */}
           {tab === 'overview' && (
             <div className="p-5 space-y-5">
+
+              {/* Snapshot: target flag, parent, counties, $ volume, trend, latest
+                  filings, UCC, credit facilities, complaints */}
+              <EntitySnapshot entityName={entityName} onNavigate={onNavigate} />
 
               {/* What this entity does */}
               {!isLoading && (

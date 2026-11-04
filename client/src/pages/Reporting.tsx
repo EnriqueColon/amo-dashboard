@@ -631,7 +631,7 @@ function TransactionsTable({ title, filterQs, exportQs }: {
         </div>
       )}
 
-      {profile && <EntityDetailPanel entityName={profile} onClose={() => setProfile(null)} />}
+      {profile && <EntityDetailPanel key={profile} entityName={profile} onClose={() => setProfile(null)} onNavigate={setProfile} />}
 
       {view === 'table' && <div className="overflow-x-auto">
         <table className="w-full text-[11px] border-collapse">

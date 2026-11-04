@@ -1,6 +1,6 @@
 # Reporting tab — activity feed + entity profiles (plan)
 
-Status: **step 1 built (open testing)**, steps 2–5 not started. Owner request, 4 Nov 2026.
+Status: **steps 1–2 built (open testing), not deployed**; steps 3–5 not started. Owner request, 4 Nov 2026.
 
 ## Goal
 
@@ -27,10 +27,15 @@ to try it and send suggestions.
 1. **Feed layout** — DONE (open testing). `client/src/components/AssignmentFeed.tsx`, toggle in
    `TransactionsTable` (`client/src/pages/Reporting.tsx`). Firm names on each card already open the
    existing entity card (`EntityDetailPanel`) as a stop-gap until step 2.
-2. **Entity profile (our own data)** — extend `EntityDetailPanel` into a snapshot: header (name,
-   type, parent, target flag), assignment activity (bought vs sold, volume, trend, top
-   counterparties), last 10 filings, UCC filings as lender/borrower, credit facilities, complaints.
-   Each section only shows when there is data.
+2. **Entity profile (our own data)** — DONE (open testing). `GET /api/entity/:name/snapshot`
+   (`server/routes.ts`) + `client/src/components/EntitySnapshot.tsx`, shown at the top of the entity
+   card's Overview everywhere the card opens (Reporting feed, Entities, Dashboard). Shows: target
+   flag; "Named with" chips (the parent/servicer names written on the firm's filings, which are
+   mostly servicers or predecessors, not true parents); counties; $ acquired / sold with how many
+   filings carry an amount; 24-month in/out bar chart; latest 10 filings (counterparty clickable to
+   switch profile); UCC filings as lender/borrower; credit facilities; foreclosure complaints as
+   plaintiff. UCC, facilities and complaints are matched on the START of the firm's name and are
+   labelled "name match". Esc now closes the card.
 3. **FDIC section (banks)** — Bank Stress score/rank/tier and key FDIC figures from
    `bank_stress.db`, link to the full bank card. Needs name → FDIC cert matching.
 4. **SEC section** — EDGAR filings + XBRL financials for public companies; Form ADV for advisers /

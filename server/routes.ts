@@ -2641,6 +2641,118 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       ' A DELAWARE LIMITED LIABILITY COMPANY', ''),
       ' A FLORIDA CORPORATION', ''))`;
 
+  // ─── GET /api/entity/:name/snapshot ───────────────────────────────────────
+  // Everything else we hold about one canonical firm, for the profile card the
+  // Reporting feed opens (docs/REPORTING_FEED_PLAN.md step 2). All counties.
+  // UCC, credit facilities and complaints are matched on the firm's name as a
+  // PREFIX ("CITIBANK" finds "CITIBANK, N.A., AS TRUSTEE…"), so they are name
+  // matches, not verified links; the card says so. Each block is empty rather
+  // than missing when nothing matches, and the complaints block is null when
+  // the table does not exist (local dev DBs).
+  app.get('/api/entity/:name/snapshot', (req, res) => {
+    const name = decodeURIComponent(req.params.name).trim();
+    if (!name) return res.status(400).json({ error: 'name required' });
+    const cacheKey = makeCacheKey('/api/entity/snapshot', { name });
+    const cached = getCached(cacheKey);
+    if (cached) return res.json(cached);
+    const prefix = `${name.toUpperCase().replace(/[%_]/g, '')}%`;
+
+    const target = db.prepare(`SELECT added_at, notes FROM target_entities WHERE entity = ?`).get(name) || null;
+
+    const parents = db.prepare(`
+      SELECT parent, SUM(n) AS n FROM (
+        SELECT assignor_parent AS parent, COUNT(*) AS n FROM aom_events_clean
+         WHERE assignor_canon = ? AND TRIM(COALESCE(assignor_parent, '')) != '' GROUP BY assignor_parent
+        UNION ALL
+        SELECT assignee_parent, COUNT(*) FROM aom_events_clean
+         WHERE assignee_canon = ? AND TRIM(COALESCE(assignee_parent, '')) != '' GROUP BY assignee_parent
+      ) WHERE UPPER(parent) NOT IN ('NULL', 'NONE', 'N/A') AND UPPER(parent) != UPPER(?)
+      GROUP BY parent ORDER BY n DESC LIMIT 3
+    `).all(name, name, name);
+
+    const counties = db.prepare(`
+      SELECT COALESCE(county, '${DEFAULT_COUNTY}') AS county, COUNT(*) AS n FROM aom_events_clean
+       WHERE assignor_canon = ? OR assignee_canon = ? GROUP BY 1 ORDER BY n DESC
+    `).all(name, name);
+
+    // Dollar volume, from the loan amounts read off the documents. Coverage is
+    // partial, so the count of filings with an amount travels with each sum.
+    const amt = `CASE WHEN loan_amount > 0 THEN loan_amount WHEN consideration_amount > 0 THEN consideration_amount END`;
+    const dollars = db.prepare(`
+      SELECT
+        SUM(CASE WHEN assignee_canon = ? THEN ${amt} END) AS in_amount,
+        SUM(CASE WHEN assignee_canon = ? AND ${amt} IS NOT NULL THEN 1 ELSE 0 END) AS in_with_amount,
+        SUM(CASE WHEN assignor_canon = ? THEN ${amt} END) AS out_amount,
+        SUM(CASE WHEN assignor_canon = ? AND ${amt} IS NOT NULL THEN 1 ELSE 0 END) AS out_with_amount
+      FROM aom_events_clean WHERE assignor_canon = ? OR assignee_canon = ?
+    `).get(name, name, name, name, name, name);
+
+    const monthly = db.prepare(`
+      SELECT substr(rec_date, 1, 7) AS month,
+             SUM(CASE WHEN assignee_canon = ? THEN 1 ELSE 0 END) AS inbound,
+             SUM(CASE WHEN assignor_canon = ? THEN 1 ELSE 0 END) AS outbound
+      FROM aom_events_clean
+      WHERE (assignor_canon = ? OR assignee_canon = ?) AND rec_date >= date('now', '-24 months')
+      GROUP BY 1 ORDER BY 1
+    `).all(name, name, name, name);
+
+    const recent = db.prepare(`
+      SELECT cfn, rec_date, county, rec_book, rec_page, doc_type,
+             CASE WHEN assignee_canon = ? THEN 'in' ELSE 'out' END AS direction,
+             CASE WHEN assignee_canon = ? THEN assignor_canon ELSE assignee_canon END AS counterparty,
+             property_address, ${amt} AS amount
+      FROM aom_events_clean WHERE assignor_canon = ? OR assignee_canon = ?
+      ORDER BY rec_date DESC LIMIT 10
+    `).all(name, name, name, name);
+
+    const uccWhere = `WHERE a.doc_type IN (${UCC_DOC_TYPES.map(() => '?').join(',')})`;
+    const ucc = db.prepare(`
+      SELECT SUM(CASE WHEN UPPER(${UCC_LENDER}) LIKE ? THEN 1 ELSE 0 END) AS as_lender,
+             SUM(CASE WHEN UPPER(${UCC_BORROWER}) LIKE ? THEN 1 ELSE 0 END) AS as_borrower,
+             MAX(a.rec_date) AS last
+      ${UCC_FROM} ${uccWhere} AND (UPPER(${UCC_LENDER}) LIKE ? OR UPPER(${UCC_BORROWER}) LIKE ?)
+    `).get(prefix, prefix, ...UCC_DOC_TYPES, prefix, prefix) as any;
+    const uccRecent = db.prepare(`
+      SELECT a.cfn, a.rec_date, a.county, a.rec_book, a.rec_page,
+             ${UCC_LENDER} AS lender, ${UCC_BORROWER} AS borrower, px.property_address
+      ${UCC_FROM} ${uccWhere} AND (UPPER(${UCC_LENDER}) LIKE ? OR UPPER(${UCC_BORROWER}) LIKE ?)
+      ORDER BY a.rec_date DESC LIMIT 5
+    `).all(...UCC_DOC_TYPES, prefix, prefix);
+
+    const facWhere = `WHERE lender_brand = ? OR borrower_brand = ? OR UPPER(lender_key) LIKE ? OR UPPER(borrower_key) LIKE ?`;
+    const facCount = (db.prepare(`SELECT COUNT(*) AS n FROM credit_facility_events ${facWhere}`)
+      .get(name, name, prefix, prefix) as any).n;
+    const facRecent = db.prepare(`
+      SELECT cfn, rec_date, county, rec_book, rec_page, facility_type, facility_amount,
+             COALESCE(lender_brand, facility_lender_name) AS lender,
+             COALESCE(borrower_brand, facility_borrower_name) AS borrower
+      FROM credit_facility_events ${facWhere} ORDER BY rec_date DESC LIMIT 5
+    `).all(name, name, prefix, prefix);
+
+    let complaints: any = null;
+    const hasComplaints = db.prepare(
+      `SELECT 1 FROM sqlite_master WHERE type='table' AND name='foreclosure_extractions'`).get();
+    if (hasComplaints) {
+      const rows = db.prepare(`
+        SELECT DISTINCT c.case_number, c.filing_date, c.county,
+               json_extract(e.result_json, '$.plaintiff') AS plaintiff
+        FROM foreclosure_cases c JOIN foreclosure_extractions e ON e.case_id = c.case_id
+        WHERE UPPER(json_extract(e.result_json, '$.plaintiff')) LIKE ?
+        ORDER BY c.filing_date DESC LIMIT 20
+      `).all(prefix);
+      complaints = { count: rows.length, recent: rows.slice(0, 5) };
+    }
+
+    const payload = {
+      name, target, parents, counties, dollars, monthly, recent,
+      ucc: { as_lender: ucc?.as_lender ?? 0, as_borrower: ucc?.as_borrower ?? 0, last: ucc?.last ?? null, recent: uccRecent },
+      facilities: { count: facCount, recent: facRecent },
+      complaints,
+    };
+    setCached(cacheKey, payload);
+    res.json(payload);
+  });
+
   // ─── GET /api/ucc ─────────────────────────────────────────────────────────
   app.get('/api/ucc', (req, res) => {
     const page   = Math.max(1, parseInt(req.query.page as string) || 1);
