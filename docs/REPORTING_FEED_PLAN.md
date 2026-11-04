@@ -38,7 +38,7 @@ you scroll (`useInfiniteQuery`, complaints windowed per loaded page). **Right** 
 reviewed, complaints, qualifying), Firms to watch (busy, not followed, + Follow adds to Targets).
 Below xl the right column folds into the middle (Trending + This period, tablet only); below lg
 filters and Following fold behind a button. Owner choices: table as a tab, endless scroll, For you
-= targets only, big ticket = $5M. Supersedes the separate table / feed cards of earlier the same day.
+= targets only, big ticket = $5M. Supersedes the separate table / feed cards of earlier the same day. LIVE 4 Nov 2026 14:30 UTC (`fe0bd9a`).
 
 
 
