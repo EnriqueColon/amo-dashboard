@@ -71,6 +71,23 @@ export function fdicCandidates(bs: Database.Database, entity: string) {
     .sort((a, b) => (Number(b.exact) - Number(a.exact)) || ((b.assets_k ?? 0) - (a.assets_k ?? 0)))
 }
 
+/**
+ * The charter a firm points at (saved decision, else top suggestion) and its
+ * holding company as FDIC writes it. Used by server/entity-sec.ts to find a
+ * bank's listed parent (Citibank -> Citigroup). null when none.
+ */
+export function fdicHoldingCompany(entity: string): { cert: number; hc_name: string | null } | null {
+  const bs = openBankStressDb()
+  if (!bs) return null
+  const db = getDb()
+  ensureTable(db)
+  const s = db.prepare(`SELECT cert, status FROM entity_fdic_links WHERE entity = ?`).get(entity) as { cert: number | null; status: string } | undefined
+  const cert = s ? (s.status === 'confirmed' ? s.cert : null) : (fdicCandidates(bs, entity)[0]?.cert ?? null)
+  if (cert == null) return null
+  const inst = institutions(bs).find(i => i.cert === cert)
+  return { cert, hc_name: inst?.hc_name ?? null }
+}
+
 // Reverse lookup for the Bank Stress card's "In the county filings as" note:
 // which of our firm names point at this charter. Same rules as the profile card
 // (a saved decision wins, otherwise the top suggestion), over every firm typed

@@ -1,12 +1,13 @@
 // One-screen snapshot of a firm, shown at the top of the entity card's Overview.
 // Built for the Reporting feed (docs/REPORTING_FEED_PLAN.md step 2): everything
 // we hold about the firm in one place. Each block renders only when it has data.
-// FDIC data for banks is EntityFdicSection; SEC (filers) and news are later steps.
+// FDIC data for banks is EntityFdicSection, SEC filer / adviser data EntitySecSection; news is a later step.
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'wouter';
 import { apiRequest } from '@/lib/queryClient';
 import DocLink from './DocLink';
 import EntityFdicSection from './EntityFdicSection';
+import EntitySecSection from './EntitySecSection';
 import { Skeleton } from '@/components/ui/skeleton';
 import { BarChart, Bar, XAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { Crosshair, Building2, FileText, Landmark, Gavel, Info, MapPin } from 'lucide-react';
@@ -84,6 +85,7 @@ export default function EntitySnapshot({ entityName, entityType, onNavigate }: {
       </div>
 
       <EntityFdicSection entityName={entityName} entityType={entityType} />
+      <EntitySecSection entityName={entityName} entityType={entityType} />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-start">
         {/* Money + trend */}

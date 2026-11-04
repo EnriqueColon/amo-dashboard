@@ -5,6 +5,7 @@ import { registerBankStressRoutes } from './bank-stress';
 import { registerComplaintsRoutes } from './complaints';
 import { registerEntityFdicRoutes } from './entity-fdic';
 import { registerFeedRoutes } from './feed';
+import { registerEntitySecRoutes } from './entity-sec';
 import { registerFdicAnalyticsRoutes } from './fdic-analytics';
 import { registerIntelRoutes } from './intel/routes';
 import { registerChatRoutes } from './chat';
@@ -1459,6 +1460,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   registerComplaintsRoutes(app);
   registerEntityFdicRoutes(app);
   registerFeedRoutes(app);
+  registerEntitySecRoutes(app);
   registerFdicAnalyticsRoutes(app);
   registerChatRoutes(app);
 

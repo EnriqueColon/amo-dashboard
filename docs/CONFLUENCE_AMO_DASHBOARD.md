@@ -411,6 +411,11 @@ analytics header, a participant-activity breakdown and a time-series chart.
   picks a different charter, or marks the firm **Not an FDIC bank**; those choices are saved and
   shared with everyone. The Bank Stress card's *In the county filings as* note uses the same matching
   (fixed 4 Nov 2026: it used to say, for example, that Focus Bank appears in our filings as US BANK).
+  **SEC data** (4 Nov 2026): the card also shows the firm's SEC filer (for listed companies the
+  ticker, latest 10-K totals for assets, equity, net income and revenue, and recent filings) and, for
+  investment managers, its registered-adviser record (Form ADV). Banks are linked to their listed
+  parent through the FDIC holding company (US Bank -> US Bancorp). Like the FDIC match, each is a
+  *suggested match* until someone confirms it, picks another, or marks the firm as having none.
   **Foreclosure complaints are in the feed too** (4 Nov 2026). Complaint cards (plaintiff, defendants,
   property, unpaid principal, and the same result label as the Complaints tab) appear by filing date
   alongside the assignments; untick *Show foreclosure complaints in the feed* to hide them. They are
@@ -2624,6 +2629,7 @@ healthy (640 rows, 57% carrying loan amounts).
 | `GET /api/entity-nodes` | Canonical entity list |
 | `GET /api/aliases/suggestions` · `POST /api/aliases/merge` | Duplicate manager |
 | `GET /api/reporting` · `/export` · `/chart` · `/participants` | Reporting tab + CSV |
+| `GET`/`PUT`/`DELETE /api/entity/:name/sec` | SEC identities for a firm: EDGAR filer (CIK) and investment adviser (CRD), suggested by name or saved; PUT `{kind, ref}` confirms, `{kind, none:true}` opts out, DELETE `?kind=` resets. Table `entity_sec_links`. Calls sec.gov / adviserinfo.sec.gov (User-Agent contact from `SEC_EDGAR_CONTACT`, default market-intelligence@) |
 | `GET /api/reporting/feed-complaints` | Complaints for a feed page's date window (`from`, `to_before`, `search`, `entities`) plus foreclosure matches for the page's assignments (`cfns`); address match on street + unit |
 | `GET`/`PUT`/`DELETE /api/entity/:name/fdic` | FDIC charter for a firm: suggested match (exact name, then largest assets) or the saved decision; PUT `{cert}` confirms, `{not_bank:true}` opts out, DELETE resets. Table `entity_fdic_links` |
 | `GET /api/entity/:name/snapshot` | Entity card snapshot: target, counties, $ volume, 24-month trend, latest filings, UCC / credit facilities / complaints by name match (cached) |

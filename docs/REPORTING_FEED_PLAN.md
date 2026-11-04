@@ -1,6 +1,6 @@
 # Reporting tab — activity feed + entity profiles (plan)
 
-Status: **steps 1–3 built (open testing), not deployed**; steps 4–5 not started. Owner request, 4 Nov 2026.
+Status: **steps 1–4 built (open testing), not deployed**; step 5 (news) not started. Owner request, 4 Nov 2026.
 
 ## Goal
 
@@ -65,9 +65,21 @@ to try it and send suggestions.
    property; complaint cards list the earlier assignments of that property. Same property = same
    county + street address + unit (or no unit on either side); complaints have no folio. "The firm
    that received this assignment is foreclosing" when plaintiff = assignee (cleaned names).
-4. **SEC section** — EDGAR filings + XBRL financials for public companies; Form ADV for advisers /
-   private credit managers; EDGAR for funds. A firm can show FDIC and SEC together (bank + holding
-   company). Needs name → CIK / CRD matching.
+4. **SEC section** — DONE (open testing). `server/entity-sec.ts` (`GET/PUT/DELETE
+   /api/entity/:name/sec`, table `entity_sec_links` keyed by entity + kind) +
+   `client/src/components/EntitySecSection.tsx`, under the FDIC block in the snapshot. Two identities:
+   **EDGAR filer** (CIK): suggested from SEC's ticker list on the firm's name, then (banks) on the
+   FDIC holding-company name via `fdicHoldingCompany()` (US BANK -> US Bancorp, CITIBANK ->
+   Citigroup), then an EDGAR filer with exactly this name; aliases for Fannie Mae / Freddie Mac.
+   Shows name, ticker/exchange, CIK, SIC, location, latest 8 key filings, and for listed companies
+   total assets / equity / net income / revenue from the latest 10-K (XBRL companyconcept; a concept
+   older than the latest fiscal year is dropped: Wells Fargo stopped tagging Revenues in FY2019).
+   **Investment adviser** (IAPD CRD): suggested when exactly the name or the name + Management /
+   Advisors / Partners (not "Investments": Wells Fargo Investments is a broker arm). Shows CRD,
+   SEC number, status, registration, latest ADV date, office, brochure, links. No AUM: IAPD's API
+   has none (needs SEC's bulk Form ADV data). Each identity: Confirm / pick a different one / none
+   / reset. EDGAR's name search ranks poorly, so it only feeds the pick list. Upstream calls spaced
+   (EDGAR 125 ms, IAPD 300 ms) and cached a day; answers cached 12 h, cleared on any link change.
 5. **News per firm** — company-specific news search (e.g. Google News query), cached for a day.
 
 ## Matching names to FDIC / SEC ids (steps 3–4)
