@@ -1,6 +1,6 @@
 # Reporting tab — activity feed + entity profiles (plan)
 
-Status: **steps 1–4 LIVE in production (open testing) since 4 Nov 2026 14:11 UTC** (`9b3633a`); step 5 (news) not started. Owner request, 4 Nov 2026.
+Status: **steps 1–4 LIVE in production (open testing) since 4 Nov 2026 14:11 UTC** (`9b3633a`; separate table and feed cards live 14:17 UTC, `c4fa7ed`); step 5 (news) not started. Owner request, 4 Nov 2026.
 
 ## Goal
 
