@@ -17,15 +17,17 @@ type Menu = { key: string; label: string; items: Item[] };
 const MENUS: Menu[] = [
   {
     key: 'home', label: 'Home', items: [
+      // Target Reporting is the landing page: "/" and the logo go here (owner, 4 Nov 2026; was Ask the Data).
+      // The route stays /reporting so existing links (e.g. /reporting?targets=1) keep working.
+      { href: '/reporting', icon: LayoutList, label: 'Target Reporting', badge: 'Open testing' },
       // "Beta" badge at the owner's request (7 Oct 2026) while the chat is trialled in production.
-      // It is also the landing page: "/" redirects here (see App.tsx).
       { href: '/ask', icon: MessageSquare, label: 'Ask the Data', badge: 'Beta' },
-      { href: '/overview', icon: BarChart2, label: 'Overview' },
     ],
   },
   {
     key: 'analysis', label: 'Analysis', items: [
-      { href: '/reporting', icon: LayoutList, label: 'Reporting' },
+      // Overview moved here from Home (owner, 4 Nov 2026).
+      { href: '/overview', icon: BarChart2, label: 'Overview' },
       { href: '/targets', icon: Crosshair, label: 'Targets' },
       { href: '/bank-stress', icon: Gauge, label: 'Bank Stress & FDIC', badge: 'New' },
       { href: '/private-credit', icon: Shield, label: 'Private Credit' },
@@ -131,7 +133,7 @@ export default function TopNav() {
           {mobileOpen ? <X size={18} /> : <Menu size={18} />}
         </button>
 
-        <Link href="/ask" className="flex items-center gap-2 min-w-0 shrink-0">
+        <Link href="/reporting" className="flex items-center gap-2 min-w-0 shrink-0">
           <svg width="22" height="22" viewBox="0 0 32 32" fill="none" aria-label="SHCP Intelligence Platform">
             <rect x="2" y="2" width="28" height="28" rx="4" fill="hsl(38 95% 55% / 0.15)" stroke="hsl(38 95% 55%)" strokeWidth="1.5" />
             <path d="M7 24 L12 10 L16 19 L20 14 L25 24" stroke="hsl(38 95% 55%)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" />

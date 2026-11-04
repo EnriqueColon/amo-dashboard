@@ -284,6 +284,10 @@ Counties**. It is global — it applies to every page and persists across naviga
 
 ### 4.3 The pages
 
+**Since 4 Nov 2026 (owner's request) the tool opens on Target Reporting.** The Home menu holds
+**Target Reporting** (the former Reporting page, renamed; address still `/reporting`) and Ask the
+Data; **Overview moved to the Analysis menu**. `/` and the logo both go to Target Reporting.
+
 Navigation is grouped into **Analysis**, **Intelligence** and **Data**. Since 29 Oct 2026 (owner's
 request) **UCC Filings** and **Clean Transactions** sit under Data with Raw Assignments, Entities and
 the Collection Log: they are document views, while Analysis holds the derived pages (Reporting,
@@ -296,10 +300,10 @@ Headline counts (total filings, unique entities, market transfers, self-assigns,
 private-credit activity), date coverage, monthly assignment volume chart, and the Top Acquirers / Top
 Sellers / Most Connected leaderboards.
 *Go here to see whether the data is current — the date range and last-collected date are the fastest health check.*
-Until 7 Oct 2026 this was the landing page at `/`; `/` now redirects to Ask the Data (owner's
-request), and Overview is the second entry in the sidebar.
+Until 7 Oct 2026 this was the landing page at `/`; from 7 Oct to 4 Nov 2026 `/` went to Ask the Data,
+and since 4 Nov 2026 it goes to Target Reporting. Overview is now the first entry in the Analysis menu.
 
-#### Ask the Data (`/ask`) — the landing page since 7 Oct 2026; in **Beta** (badge on the tab and the page header)
+#### Ask the Data (`/ask`) — the landing page from 7 Oct to 4 Nov 2026; in **Beta** (badge on the tab and the page header)
 The Beta badge is the owner's marker that the page is live for evaluation, not yet a
 supported part of the tool (it first shipped as "TESTING/NOTDEPLOYED", renamed the same day). Drop it
 (`badge` field in `client/src/components/TopNav.tsx`, header span in `pages/Chat.tsx`) once the
@@ -394,7 +398,7 @@ Names appear exactly as filed and are **not** merged into canonical entities. Bo
 mostly property companies named after street numbers, and the merging rules used elsewhere in the
 tool would combine "10820 Investments LLC" with "11140 Investments LLC".
 
-#### Reporting (`/reporting`)
+#### Target Reporting (`/reporting`) — the landing page since 4 Nov 2026 (named "Reporting" until then)
 The main working surface. A filterable, searchable, paginated table of clean transactions with an
 analytics header, a participant-activity breakdown and a time-series chart.
 - **New page layout — Open testing (4 Nov 2026).** The tab now looks like a social-media page:

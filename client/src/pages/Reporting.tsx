@@ -1292,7 +1292,7 @@ export default function Reporting() {
       <div className="flex items-center justify-between flex-wrap gap-2 print:hidden">
         <div className="flex items-center gap-2 flex-wrap">
           <LayoutList size={15} className="text-primary" />
-          <h1 className="text-lg font-semibold">Reporting</h1>
+          <h1 className="text-lg font-semibold">Target Reporting</h1>
           <span className="text-xs text-muted-foreground ml-1">{countyLabel(county)}</span>
           <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/15 text-primary font-medium" title="New layout we're testing. Tell us what you'd change.">Open testing</span>
         </div>

@@ -36,7 +36,7 @@ export default function App() {
             <main className="flex-1 overflow-y-auto flex flex-col print:overflow-visible">
               <Switch>
                 {/* Landing page is Ask the Data (owner's request, 7 Oct 2026). Overview lives at /overview. */}
-                <Route path="/">{() => <Redirect to="/ask" replace />}</Route>
+                <Route path="/">{() => <Redirect to="/reporting" replace />}</Route>
                 <Route path="/ask" component={Chat} />
                 <Route path="/overview" component={Dashboard} />
                 <Route path="/clean-events" component={CleanEvents} />
