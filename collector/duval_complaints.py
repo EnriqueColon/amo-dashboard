@@ -363,7 +363,7 @@ def fetch_one(conn, core, row) -> str:
                 print(f"  WARNING {row['case_number']}: complaint marked available but no link found")
         else:
             data = core.pdf(entry["href"])
-            if not data.startswith(b"%PDF"):
+            if not data.startswith(b"%PDF"):  # Core.pdf already raises with the details; this is the backstop
                 raise RuntimeError(f"{row['case_number']}: document response is not a PDF")
             PDF_DIR.mkdir(parents=True, exist_ok=True)
             f = PDF_DIR / f"DU_{row['case_number']}_DIN{din}.pdf"

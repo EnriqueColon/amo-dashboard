@@ -16,6 +16,7 @@ docs/DUVAL_COMPLAINTS.md.
 Usage (check only):  DUVAL_CORE_USER=... DUVAL_CORE_PASS=... python duval_session.py
 """
 import os
+import re
 import sys
 import time
 
@@ -61,6 +62,11 @@ class Core:
             raise LoginError(f"CORE sign-in refused (AccessType={d.get('AccessType')!r})")
         self.token = d["Token"]
         self.access_type = d.get("AccessType")
+        # The site's own page script (persistToCookieBackup) stores the login in cookies after a successful sign-in,
+        # and the document handler may read them. A browser has them; a bare HTTP session does not, so set the same ones.
+        for name, value in (("displayName", d.get("DisplayName") or ""), ("accessType", self.access_type or ""),
+                            ("token", self.token), ("isPublicComputer", "false")):
+            self.s.cookies.set(name, value, domain="core.duvalclerk.com", path="/")
 
     # ------------------------------------------------------------------ calls
     def _next_tab(self) -> int:
@@ -106,11 +112,17 @@ class Core:
 
     def pdf(self, href: str) -> bytes:
         """Fetch a document by the /court/case/.../content.pdf path taken from the case page."""
-        r = self.s.get(f"{BASE}{href}", timeout=180)
-        if r.status_code in (401, 403):
+        hdr = {"Referer": f"{BASE}/CoreCms.aspx", "Accept": "application/pdf,*/*"}
+        r = self.s.get(f"{BASE}{href}", timeout=180, headers=hdr)
+        if r.status_code in (401, 403) or not r.content.startswith(b"%PDF"):
             self.login()
-            r = self.s.get(f"{BASE}{href}", timeout=180)
+            r = self.s.get(f"{BASE}{href}", timeout=180, headers=hdr)
         r.raise_for_status()
+        if not r.content.startswith(b"%PDF"):
+            sample = re.sub(r"\s+", " ", r.text[:300]) if "text" in r.headers.get("Content-Type", "") or r.content[:1] == b"<" else repr(r.content[:40])
+            raise RuntimeError(f"document request did not return a PDF: HTTP {r.status_code}, "
+                               f"content-type {r.headers.get('Content-Type')!r}, final URL {r.url}, "
+                               f"redirects {[h.status_code for h in r.history]}, starts: {sample}")
         return r.content
 
 
