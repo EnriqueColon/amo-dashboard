@@ -11,8 +11,9 @@ import {
   LayoutList, Search, X, ChevronLeft, ChevronRight,
   CheckCircle, Clock, ExternalLink, Download,
   BarChart2, TrendingUp, TrendingDown, Users, PieChart,
-  ArrowUpRight, ChevronDown, ChevronUp, Crosshair, Printer,
+  ArrowUpRight, ChevronDown, ChevronUp, Crosshair, Printer, Rss, Table2,
 } from 'lucide-react';
+import EntityDetailPanel from '@/components/EntityDetailPanel';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   CartesianGrid, Cell, PieChart as RechartsPie, Pie, Legend,
@@ -273,6 +274,19 @@ function RowDetail({ row, onClose }: { row: any; onClose: () => void }) {
   return (
     <tr className="bg-muted/10 border-b border-border/30">
       <td colSpan={13} className="px-4 py-4">
+        <RowDetailBody row={row} />
+        <button onClick={onClose} className="mt-2 text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1">
+          <ChevronUp size={10} />Collapse
+        </button>
+      </td>
+    </tr>
+  );
+}
+
+// The expanded detail, shared by the table row and the feed card.
+function RowDetailBody({ row }: { row: any }) {
+  return (
+    <>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-8 gap-y-3 text-xs">
           <div className="space-y-1">
             <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Document</p>
@@ -310,12 +324,223 @@ function RowDetail({ row, onClose }: { row: any; onClose: () => void }) {
             Reviewed by <span className="text-foreground">{row.reviewed_by}</span> · {new Date(row.reviewed_at).toLocaleString()}
           </p>
         )}
-        <button onClick={onClose} className="mt-2 text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1">
-          <ChevronUp size={10} />Collapse
-        </button>
-      </td>
-    </tr>
+    </>
   );
+}
+
+// ── Activity feed (open testing, 4 Nov 2026) ─────────────────────────────────
+// The same page of rows as the table, drawn as social-media-style cards. Plan:
+// docs/REPORTING_FEED_PLAN.md. Filings on one page with the same assignor,
+// assignee and recording date fold into one card so bulk servicing batches
+// don't flood the feed.
+const TYPE_LABEL: Record<string, string> = {
+  BANK: 'Bank', SERVICER: 'Servicer', PRIVATE_CREDIT: 'Private credit',
+  GSE: 'GSE', TRUST: 'Trust', MERS: 'MERS', OTHER: 'Other',
+};
+const AVATAR_STYLE: Record<string, string> = {
+  BANK:           'bg-blue-100 text-blue-700',
+  SERVICER:       'bg-purple-100 text-purple-700',
+  PRIVATE_CREDIT: 'bg-orange-100 text-orange-700',
+  GSE:            'bg-emerald-100 text-emerald-700',
+  TRUST:          'bg-slate-100 text-slate-600',
+  MERS:           'bg-yellow-100 text-yellow-700',
+};
+const NOUN_BY_CLASS: Record<string, [string, string]> = {
+  'Collateral':     ['a collateral assignment', 'collateral assignments'],
+  'Rents & leases': ['an assignment of rents', 'assignments of rents'],
+  'Other':          ['a document', 'documents'],
+};
+
+function initials(name: string): string {
+  const words = (name || '?').replace(/[^A-Za-z0-9 ]/g, ' ').split(/\s+/).filter(Boolean);
+  return ((words[0]?.[0] || '?') + (words[1]?.[0] || '')).toUpperCase();
+}
+
+function fmtFeedDate(d: string | null | undefined): string {
+  if (!d) return '';
+  const dt = new Date(`${d.slice(0, 10)}T12:00:00`);
+  if (isNaN(dt.getTime())) return d;
+  const days = Math.round((Date.now() - dt.getTime()) / 86_400_000);
+  const nice = dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  if (days <= 0) return `${nice} · today`;
+  if (days === 1) return `${nice} · yesterday`;
+  if (days < 30) return `${nice} · ${days} days ago`;
+  return nice;
+}
+
+function groupRows(rows: any[]): any[][] {
+  const groups = new Map<string, any[]>();
+  for (const r of rows) {
+    const k = `${r.assignor_canon}|${r.assignee_canon}|${r.rec_date}`;
+    const g = groups.get(k);
+    if (g) g.push(r); else groups.set(k, [r]);
+  }
+  return Array.from(groups.values());
+}
+
+function EntityName({ name, onOpen }: { name: string; onOpen: (n: string) => void }) {
+  if (!name) return <span className="text-muted-foreground">Unknown party</span>;
+  return (
+    <button onClick={() => onOpen(name)} title={`Open ${name}'s profile`}
+      className="font-semibold text-foreground hover:text-primary hover:underline underline-offset-2 text-left">
+      {name}
+    </button>
+  );
+}
+
+function ReviewButton({ row, onReview, onUnreview }: { row: any; onReview: (c: string) => void; onUnreview: (c: string) => void }) {
+  return row.reviewed_at ? (
+    <button onClick={() => onUnreview(row.cfn)} title="Mark unreviewed"
+      className="inline-flex items-center gap-1 text-emerald-600 hover:text-red-500 transition-colors">
+      <CheckCircle size={12} />Reviewed
+    </button>
+  ) : (
+    <button onClick={() => onReview(row.cfn)} title="Mark reviewed"
+      className="inline-flex items-center gap-1 hover:text-primary transition-colors">
+      <Clock size={12} />Mark reviewed
+    </button>
+  );
+}
+
+function FeedCard({ group, onOpenEntity, onReview, onUnreview }: {
+  group: any[];
+  onOpenEntity: (n: string) => void;
+  onReview: (c: string) => void;
+  onUnreview: (c: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const r = group[0];
+  const many = group.length > 1;
+  const cls = deriveClassification(r);
+  const [one, plural] = NOUN_BY_CLASS[cls] || ['a mortgage', 'mortgages'];
+  const amountOf = (x: any) => (x.loan_amount > 0 ? x.loan_amount : x.consideration_amount > 0 ? x.consideration_amount : 0);
+  const total = group.reduce((s, x) => s + (amountOf(x) || 0), 0);
+  const unreviewed = group.filter(x => !x.reviewed_at);
+  const property = cleanField(r.property_address, true);
+  const folio = cleanField(r.folio_parcel);
+  const signatory = cleanField(r.signatory_officer);
+  const assignorParent = cleanField(r.assignor_parent);
+  const assigneeParent = cleanField(r.assignee_parent);
+
+  return (
+    <article className="bg-card border border-border rounded-xl px-4 py-3 hover:border-primary/30 transition-colors">
+      <div className="flex gap-3">
+        <button onClick={() => onOpenEntity(r.assignor_canon)} title={`Open ${r.assignor_canon}'s profile`}
+          className={`w-10 h-10 rounded-full shrink-0 flex items-center justify-center text-xs font-semibold ${AVATAR_STYLE[r.assignor_type] || 'bg-muted text-muted-foreground'}`}>
+          {initials(r.assignor_canon)}
+        </button>
+        <div className="flex-1 min-w-0">
+          {/* Headline: who did what to whom */}
+          <p className="text-sm leading-snug">
+            <EntityName name={r.assignor_canon} onOpen={onOpenEntity} />
+            <span className="text-muted-foreground"> assigned {many ? `${group.length} ${plural}` : one} to </span>
+            <EntityName name={r.assignee_canon} onOpen={onOpenEntity} />
+          </p>
+          {(assignorParent || assigneeParent) && (
+            <p className="text-[11px] text-amber-600 mt-0.5 truncate">
+              {assignorParent && <>↳ <button className="hover:underline" onClick={() => onOpenEntity(assignorParent)}>{assignorParent}</button></>}
+              {assignorParent && assigneeParent && <span className="text-muted-foreground"> · </span>}
+              {assigneeParent && <>owner: <button className="hover:underline" onClick={() => onOpenEntity(assigneeParent)}>{assigneeParent}</button></>}
+            </p>
+          )}
+          <p className="text-[11px] text-muted-foreground mt-0.5 flex items-center gap-1 flex-wrap">
+            <span className={TYPE_COLOR[r.assignor_type]}>{TYPE_LABEL[r.assignor_type] || r.assignor_type || '—'}</span>
+            <span>→</span>
+            <span className={TYPE_COLOR[r.assignee_type]}>{TYPE_LABEL[r.assignee_type] || r.assignee_type || '—'}</span>
+            <span>·</span><CountyCell county={r.county} />
+            <span>·</span><span>{fmtFeedDate(r.rec_date)}</span>
+            {!many && <><span>·</span>
+              <DocLink row={r} className="font-mono text-primary/80 hover:underline inline-flex items-center gap-0.5">
+                {r.cfn}<ExternalLink size={8} className="opacity-50" />
+              </DocLink></>}
+          </p>
+
+          {/* Property / amount panel */}
+          {(!many && (property || folio || signatory || total > 0)) || (many && total > 0) ? (
+            <div className="mt-2 rounded-lg bg-muted/40 px-3 py-2 flex items-center justify-between gap-3">
+              <div className="min-w-0 text-xs">
+                {many ? (
+                  <p className="text-muted-foreground">Combined amount of {group.length} filings</p>
+                ) : (
+                  <>
+                    {property ? <p className="font-medium truncate" title={property}>{property}</p>
+                      : <p className="text-muted-foreground italic">Property address not read</p>}
+                    <p className="text-[11px] text-muted-foreground truncate">
+                      {folio && <>Folio <span className="font-mono">{folio}</span></>}
+                      {folio && signatory && ' · '}
+                      {signatory && <>Signed by {signatory}</>}
+                    </p>
+                  </>
+                )}
+              </div>
+              {total > 0 && <p className="text-lg font-semibold text-emerald-600 tabular-nums shrink-0">{fmtAmt(total)}</p>}
+            </div>
+          ) : null}
+
+          <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+            <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${CLASS_STYLE[cls] || 'bg-muted border-border text-muted-foreground'}`}>{cls}</span>
+            {r.doc_type && <span className="inline-flex rounded-full border border-border px-2 py-0.5 text-[10px] text-muted-foreground">{r.doc_type}</span>}
+          </div>
+
+          {/* Action bar */}
+          <div className="mt-2 pt-2 border-t border-border/60 flex items-center gap-4 text-[11px] text-muted-foreground">
+            {many ? (
+              unreviewed.length > 0 ? (
+                <button onClick={() => unreviewed.forEach(x => onReview(x.cfn))}
+                  className="inline-flex items-center gap-1 hover:text-primary transition-colors">
+                  <Clock size={12} />Mark all reviewed ({unreviewed.length})
+                </button>
+              ) : <span className="inline-flex items-center gap-1 text-emerald-600"><CheckCircle size={12} />All reviewed</span>
+            ) : (
+              <ReviewButton row={r} onReview={onReview} onUnreview={onUnreview} />
+            )}
+            {!many && (
+              <DocLink row={r} className="inline-flex items-center gap-1 hover:text-primary transition-colors">
+                <ArrowUpRight size={12} />Document
+              </DocLink>
+            )}
+            <button onClick={() => setOpen(o => !o)} className="inline-flex items-center gap-1 hover:text-primary transition-colors">
+              {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+              {many ? (open ? 'Hide filings' : `Show ${group.length} filings`) : (open ? 'Hide details' : 'Details')}
+            </button>
+          </div>
+
+          {open && (
+            <div className="mt-2 pt-2 border-t border-border/60">
+              {many ? (
+                <ul className="divide-y divide-border/50 text-xs">
+                  {group.map(x => {
+                    const p = cleanField(x.property_address, true);
+                    const amt = fmtAmt(amountOf(x));
+                    return (
+                      <li key={x.cfn} className="py-1.5 flex items-center gap-3">
+                        <DocLink row={x} className="font-mono text-primary/80 hover:underline inline-flex items-center gap-0.5 shrink-0">
+                          {x.cfn}<ExternalLink size={8} className="opacity-50" />
+                        </DocLink>
+                        <span className="truncate flex-1 text-muted-foreground" title={p || ''}>{p || '—'}</span>
+                        {amt && <span className="font-mono text-emerald-600 shrink-0">{amt}</span>}
+                        <span className="text-[11px] text-muted-foreground shrink-0">
+                          <ReviewButton row={x} onReview={onReview} onUnreview={onUnreview} />
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : (
+                <RowDetailBody row={r} />
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </article>
+  );
+}
+
+type ListView = 'feed' | 'table';
+const VIEW_KEY = 'reporting:list-view';
+function readView(): ListView {
+  try { return localStorage.getItem(VIEW_KEY) === 'table' ? 'table' : 'feed'; } catch { return 'feed'; }
 }
 
 // ── Filing table (one instance per selected entity when 2+ are chosen) ───────
@@ -331,6 +556,12 @@ function TransactionsTable({ title, filterQs, exportQs }: {
   const qc = useQueryClient();
   const [page, setPage]         = useState(1);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [view, setViewState]    = useState<ListView>(readView);
+  const [profile, setProfile]   = useState<string | null>(null);
+  const setView = (v: ListView) => {
+    setViewState(v);
+    try { localStorage.setItem(VIEW_KEY, v); } catch { /* private window */ }
+  };
 
   const qs = `?page=${page}&limit=50${filterQs}`;
   const { data, isLoading } = useQuery({
@@ -350,24 +581,59 @@ function TransactionsTable({ title, filterQs, exportQs }: {
 
   return (
     <div className="bg-card border border-border rounded-lg overflow-hidden break-inside-avoid">
-      {/* Per-entity title bar (multi-entity mode) */}
-      {title && (
-        <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-muted/20">
-          <h3 className="text-xs font-semibold flex items-center gap-1.5">
-            <Crosshair size={11} className="text-primary" />{title}
-            {data && <span className="font-normal text-muted-foreground ml-1">{data.total.toLocaleString()} transaction{data.total === 1 ? '' : 's'}</span>}
-          </h3>
+      {/* Title bar: entity name (multi-entity mode), count, Feed | Table toggle */}
+      <div className="flex items-center justify-between gap-2 flex-wrap px-3 py-2 border-b border-border bg-muted/20">
+        <h3 className="text-xs font-semibold flex items-center gap-1.5">
+          {title ? <><Crosshair size={11} className="text-primary" />{title}</> : 'Assignments activity'}
+          {data && <span className="font-normal text-muted-foreground ml-1">{data.total.toLocaleString()} transaction{data.total === 1 ? '' : 's'}</span>}
+        </h3>
+        <div className="flex items-center gap-2 print:hidden">
           {exportQs && (
             <button
               onClick={() => { window.location.href = `/api/reporting/export${exportQs}`; }}
-              className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-foreground transition-colors print:hidden">
+              className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-foreground transition-colors">
               <Download size={10} />CSV
             </button>
+          )}
+          <div className="inline-flex rounded-md border border-border overflow-hidden text-[10px] font-medium">
+            {(['feed', 'table'] as const).map(v => (
+              <button key={v} onClick={() => setView(v)}
+                className={`px-2 h-6 inline-flex items-center gap-1 transition-colors ${view === v ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+                {v === 'feed' ? <><Rss size={10} />Feed</> : <><Table2 size={10} />Table</>}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {view === 'feed' && (
+        <div className="px-3 py-2 border-b border-border bg-primary/5 flex items-start gap-2 text-[11px] print:hidden">
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/15 text-primary font-medium shrink-0">Open testing</span>
+          <span className="text-muted-foreground">
+            We're trying a feed layout for this list. Click any firm's name to open its profile. Try it out and tell us what you'd change; the old table is one click away under <span className="font-medium text-foreground">Table</span>.
+          </span>
+        </div>
+      )}
+
+      {view === 'feed' && (
+        <div className="p-3 space-y-2.5 bg-muted/10">
+          {isLoading
+            ? Array(4).fill(0).map((_, i) => <Skeleton key={i} className="h-28 w-full rounded-xl" />)
+            : groupRows(data?.rows || []).map(g => (
+                <FeedCard key={g[0].cfn} group={g}
+                  onOpenEntity={setProfile}
+                  onReview={c => reviewMutation.mutate(c)}
+                  onUnreview={c => unreviewMutation.mutate(c)} />
+              ))}
+          {!isLoading && !data?.rows?.length && (
+            <p className="px-4 py-10 text-center text-muted-foreground text-xs">No records found.</p>
           )}
         </div>
       )}
 
-      <div className="overflow-x-auto">
+      {profile && <EntityDetailPanel entityName={profile} onClose={() => setProfile(null)} />}
+
+      {view === 'table' && <div className="overflow-x-auto">
         <table className="w-full text-[11px] border-collapse">
           <thead>
             <tr className="bg-muted/40 border-b border-border text-muted-foreground">
@@ -478,7 +744,7 @@ function TransactionsTable({ title, filterQs, exportQs }: {
             )}
           </tbody>
         </table>
-      </div>
+      </div>}
 
       {/* Pagination */}
       {data && data.pages > 1 && (

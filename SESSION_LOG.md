@@ -4283,3 +4283,8 @@ Owner wants a new pipeline: Miami-Dade Clerk circuit-civil foreclosure complaint
 
 
 
+
+## 4 Nov 2026 — Reporting tab: activity feed (Open testing)
+- Owner wants the Reporting filing list ("Assignments activity") to read like a social-media feed, and every firm on a card to open a profile snapshot (our data + FDIC for banks + SEC for filers + news). Plan and decisions: `docs/REPORTING_FEED_PLAN.md` (5 steps).
+- Step 1 BUILT in `client/src/pages/Reporting.tsx`: `FeedCard` (assignor avatar, "X assigned a mortgage to Y", types, county, date, CFN link, property/folio/signer/amount panel, classification pill, Mark reviewed / Document / Details), same-page grouping by assignor+assignee+rec_date ("assigned 3 mortgages", Show N filings, Mark all reviewed), Feed | Table toggle (localStorage `reporting:list-view`, feed default), "Open testing" banner on the feed. Firm names/avatar open the existing centred `EntityDetailPanel` as a stop-gap for step 2. `RowDetail` split so `RowDetailBody` is shared.
+- Checked locally on :5050: 50 rows -> 46 cards (2 groups of 3), profile card opens, group expands, table toggle persists across reload, no console errors. Local DB has no loan amounts/addresses at all, so the amount panel was checked with sample values injected in the browser only. NOT deployed (owner rule: ask before production push). Gotcha: Esc doesn't close the profile card unless it has focus; the X does.
