@@ -4,6 +4,15 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-11-05 (evening) — ST. JOHNS COUNTY SCOPED (not built): both Clerk search tools are CAPTCHA-gated
+
+- Owner asked to add St. Johns County; chose the Official Records route. Findings in `docs/ST_JOHNS_COMPLAINTS_SCOPE.md`: Court Records (Catalis Benchmark) has an hCaptcha on the search form; Official Records (Landmark Web) has a Google reCAPTCHA on all 11 search sections. Neither can run unattended; we do not solve or bypass CAPTCHAs. Trellis lists the cases and returned the text of the filing-fee form ("Value of Real Property or Mortgage Foreclosure Claim") with the principal due on the note (CA26-1797: $381,955.76); PDFs need a subscription.
+- **Correction of my own error:** I told the owner Official Records "probably" had no CAPTCHA (checked the DOM before the search form loaded). It does. The owner accepted the Landmark disclaimer in the browser pane for the exploration; no collector accepts it automatically.
+- The browser tool blocked my attempt to click the disclaimer's Accept for the owner (accepting terms needs the owner's explicit say-so); I did not work around it.
+- **Next:** draft a request to the Clerk (unattended registered account? CAPTCHA skipped when logged in? bulk or daily export of the Official Records index and new civil filings?); owner registers an account; test whether logged-in sessions skip the CAPTCHA. Idea for every county: the filing-fee form states the principal due and may be public (it was in Duval); compare it with our 10 Duval complaint principals first.
+
+---
+
 ## 2026-11-05 (later) — COUNTY COLUMN ADDED TO COMPLAINTS; DUVAL DATA VERIFIED
 
 - Owner: "add a column that tells us which county... make sure that data was pulled into the tool correctly." Found: the tab had no county marker, Duval rows sat mixed in with Miami-Dade, and the Monday email would have listed Duval's qualifier under Miami-Dade wording. Fixed (commit 8f95734, deployed: backup `backup_pre_county_col.db`, build, restart, login 200, 6 env names intact): `countyLabel()` in `server/complaints.ts` (from the pipeline's `county` column: Miami-Dade / Duval / Hillsborough, never free text); new County column in the Complaints table, the spreadsheet view (County is now the clean name; the printed court caption moved to "Court (as printed in the complaint)"), the CSV, and each lead in the Monday email (which also stopped counting never-read lower-band cases as "not read yet"; its section wording is no longer Miami-Dade-only). Page heading updated.
