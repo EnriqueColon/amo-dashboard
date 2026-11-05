@@ -55,6 +55,13 @@ function tablesExist(): boolean {
   return t.length === 2
 }
 
+const COUNTY_NAMES: Record<string, string> = { 'MIAMI-DADE': 'Miami-Dade', DUVAL: 'Duval', HILLSBOROUGH: 'Hillsborough' }
+/** One clean county name per row ('MIAMI-DADE' -> 'Miami-Dade'), from the pipeline's own county column, never from free text in the complaint. */
+export function countyLabel(c: string | null | undefined): string {
+  const k = String(c || 'MIAMI-DADE').toUpperCase()
+  return COUNTY_NAMES[k] ?? k.split(/[-\s]+/).map(w => w.charAt(0) + w.slice(1).toLowerCase()).join('-')
+}
+
 type Row = {
   case_id: string; case_number: string; case_type: string; filing_date: string | null; case_style: string | null
   complaint_status: string; complaint_pdf: string | null; note: string | null; county: string | null
@@ -93,7 +100,8 @@ function sheetFields(row: Row, res: any, address: string | null): SheetField[] {
     f('Case', 'case_number', 'Case Number', row.case_number),
     f('Case', 'case_type', 'Clerk Case Type', row.case_type),
     f('Case', 'document_title', 'Document Title', res?.document_title, true),
-    f('Case', 'county', 'County', res?.county_court ?? row.county ?? 'MIAMI-DADE'),
+    f('Case', 'county', 'County', countyLabel(row.county)),
+    f('Case', 'court_printed', 'Court (as printed in the complaint)', res?.county_court, true),
     f('Case', 'date_filed', 'Date Filed', res?.date_filed ?? row.filing_date),
     f('Case', 'clerk_filing_date', 'Clerk Filing Date', row.filing_date),
     f('Parties', 'plaintiff', 'Plaintiff', res?.plaintiff, true),
@@ -186,6 +194,7 @@ function shape(row: Row, detail = false) {
   const out: any = {
     case_id: row.case_id, case_number: row.case_number, case_type: row.case_type,
     county: row.county ?? 'MIAMI-DADE',
+    county_label: countyLabel(row.county),
     filing_date: row.filing_date, case_style: row.case_style,
     status: row.complaint_status === 'downloaded' ? (res ? 'extracted' : 'downloaded') : row.complaint_status,
     plaintiff: res?.plaintiff ?? null,

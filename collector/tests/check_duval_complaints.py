@@ -128,6 +128,20 @@ check(dc.fetch_one(db, FakeCore(unrel_html), row) == "complaint_not_public", "co
 check(db.execute("SELECT note FROM foreclosure_cases WHERE case_id='DU:14486400'").fetchone()[0].startswith("Complaint not released yet"), "reason recorded")
 check(dc.fetch_one(db, FakeCore(case_html.replace("COMPLAINT (VERIFIED MORTGAGE FORECLOSURE)", "SUMMONS").replace("AMENDED COMPLAINT", "NOTICE")), db.execute("SELECT * FROM foreclosure_cases WHERE case_id='DU:14488262'").fetchone()) == "no_complaint_entry", "no complaint line")
 db.execute("UPDATE foreclosure_cases SET complaint_status='pending' WHERE case_id='DU:14486400'")
+# --- dates and full names for cases the search page cannot describe
+db.execute("UPDATE foreclosure_cases SET filing_date=NULL, case_style='NAVY FEDERAL CREDIT UNIO v. KATRINA PATRICE W (+1)' WHERE case_id='DU:14486204'")
+check(dc.fill_details(db, FakeCore(case_html)) >= 1, "fill_details reads the case page")
+r3 = db.execute("SELECT filing_date, case_style, metadata_json FROM foreclosure_cases WHERE case_id='DU:14486204'").fetchone()
+check(r3["filing_date"] == "2026-10-30", f"filing date filled: {r3['filing_date']}")
+check(r3["case_style"] == "NAVY FEDERAL CREDIT UNION v. KATRINA PATRICE WILLIAMS (+1)", f"full names: {r3['case_style']}")
+check(json.loads(r3["metadata_json"])["division"] == "FC-D", "division kept")
+db.execute("UPDATE foreclosure_cases SET filing_date=NULL WHERE case_id='DU:14486204'")
+try:
+    dc.fill_details(db, FakeCore("", boom=duval_session.BotCheckError("bot check")))
+    check(False, "a Bot Check during fill_details must stop the run")
+except duval_session.BotCheckError:
+    pass
+
 try:
     dc.fetch_pending(db, FakeCore("", boom=duval_session.BotCheckError("bot check")))
     check(False, "a Bot Check must stop the run, not be swallowed")

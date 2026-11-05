@@ -336,6 +336,40 @@ def store_cases(conn, rows: list[dict], include_lower: bool) -> tuple[int, int]:
     return found, new
 
 
+def fill_details(conn, core, limit: int | None = None) -> int:
+    """The search page shows no file date and cuts party names at 25 characters. For every Duval case still
+    without a filing date (new cases, and the lower-band ones that are never downloaded), read the case page:
+    exact file date, current status, full party names, attorney and division. One page load per case."""
+    rows = conn.execute("SELECT * FROM foreclosure_cases WHERE county=? AND filing_date IS NULL ORDER BY first_seen",
+                        (COUNTY,)).fetchall()
+    if limit:
+        rows = rows[:limit]
+    done = 0
+    for row in rows:
+        try:
+            case = parse_case_html(core.case(row["case_id"][len(ID_PREFIX):]).get("BodyHtml") or "")
+        except Exception as e:
+            from duval_session import BotCheckError
+            if isinstance(e, BotCheckError):
+                raise
+            print(f"  ERROR reading case page for {row['case_number']}: {e}")
+            continue
+        time.sleep(CASE_PAUSE)
+        if not case["file_date"]:
+            continue
+        letter = {"PLAINTIFF": "P", "DEFENDANT": "D"}
+        style = case_style([(p["name"], letter.get(p["role"], "")) for p in case["parties"]]) if case["parties"] else row["case_style"]
+        meta = json.loads(row["metadata_json"] or "{}")
+        meta.update({"uniform_number": case["uniform_case_number"], "division": case["division"], "judge": case["judge"],
+                     "parties": case["parties"], "attorneys": case["attorneys"]})
+        conn.execute("UPDATE foreclosure_cases SET filing_date=?, case_status=COALESCE(?, case_status), case_style=?, "
+                     "metadata_json=? WHERE case_id=?",
+                     (case["file_date"], case["status"], style, json.dumps(meta), row["case_id"]))
+        conn.commit()
+        done += 1
+    return done
+
+
 # --------------------------------------------------------------------------- stage 2
 def due_for_fetch(conn):
     cutoff_retry = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -439,6 +473,7 @@ def main():
             print(f"searching Duval {d_from}..{d_to - timedelta(days=1)}")
             found, new = search_range(conn, core, d_from, d_to, a.include_lower_band)
             print(f"cases found {found}, new {new}")
+            print(f"case pages read for date and full names: {fill_details(conn, core)}")
         if not a.search_only and not a.extract_only:
             print("fetch results:", fetch_pending(conn, core, a.limit))
         if a.extract:

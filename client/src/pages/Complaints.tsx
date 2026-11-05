@@ -8,7 +8,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Gavel, ChevronDown, ChevronRight, AlertTriangle, Download, FileText } from 'lucide-react';
 
-// Complaints (beta): Miami-Dade foreclosure complaints, case types RPMF-Commercial and RPMF-Non-Homestead.
+// Complaints (beta): foreclosure complaints by county (Miami-Dade, Duval): Commercial and Non-Homestead Residential case types.
 // "Qualifies" = principal of at least $500,000 (inclusive) AND no reinstatement clause in the mortgage,
 // worked out by the server from the stored extraction each time; it is not a stored label.
 // Two ways to read the same data: a readable summary (one clear row per complaint, click for the full
@@ -17,7 +17,7 @@ import { Gavel, ChevronDown, ChevronRight, AlertTriangle, Download, FileText } f
 
 type Field = { key: string; label: string; value: string | null; group: string; wide?: boolean };
 type Row = {
-  case_id: string; case_number: string; case_type: string; case_style: string | null; filing_date: string | null;
+  case_id: string; case_number: string; county_label: string; case_type: string; case_style: string | null; filing_date: string | null;
   status: string; plaintiff: string | null; is_foreclosure: boolean | null;
   verdict: 'qualifies' | 'no' | 'unclear' | 'pending'; principal: number | null;
   default_date: string | null; right_to_reinstate_clause: boolean | null;
@@ -240,7 +240,7 @@ export default function Complaints() {
         <h1 className="text-xl font-semibold">Complaints</h1>
         <span className="text-xs px-2 py-0.5 rounded bg-primary/15 text-primary font-medium">Open testing</span>
         <span className="text-sm text-muted-foreground ml-1">
-          Miami-Dade foreclosure complaints (RPMF-Commercial and RPMF-Non-Homestead), read from the Clerk's records
+          Foreclosure complaints by county (Miami-Dade and Duval; Commercial and Non-Homestead Residential), read from each Clerk's records
         </span>
       </div>
 
@@ -296,6 +296,7 @@ export default function Complaints() {
                   <tr className="text-left text-muted-foreground border-b border-border">
                     <th className="py-2.5 w-6"></th>
                     <th className="py-2.5 pr-4 font-medium">Case</th>
+                    <th className="pr-4 font-medium">County</th>
                     <th className="pr-4 font-medium">Plaintiff</th>
                     <th className="pr-4 font-medium">Property address</th>
                     <th className="pr-4 font-medium text-right">Unpaid principal</th>
@@ -314,6 +315,7 @@ export default function Complaints() {
                           <div className="font-medium">{r.case_number}</div>
                           <div className="text-xs text-muted-foreground mt-0.5">{r.case_type} · filed {r.filing_date ?? '—'}</div>
                         </td>
+                        <td className="py-3 pr-4 whitespace-nowrap">{r.county_label}</td>
                         <td className="py-3 pr-4 max-w-[22rem]">
                           <div style={clamp(2)} title={r.plaintiff ?? r.case_style ?? ''}>{r.plaintiff ?? r.case_style ?? '—'}</div>
                         </td>
@@ -335,7 +337,7 @@ export default function Complaints() {
                       {open === r.case_id && (
                         <tr className="border-b border-border/50 bg-muted/20">
                           <td></td>
-                          <td colSpan={7} className="pr-4"><FullRecord r={r} onDone={refresh} /></td>
+                          <td colSpan={8} className="pr-4"><FullRecord r={r} onDone={refresh} /></td>
                         </tr>
                       )}
                     </Fragment>
