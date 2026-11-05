@@ -4,6 +4,14 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-11-05 (later) — COUNTY COLUMN ADDED TO COMPLAINTS; DUVAL DATA VERIFIED
+
+- Owner: "add a column that tells us which county... make sure that data was pulled into the tool correctly." Found: the tab had no county marker, Duval rows sat mixed in with Miami-Dade, and the Monday email would have listed Duval's qualifier under Miami-Dade wording. Fixed (commit 8f95734, deployed: backup `backup_pre_county_col.db`, build, restart, login 200, 6 env names intact): `countyLabel()` in `server/complaints.ts` (from the pipeline's `county` column: Miami-Dade / Duval / Hillsborough, never free text); new County column in the Complaints table, the spreadsheet view (County is now the clean name; the printed court caption moved to "Court (as printed in the complaint)"), the CSV, and each lead in the Monday email (which also stopped counting never-read lower-band cases as "not read yet"; its section wording is no longer Miami-Dade-only). Page heading updated.
+- **Data check:** 36 Duval cases, 36 unique ids/numbers, all 10 PDFs' page counts equal the docket's, plaintiffs agree with the case styles, a repeat search an hour later found the same 36 (0 new). Gap found and fixed: the 24 lower-band cases had no filing date and names cut at 25 characters (the search page shows neither). `fill_details()` now reads each new case page for the exact date, status, full names, attorney and division; ran once on the droplet (24 pages, 0 errors): all 36 now have dates (22 Oct-3 Nov, inside the window). Server code run against a scratch copy of the live complaint tables: Miami-Dade 40, Duval 36; Duval 1 qualifies / 33 no / 2 not public.
+- **Not done:** a county filter on the tab (offered); an independent cross-check of Duval against the Clerk's own site in a browser (needs the owner to sign in the browser pane); the Complaints tab was not viewed in a browser. Source quirk kept: Oceanus's address prints "Jacksonville, Beach" (the mortgage itself has the stray comma).
+
+---
+
 ## 2026-11-05 — DUVAL FIRST PULL DONE (14 days) + DAILY JOB INSTALLED
 
 - Owner added `DUVAL_CORE_USER`/`DUVAL_CORE_PASS` to the droplet `.env` themselves (backup `.env.before_duval.20261105T162843Z`; Claude confirmed only that both names exist with values). Crontab backed up (`/root/crontab.before_duval.*`); line installed: `50 11 * * * run_duval_complaints_daily.sh` (log `collector/duval_complaints_daily.log`). First scheduled run: 6 Nov 11:50 UTC.
