@@ -1,6 +1,6 @@
 # Duval County Foreclosure Complaints — Collector
 
-**Status:** built, tested offline, and run live by the owner (4 Nov 2026: sign-in, search of 20 cases, 2 complaints downloaded and checked) · **NOT deployed, NOT scheduled**
+**Status:** LIVE (5 Nov 2026). Deployed, first 14-day pull done (36 cases, 10 read, 1 qualifies), daily job scheduled at 11:50 UTC. Login lives in the droplet `.env` (added by the owner).
 **Code:** `collector/duval_session.py`, `collector/duval_complaints.py`, `collector/run_duval_complaints_daily.sh`, `collector/tests/check_duval_complaints.py` (+ fixtures)
 
 ## In plain English
@@ -73,3 +73,7 @@ Per the owner's rule (Hillsborough scope §13), Duval stays off "Qualifies" unti
 2. **Run unattended on the droplet** with the owner's login stored in `.env`? Confirm the Clerk allows a shared account to run unattended.
 3. ~~Lower claim bands~~ — decided 4 Nov 2026: list them as "does not qualify", do not download.
 4. **Counties' order:** Duval before or after the Hillsborough document route?
+
+## First pull (5 Nov 2026)
+
+36 cases found over 14 days (22 Oct to 5 Nov): 12 in the $250,000+ band, 24 below band ("Does not qualify", not downloaded). Of the 12: 10 downloaded and read (0 failed), 2 not released yet. Result: 1 qualifies, 9 do not. Spend $2.41, cap not hit, no errors or Bot Check. Three results were hand-checked against the PDFs (all matched), including the near miss (007405: $579,662.27 principal, but the mortgage has the borrower's right to reinstate).

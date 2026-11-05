@@ -4,6 +4,17 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-11-05 — DUVAL FIRST PULL DONE (14 days) + DAILY JOB INSTALLED
+
+- Owner added `DUVAL_CORE_USER`/`DUVAL_CORE_PASS` to the droplet `.env` themselves (backup `.env.before_duval.20261105T162843Z`; Claude confirmed only that both names exist with values). Crontab backed up (`/root/crontab.before_duval.*`); line installed: `50 11 * * * run_duval_complaints_daily.sh` (log `collector/duval_complaints_daily.log`). First scheduled run: 6 Nov 11:50 UTC.
+- **Pull (log `collector/batch/duval_backfill_20261105.log`, `--days 14 --extract`):** searched 22 Oct-5 Nov; 36 cases found (3 commercial, 33 non-homestead; no window near the 25-per-page limit, so nothing truncated); 12 in the $250,000+ band, 24 below band (listed as "Does not qualify", not downloaded); of the 12, 10 downloaded and 10 extracted (0 failed, 0 waiting), 2 not released yet (2026-CA-007415, 2026-CA-007673; the Clerk's image cell says "Request / View on request", no link; retried weekly for 8 weeks). Spend $2.41 of the $15/day cap, `stopped_for_budget` False. No errors, no Bot Check.
+- **Results:** 1 qualifies (Oceanus 007589, $800,000, no reinstatement clause); 9 do not (8 principal under $500k: 225k-380k; 1 near miss: 007405, principal $579,662.27 but the mortgage has "Borrower's Right to Reinstate After Acceleration"). All 10 are mortgage foreclosures; no review flags. `pm2 restart` after the pull (login 200, 6 env names intact).
+- **Hand-check so far (3 of 10 against the PDF):** 007589 and 007567 (4 Nov) and 007405 (principal p.2, clause p.16, whole PDF scanned for a deleting rider: none; a notice on p.27 says the borrower has the right to reinstate). All matched. The other 7 are far below $500k (max 380k) and were not individually checked.
+- **Monitor lesson:** `pgrep -f` over ssh matches its own shell, so a "running" count never reaches 0; check the log's `extract results:` line instead.
+- **Next county** (owner: after Duval).
+
+---
+
 ## 2026-11-04 — DUVAL COUNTY COMPLAINTS COLLECTOR BUILT (offline-tested; NOT deployed, NOT scheduled)
 
 Owner: "Build it" for Duval complaints, with their own CORE login (never typed or seen by Claude; they signed in in the browser pane). Full write-up: `docs/DUVAL_COMPLAINTS.md`.
