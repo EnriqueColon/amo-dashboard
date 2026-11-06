@@ -4,6 +4,13 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-11-06 — DATE COLLECTED COLUMN; DUVAL FIRST SCHEDULED RUN OK
+
+- Owner: "add a column ... the date it was scrapped." Added **Date Collected** (the day the tool first pulled the case in: `foreclosure_cases.first_seen`, UTC, shown as an Eastern-time date) to the Complaints table, spreadsheet view and CSV (commit c2667dd, deployed: backup `backup_pre_collected_col.db`, build, restart, login 200, 6 env names intact). Tested on a copy of the live complaint tables: 82 rows, 0 without a date; Miami-Dade 5 days of collection (3-6 Nov), Duval 5-6 Nov. Note: it is the first-pulled date, not the last time the case was re-read (a case's later document fetch or extraction does not change it). Duval's 36 backfilled cases all show 5 Nov.
+- **Duval first scheduled run (6 Nov 11:50 UTC): clean.** Searched 27 Oct-6 Nov, 23 cases, 1 new (NH $250k+ band), read its case page, downloaded and extracted its complaint (1 extracted, 0 failed), budget not hit, exit 0. Table: below_band_threshold 24, complaint_not_public 2, downloaded 11. The 2 unreleased are retried weekly (next ~12 Nov).
+
+---
+
 ## 2026-11-05 (evening) — ST. JOHNS COUNTY SCOPED (not built): both Clerk search tools are CAPTCHA-gated
 
 - Owner asked to add St. Johns County; chose the Official Records route. Findings in `docs/ST_JOHNS_COMPLAINTS_SCOPE.md`: Court Records (Catalis Benchmark) has an hCaptcha on the search form; Official Records (Landmark Web) has a Google reCAPTCHA on all 11 search sections. Neither can run unattended; we do not solve or bypass CAPTCHAs. Trellis lists the cases and returned the text of the filing-fee form ("Value of Real Property or Mortgage Foreclosure Claim") with the principal due on the note (CA26-1797: $381,955.76); PDFs need a subscription.
