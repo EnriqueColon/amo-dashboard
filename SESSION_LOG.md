@@ -4,6 +4,14 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-11-06 (later) — NEW YORK SCOPED (not built): NYSCEF bans bots; ACRIS has no lis pendens
+
+- Owner suggested New York State ("easy accessible, breaks down by county"). Findings in `docs/NEW_YORK_COMPLAINTS_SCOPE.md`: NYSCEF's Terms of Use say the site "may not be accessed by any automated program ('bot') for the purpose of extracting data for any use" and data "may not be mined or sold, or used in any pay-for-use application"; its search also carries an hCaptcha. So NYSCEF cannot be automated or used as a data source for this tool. No search was run on NYSCEF; only the form and the Terms were read.
+- NYC ACRIS open data (Socrata, no login) is a permitted API but has **no notice of pendency and no complaints**; it has mortgages (`MTGE`) and assignments of mortgage (`ASST`), i.e. the tool's core product for the five boroughs (a different project).
+- **Options for the owner:** ask the court system about a licensed feed; NYC AOM from ACRIS; Trellis (price/terms); county clerks. Next county is the owner's call.
+
+---
+
 ## 2026-11-06 — DATE COLLECTED COLUMN; DUVAL FIRST SCHEDULED RUN OK
 
 - Owner: "add a column ... the date it was scrapped." Added **Date Collected** (the day the tool first pulled the case in: `foreclosure_cases.first_seen`, UTC, shown as an Eastern-time date) to the Complaints table, spreadsheet view and CSV (commit c2667dd, deployed: backup `backup_pre_collected_col.db`, build, restart, login 200, 6 env names intact). Tested on a copy of the live complaint tables: 82 rows, 0 without a date; Miami-Dade 5 days of collection (3-6 Nov), Duval 5-6 Nov. Note: it is the first-pulled date, not the last time the case was re-read (a case's later document fetch or extraction does not change it). Duval's 36 backfilled cases all show 5 Nov.
