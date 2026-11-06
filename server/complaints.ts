@@ -62,16 +62,24 @@ export function countyLabel(c: string | null | undefined): string {
   return COUNTY_NAMES[k] ?? k.split(/[-\s]+/).map(w => w.charAt(0) + w.slice(1).toLowerCase()).join('-')
 }
 
+/** The day the tool first pulled the case in (foreclosure_cases.first_seen, a UTC timestamp), as an Eastern-time date. */
+export function collectedOn(firstSeen: string | null | undefined): string | null {
+  if (!firstSeen) return null
+  const d = new Date(firstSeen)
+  if (Number.isNaN(d.getTime())) return String(firstSeen).slice(0, 10)
+  return d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+}
+
 type Row = {
   case_id: string; case_number: string; case_type: string; filing_date: string | null; case_style: string | null
-  complaint_status: string; complaint_pdf: string | null; note: string | null; county: string | null
+  complaint_status: string; complaint_pdf: string | null; note: string | null; county: string | null; first_seen: string | null
   result_json: string | null; extracted_at: string | null
   decision: string | null; review_address: string | null; review_note: string | null
 }
 
 const BASE_SQL = `
   SELECT c.case_id, c.case_number, c.case_type, c.filing_date, c.case_style, c.complaint_status,
-         c.complaint_pdf, c.note, c.county, e.result_json, e.extracted_at,
+         c.complaint_pdf, c.note, c.county, c.first_seen, e.result_json, e.extracted_at,
          r.decision, r.address AS review_address, r.note AS review_note
   FROM foreclosure_cases c
   LEFT JOIN foreclosure_extractions e ON e.case_id = c.case_id AND e.model = ?
@@ -104,6 +112,7 @@ function sheetFields(row: Row, res: any, address: string | null): SheetField[] {
     f('Case', 'court_printed', 'Court (as printed in the complaint)', res?.county_court, true),
     f('Case', 'date_filed', 'Date Filed', res?.date_filed ?? row.filing_date),
     f('Case', 'clerk_filing_date', 'Clerk Filing Date', row.filing_date),
+    f('Case', 'collected_on', 'Date Collected', collectedOn(row.first_seen)),
     f('Parties', 'plaintiff', 'Plaintiff', res?.plaintiff, true),
     f('Parties', 'attorney_name', 'Plaintiff Attorney Name', att.name),
     f('Parties', 'attorney_email', 'Plaintiff Attorney Email', (att.emails ?? []).join('; ')),
@@ -195,6 +204,7 @@ function shape(row: Row, detail = false) {
     case_id: row.case_id, case_number: row.case_number, case_type: row.case_type,
     county: row.county ?? 'MIAMI-DADE',
     county_label: countyLabel(row.county),
+    collected_on: collectedOn(row.first_seen),
     filing_date: row.filing_date, case_style: row.case_style,
     status: row.complaint_status === 'downloaded' ? (res ? 'extracted' : 'downloaded') : row.complaint_status,
     plaintiff: res?.plaintiff ?? null,

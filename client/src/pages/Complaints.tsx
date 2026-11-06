@@ -17,7 +17,7 @@ import { Gavel, ChevronDown, ChevronRight, AlertTriangle, Download, FileText } f
 
 type Field = { key: string; label: string; value: string | null; group: string; wide?: boolean };
 type Row = {
-  case_id: string; case_number: string; county_label: string; case_type: string; case_style: string | null; filing_date: string | null;
+  case_id: string; case_number: string; county_label: string; collected_on: string | null; case_type: string; case_style: string | null; filing_date: string | null;
   status: string; plaintiff: string | null; is_foreclosure: boolean | null;
   verdict: 'qualifies' | 'no' | 'unclear' | 'pending'; principal: number | null;
   default_date: string | null; right_to_reinstate_clause: boolean | null;
@@ -297,6 +297,7 @@ export default function Complaints() {
                     <th className="py-2.5 w-6"></th>
                     <th className="py-2.5 pr-4 font-medium">Case</th>
                     <th className="pr-4 font-medium">County</th>
+                    <th className="pr-4 font-medium">Collected</th>
                     <th className="pr-4 font-medium">Plaintiff</th>
                     <th className="pr-4 font-medium">Property address</th>
                     <th className="pr-4 font-medium text-right">Unpaid principal</th>
@@ -316,6 +317,7 @@ export default function Complaints() {
                           <div className="text-xs text-muted-foreground mt-0.5">{r.case_type} · filed {r.filing_date ?? '—'}</div>
                         </td>
                         <td className="py-3 pr-4 whitespace-nowrap">{r.county_label}</td>
+                        <td className="py-3 pr-4 whitespace-nowrap tabular-nums">{r.collected_on ?? '—'}</td>
                         <td className="py-3 pr-4 max-w-[22rem]">
                           <div style={clamp(2)} title={r.plaintiff ?? r.case_style ?? ''}>{r.plaintiff ?? r.case_style ?? '—'}</div>
                         </td>
@@ -337,7 +339,7 @@ export default function Complaints() {
                       {open === r.case_id && (
                         <tr className="border-b border-border/50 bg-muted/20">
                           <td></td>
-                          <td colSpan={8} className="pr-4"><FullRecord r={r} onDone={refresh} /></td>
+                          <td colSpan={9} className="pr-4"><FullRecord r={r} onDone={refresh} /></td>
                         </tr>
                       )}
                     </Fragment>
