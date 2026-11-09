@@ -1,3 +1,32 @@
+# Rollback — Duval complaints collector, lower-band label, County and Date Collected columns (4–6 Nov 2026)
+
+**State (DEPLOYED 4–6 Nov 2026; origin/main `c2667dd` on the droplet):** the Duval County complaints collector (`collector/duval_session.py`,
+`duval_complaints.py`, `run_duval_complaints_daily.sh`, test `tests/check_duval_complaints.py`), the shared `ensure_county_schema()` in
+`complaints_collect.py` (Hillsborough now calls it), and in `server/complaints.ts` / `client/src/pages/Complaints.tsx` / `server/email/complaintsSection.ts`:
+lower-claim-band cases (`below_band_threshold`) read "Does not qualify" with the reason, a **County** column (clean name from the `county` column) and a
+**Date Collected** column (`first_seen`, Eastern date). Commits: `1737d2b e53f173 dd14880 45e1552 c5a646a 2af24bd 8f95734 c2667dd` (+ docs `c99a251 7367b41 9677637`).
+Duval runs daily from cron `50 11 * * *`; its login lives in `/opt/amo-dashboard/.env` as `DUVAL_CORE_USER` / `DUVAL_CORE_PASS` (added by the owner).
+
+| Piece | Touches prod data? | Revert |
+|---|---|---|
+| Duval collector + cron + `.env` login | Adds rows with `county='DUVAL'` to `foreclosure_cases` / `foreclosure_extractions`; PDFs in `complaints_pdfs/DU_*` | stop it: remove the cron line (backup `/root/crontab.before_duval.<ts>`); remove the two `DUVAL_CORE_*` lines from `.env` (backup `.env.before_duval.20261105T162843Z`) |
+| `below_band_threshold` label, County and Date Collected columns | Display only; no data written | `git revert` the commits, `npm run build`, `pm2 restart amo-dashboard` |
+| Shared `ensure_county_schema` | Adds `county` / `metadata_json` columns only if missing (the columns already existed from Hillsborough) | `git revert 1737d2b` (Hillsborough keeps working either way, it carries its own earlier copy in the older commits) |
+
+**Revert the data (only if Duval rows must go):**
+
+    cd /opt/amo-dashboard
+    sqlite3 miami_dade_amo.db "DELETE FROM foreclosure_extractions WHERE case_id LIKE 'DU:%'; DELETE FROM foreclosure_reviews WHERE case_id LIKE 'DU:%'; DELETE FROM foreclosure_cases WHERE county='DUVAL';"
+    rm -f complaints_pdfs/DU_*.pdf        # 11 files, about 200 MB
+    pm2 restart amo-dashboard             # clears the 7-day cache
+
+**Backups taken before each step:** `backup_pre_duval.db` (4 Nov, before the first deploy), `backup_pre_county_col.db` (5 Nov), `backup_pre_collected_col.db` (6 Nov);
+all integrity-checked, kept in `/opt/amo-dashboard/`. Restoring one returns the whole database to that moment (it also discards anything collected since).
+
+Not deployed and nothing to roll back: the St. Johns County and New York scoping (docs only: `docs/ST_JOHNS_COMPLAINTS_SCOPE.md`, `docs/NEW_YORK_COMPLAINTS_SCOPE.md`).
+
+---
+
 # Rollback — Complaints pipeline audit fixes, centred cards, expandable bank card (3 Nov 2026)
 
 **State (DEPLOYED 3 Nov 2026 14:40 UTC, origin/main `4022813`; old bundle in `/root/dist.before_audit_push`):** code, plus the Complaints data loaded from the audited first week (29 cases, 24 extractions) and the daily cron (`30 11 * * * run_complaints_daily.sh`)

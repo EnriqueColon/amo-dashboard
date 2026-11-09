@@ -4,6 +4,23 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-11-06 — STATE OF PLAY (handoff to Cursor; read this first)
+
+**Running on the droplet by itself (cron):** Miami-Dade complaints 11:30 UTC; **Duval complaints 11:50 UTC** (live since 5 Nov; first scheduled run 6 Nov clean); assignments daily pulls, nightly rebuild 08:30 UTC, Friday AI classification, Monday email. App at `origin/main` `c2667dd` (plus docs commits after it), PM2 `amo-dashboard`.
+
+**Done this stretch (all committed, deployed, recorded below in order):** F1 entity-type fix + rebuild verified (2 Nov); transaction labels renamed to INTO_INSTITUTION / OUT_OF_INSTITUTION / NON_INSTITUTIONAL (2 Nov); Duval complaints collector built, live-tested, deployed, first 14-day pull (36 cases, 10 read, 1 qualifies), daily job installed (4-5 Nov); lower-band cases listed as "Does not qualify"; County column; Date Collected column (6 Nov); Duval data cross-checked against the Clerk's site (0 differences).
+
+**Open / parked (none running, none started):**
+- Two small follow-ups: assignee-MERS rule in `enrich_entities.py` and `routes.ts` txn_type SQL; keep enrich's GSE/MERS rule results.
+- Audit fixes F2/F3 (category rules), F4 (Hillsborough direction), taxonomy items; watchlist Stream 1 awaits the owner's go (built, not deployed); Stream 2 (dockets) to discuss.
+- Hillsborough complaints: discovery only, document route undecided.
+- **St. Johns FL: ON HOLD** (CAPTCHA on both Clerk search tools; needs the Clerk's answer / an account). **New York: ON HOLD** (NYSCEF bans bots; ACRIS has no lis pendens). Palm Beach deferred. Other holds in memory: complaints backfill (Jul 2024-Oct 2026 Miami-Dade), UI redesign.
+- Unconfirmed: whether the Duval Clerk's terms allow an unattended shared login. Optional: a county filter on the Complaints tab; a run-log row per county (`foreclosure_runs` has no county column).
+
+**Rules that matter for the next session:** never solve or bypass a CAPTCHA; read a site's Terms of Use before building on it; the owner types credentials in a real Terminal, never in chat, and an assistant never handles passwords or accepts a site's terms for them; ask before production pushes the owner has not agreed; every agreed change is committed and pushed; keep this file, `docs/CONFLUENCE_AMO_DASHBOARD.md`, `ROLLBACK.md`, `CLAUDE.md` and `.cursor/rules/amo-session-handoff.mdc` in step. Droplet SSH "Permission denied (publickey)" after a reboot is the Mac's agent: `ssh-add --apple-load-keychain`.
+
+---
+
 ## 2026-11-06 (later) — NEW YORK SCOPED (not built): NYSCEF bans bots; ACRIS has no lis pendens
 
 - Owner suggested New York State ("easy accessible, breaks down by county"). Findings in `docs/NEW_YORK_COMPLAINTS_SCOPE.md`: NYSCEF's Terms of Use say the site "may not be accessed by any automated program ('bot') for the purpose of extracting data for any use" and data "may not be mined or sold, or used in any pay-for-use application"; its search also carries an hCaptcha. So NYSCEF cannot be automated or used as a data source for this tool. No search was run on NYSCEF; only the form and the Terms were read.
