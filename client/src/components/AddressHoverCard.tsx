@@ -12,7 +12,7 @@ function StreetViewPhoto({ address }: { address: string }) {
     return <div className="flex h-24 items-center justify-center rounded bg-muted text-xs text-muted-foreground">No Street View photo for this address</div>;
   }
   return (
-    <div className="relative h-[180px] w-full overflow-hidden rounded bg-muted">
+    <div className="relative h-[235px] w-full overflow-hidden rounded bg-muted">
       {state === 'loading' && <div className="absolute inset-0 animate-pulse bg-muted" />}
       <img
         src={`/api/streetview?address=${encodeURIComponent(address)}`}
@@ -35,12 +35,18 @@ export function AddressHoverCard({ address, children }: { address: string; child
       <HoverCardTrigger asChild>
         <div className="cursor-default underline decoration-dotted decoration-muted-foreground/50 underline-offset-2">{children}</div>
       </HoverCardTrigger>
-      <HoverCardContent side="top" align="start" className="w-[340px] space-y-2 p-3">
-        {data?.enabled && hasHouseNumber(clean) && <StreetViewPhoto address={clean} />}
-        <div className="flex items-start gap-1.5 text-sm"><MapPin size={14} className="mt-0.5 shrink-0 text-muted-foreground" />{clean}</div>
-        <a href={maps} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline">
-          Open in Google Maps <ExternalLink size={12} />
-        </a>
+      <HoverCardContent side="bottom" align="start" className="w-[400px] space-y-2 p-3">
+        {!data?.enabled
+          ? <div className="flex h-24 items-center justify-center rounded bg-muted text-xs text-muted-foreground">Street View photo not set up yet</div>
+          : hasHouseNumber(clean)
+            ? <StreetViewPhoto address={clean} />
+            : <div className="flex h-24 items-center justify-center rounded bg-muted text-xs text-muted-foreground">No house number, so no Street View photo</div>}
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-start gap-1.5 text-sm"><MapPin size={14} className="mt-0.5 shrink-0 text-muted-foreground" />{clean}</div>
+          <a href={maps} target="_blank" rel="noreferrer" className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground hover:text-primary hover:underline">
+            Map <ExternalLink size={11} />
+          </a>
+        </div>
       </HoverCardContent>
     </HoverCard>
   );

@@ -46,7 +46,7 @@ export function registerStreetViewRoutes(app: Express) {
         if (meta.status === 'ZERO_RESULTS' || meta.status === 'NOT_FOUND') fs.writeFileSync(none, meta.status)
         return res.status(404).json({ error: 'no imagery', status: meta.status })
       }
-      const img = await fetch(`${BASE}?size=480x300&fov=80&${q}`)
+      const img = await fetch(`${BASE}?size=640x376&fov=80&${q}`)
       if (!img.ok || !(img.headers.get('content-type') ?? '').startsWith('image/')) {
         return res.status(502).json({ error: `street view image request failed (${img.status})` })
       }
