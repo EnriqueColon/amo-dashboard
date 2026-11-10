@@ -1,3 +1,31 @@
+# Rollback — Monroe, Leon and Citrus complaints collectors; lower-band reading; Miami-Dade fetch county filter (10 Nov 2026)
+
+**State (DEPLOYED 10 Nov 2026; droplet on `7405c85`+docs):** three county collectors writing to `foreclosure_cases` / `foreclosure_extractions`
+with prefixed ids, each from its own cron. Commits: Monroe `0c56788`; Leon `8b2de2a 8a612c8 eaebacb b4436cf`; lower-band reading for Duval/Monroe/Leon
+`9b55110`; Citrus `05a2503 7405c85`. No schema change (the `county` / `metadata_json` columns already existed). **No database backup was taken for
+these**; they only add rows, so reverting is a delete by county (below), not a restore.
+
+| Piece | Touches prod data? | Revert |
+|---|---|---|
+| Monroe (`MO:`, cron `10 12 * * *`) | 3 rows, 2 PDFs `complaints_pdfs/MO_*` | remove its cron line |
+| Leon (`LE:`, cron `30 12 * * *`, via the IPRoyal proxy) | 42 rows, 41 PDFs `LE_*` | remove its cron line; `IPROYAL_*` in `.env` are also used elsewhere, see the proxy section below |
+| Citrus (`CI:`, cron `50 12 * * *`) | 95 rows (first run, all of 2026), 93 PDFs `CI_*` (~780 MB) | remove its cron line (backup `/root/crontab.before_citrus.20261110T191729Z`); remove `CITRUS_SCORSS_USER` / `CITRUS_SCORSS_PASS` from `.env` (backups `/root/env.before_citrus*`) |
+| `--include-lower-band` in the Duval / Monroe / Leon / Citrus wrappers | Downloads and reads lower-band complaints (extraction spend under the shared `COMPLAINTS_DAILY_BUDGET_USD`) | drop the flag from the wrapper; rows already read stay read |
+| `complaints_collect.due_for_fetch` Miami-Dade-only filter (`05a2503`) | None; it stops the Miami-Dade run from fetching other counties' rows | **do not revert on its own**: without it the 11:30 UTC Miami-Dade run looks up every other county's waiting cases on the Miami-Dade Clerk |
+| UI: county names, Complaints-tab blurb | Display only | `git revert`, `npm run build`, `pm2 restart amo-dashboard` |
+
+**Revert the data for one county** (example Citrus; use `MO:`/`MONROE`/`MO_*` or `LE:`/`LEON`/`LE_*` for the others):
+
+    cd /opt/amo-dashboard
+    sqlite3 miami_dade_amo.db "DELETE FROM foreclosure_extractions WHERE case_id LIKE 'CI:%'; DELETE FROM foreclosure_reviews WHERE case_id LIKE 'CI:%'; DELETE FROM foreclosure_cases WHERE county='CITRUS';"
+    rm -f complaints_pdfs/CI_*.pdf
+    pm2 restart amo-dashboard             # clears the 7-day cache
+
+Citrus exits: 2 = every export window answered HTTP 500; 3 = CAPTCHA, signed-out page, 403 or 429 (stopped, never worked around); 4 = sign-in refused (not
+retried, to avoid locking the owner's account; check it in a browser). Times in Eastern: Monroe 7:10, Leon 7:30, Citrus 7:50 AM EST (an hour later in EDT).
+
+---
+
 # Rollback — Optional IPRoyal proxy helper & session wiring (`collector/proxy_config.py`, `clerk_session.py`, `duval_session.py`, `collect_live.py`, `hillsborough_complaints.py`, `stealth_pool.py`, `server/complaints.ts`, 10 Nov 2026)
 
 **State:** `collector/proxy_config.py` + `collector/tests/check_proxy_config.py` (offline) + optional proxy/stealth wiring in `collector/clerk_session.py`, `collector/duval_session.py`, `collector/collect_live.py`, `collector/hillsborough_complaints.py`, and `collector/stealth_pool.py`, plus `metadata_json` party display fallback in `server/complaints.ts`. Droplet `.env` backup saved at `/opt/amo-dashboard/.env.before_proxy.*`.
