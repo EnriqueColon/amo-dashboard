@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { AddressHoverCard } from '@/components/AddressHoverCard';
 import { Gavel, ChevronDown, ChevronRight, AlertTriangle, Download, FileText } from 'lucide-react';
 
 // Complaints (beta): foreclosure complaints by county (Miami-Dade, Duval, Monroe, Leon): Commercial and Non-Homestead Residential case types.
@@ -323,7 +324,9 @@ export default function Complaints() {
                         </td>
                         <td className="py-3 pr-4 max-w-[20rem]">
                           {(r.review?.decision === 'address_entered' ? r.review.address : r.address)
-                            ? <div style={clamp(2)}>{r.review?.decision === 'address_entered' ? r.review.address : r.address}</div>
+                            ? <AddressHoverCard address={(r.review?.decision === 'address_entered' ? r.review.address : r.address)!}>
+                                <div style={clamp(2)}>{r.review?.decision === 'address_entered' ? r.review.address : r.address}</div>
+                              </AddressHoverCard>
                             : <span className="text-muted-foreground">No address</span>}
                           {r.address_source && <div className="text-xs text-muted-foreground mt-0.5">{r.address_source}</div>}
                         </td>

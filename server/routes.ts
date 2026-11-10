@@ -4,6 +4,7 @@ import { getDb } from './db';
 import { registerBankStressRoutes } from './bank-stress';
 import { registerComplaintsRoutes, VISIBLE_COMPLAINTS_SQL } from './complaints';
 import { registerEntityFdicRoutes } from './entity-fdic';
+import { registerStreetViewRoutes } from './streetview';
 import { registerFeedRoutes } from './feed';
 import { registerEntitySecRoutes } from './entity-sec';
 import { registerFdicAnalyticsRoutes } from './fdic-analytics';
@@ -1458,6 +1459,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   // which was in turn removed on 2026-10-27 (stage 4 of the Bank Stress work).
   registerBankStressRoutes(app);
   registerComplaintsRoutes(app);
+  registerStreetViewRoutes(app);
   registerEntityFdicRoutes(app);
   registerFeedRoutes(app);
   registerEntitySecRoutes(app);

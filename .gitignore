@@ -57,3 +57,6 @@ intel.db-wal
 
 # local complaints test pull (PDFs + scratch DB)
 local_complaints_week/
+
+# Street View photos cached by server/streetview.ts
+streetview_cache/
