@@ -2,7 +2,7 @@ import type { Express } from 'express';
 import type { Server } from 'http';
 import { getDb } from './db';
 import { registerBankStressRoutes } from './bank-stress';
-import { registerComplaintsRoutes } from './complaints';
+import { registerComplaintsRoutes, VISIBLE_COMPLAINTS_SQL } from './complaints';
 import { registerEntityFdicRoutes } from './entity-fdic';
 import { registerFeedRoutes } from './feed';
 import { registerEntitySecRoutes } from './entity-sec';
@@ -2750,7 +2750,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
         SELECT DISTINCT c.case_number, c.filing_date, c.county,
                json_extract(e.result_json, '$.plaintiff') AS plaintiff
         FROM foreclosure_cases c JOIN foreclosure_extractions e ON e.case_id = c.case_id
-        WHERE UPPER(json_extract(e.result_json, '$.plaintiff')) LIKE ?
+        WHERE UPPER(json_extract(e.result_json, '$.plaintiff')) LIKE ? AND ${VISIBLE_COMPLAINTS_SQL}
         ORDER BY c.filing_date DESC LIMIT 20
       `).all(prefix);
       complaints = { count: rows.length, recent: rows.slice(0, 5) };

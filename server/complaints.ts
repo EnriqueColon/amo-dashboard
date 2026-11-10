@@ -91,13 +91,18 @@ type Row = {
   decision: string | null; review_address: string | null; review_note: string | null
 }
 
+/** Counties whose complaint rows stay in the database but are not shown anywhere (owner, 10 Nov 2026: Hillsborough's
+ * foreclosure step is stopped and its one manual run is hidden). SQL condition on `foreclosure_cases c`. */
+export const VISIBLE_COMPLAINTS_SQL = `COALESCE(c.county, 'MIAMI-DADE') NOT IN ('HILLSBOROUGH')`
+
 const BASE_SQL = `
   SELECT c.case_id, c.case_number, c.case_type, c.filing_date, c.case_style, c.complaint_status,
          c.complaint_pdf, c.note, c.county, c.first_seen, c.metadata_json, e.result_json, e.extracted_at,
          r.decision, r.address AS review_address, r.note AS review_note
   FROM foreclosure_cases c
   LEFT JOIN foreclosure_extractions e ON e.case_id = c.case_id AND e.model = ?
-  LEFT JOIN foreclosure_reviews r ON r.case_id = c.case_id`
+  LEFT JOIN foreclosure_reviews r ON r.case_id = c.case_id
+  WHERE ${VISIBLE_COMPLAINTS_SQL}`
 
 
 // ─── The old collector's spreadsheet, column for column ───────────────────────────────────────────
@@ -282,7 +287,7 @@ export function registerComplaintsRoutes(app: Express) {
     if (!tablesExist()) return res.json({ active: false })
     const rows = (getDb().prepare(BASE_SQL).all(MODEL) as Row[]).map(r => shape(r))
     const count = (f: (r: any) => boolean) => rows.filter(f).length
-    const last = getDb().prepare(`SELECT MAX(first_seen) AS t FROM foreclosure_cases`).get() as { t: string | null }
+    const last = getDb().prepare(`SELECT MAX(first_seen) AS t FROM foreclosure_cases c WHERE ${VISIBLE_COMPLAINTS_SQL}`).get() as { t: string | null }
     res.json({
       active: true, model: MODEL, last_case_seen: last.t,
       cases: rows.length,
@@ -337,7 +342,7 @@ export function registerComplaintsRoutes(app: Express) {
 
   app.get('/api/complaints/:caseId', (req: Request, res: Response) => {
     if (!tablesExist()) return res.status(503).json({ error: 'not set up' })
-    const row = getDb().prepare(BASE_SQL + ' WHERE c.case_id = ?').get(MODEL, req.params.caseId) as Row | undefined
+    const row = getDb().prepare(BASE_SQL + ' AND c.case_id = ?').get(MODEL, req.params.caseId) as Row | undefined
     if (!row) return res.status(404).json({ error: 'case not found' })
     res.json(shape(row, true))
   })
