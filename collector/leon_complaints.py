@@ -17,6 +17,10 @@ A complaint whose docket entry has no image link ("Non-Viewable images ... Requi
 Clerk's notice asks that requests be made "in a reasonable manner": every request is paced. No CAPTCHA is shown
 on this route; if one ever appears, or the site answers 403/429, the run stops (exit 3) and nothing solves it.
 
+The Clerk's network refuses the droplet's address (connect timeout / 403, 10 Nov 2026). At the owner's instruction,
+having accepted the risk, the session goes through the IPRoyal proxy when it is configured in .env (proxy_config);
+--direct skips it. The User-Agent still names the collector, and the pacing and stop rules are unchanged.
+
 Usage:
   python leon_complaints.py --days 10 --extract
   python leon_complaints.py --from 2026-10-01 --to 2026-11-10 --search-only
@@ -69,11 +73,13 @@ CAPTCHA_RE = re.compile(rb"g-recaptcha|data-sitekey|grecaptcha\.(?:execute|rende
 
 
 class LeonSession:
-    def __init__(self):
+    def __init__(self, use_proxy: bool = True):
         import requests
+        import proxy_config
         self.s = requests.Session()
         self.s.headers["User-Agent"] = UA
         self._started = False
+        self.route = proxy_config.apply_to_requests_session(self.s, session_key="leon_courts", enabled=use_proxy) or "direct connection"
 
     def _check(self, r):
         body = r.content[:200000]
@@ -357,6 +363,7 @@ def main():
     ap.add_argument("--include-lower-band", action="store_true", help="also fetch claims under $250,000")
     ap.add_argument("--extract", action="store_true", help="after fetching, read and extract new complaints")
     ap.add_argument("--extract-only", action="store_true", help="read and extract already-downloaded complaints; no site access")
+    ap.add_argument("--direct", action="store_true", help="do not use the IPRoyal proxy even if it is configured")
     ap.add_argument("--model", default=os.environ.get("COMPLAINTS_MODEL", "gpt-5.5"))
     ap.add_argument("--budget", type=float, default=float(os.environ.get("COMPLAINTS_DAILY_BUDGET_USD", "15")))
     a = ap.parse_args()
@@ -365,7 +372,9 @@ def main():
     try:
         if a.extract_only:
             a.extract, a.search_only, a.fetch_only = True, False, False
-        site = None if a.extract_only else LeonSession()
+        site = None if a.extract_only else LeonSession(use_proxy=not a.direct)
+        if site:
+            print(f"route: {site.route}")
         if not a.fetch_only and not a.extract_only:
             if a.days:
                 d_to, d_from = date.today() + timedelta(days=1), date.today() - timedelta(days=a.days)
