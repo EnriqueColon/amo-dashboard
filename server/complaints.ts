@@ -59,6 +59,7 @@ const COUNTY_NAMES: Record<string, string> = {
   'MIAMI-DADE': 'Miami-Dade',
   DUVAL: 'Duval',
   HILLSBOROUGH: 'Hillsborough',
+  MONROE: 'Monroe',
   'NEW-YORK': 'New York (Manhattan)',
   KINGS: 'Kings (Brooklyn)',
   QUEENS: 'Queens',
@@ -178,6 +179,8 @@ const FLAG_WORDS: Record<string, string> = {
 
 /** Plain-English reason for the result chip, built from the same fields the rules use (never a separate guess). */
 function resultReason(row: Row, res: any, notes: any[]): string {
+  if (!res && row.complaint_status === 'below_band_threshold' && /^Claim Amount at Filing/i.test(row.note ?? ''))
+    return `Does not qualify: the Clerk's docket records the ${row.note!.replace(/: below the \$500,000 threshold$/, '').replace(/^Claim Amount/, 'claim amount')}, which cannot reach the $500,000 threshold. This is the Clerk's docket entry, not a reading of the complaint, so the complaint was not downloaded or read.`
   if (!res && row.complaint_status === 'below_band_threshold')
     return `Does not qualify: the Clerk filed this case in a claim band under $250,000 (${row.case_type}), which cannot reach the $500,000 threshold. This is the Clerk's filing band, not a reading of the complaint, so the complaint was not downloaded or read.`
   if (row.complaint_status === 'complaint_not_public')
