@@ -314,21 +314,55 @@ def fetch_one(conn, site, row) -> str:
             f.write_bytes(data)
             status, path, sha, note = "downloaded", str(f), hashlib.sha256(data).hexdigest(), None
             time.sleep(IMAGE_PAUSE)
-    for k in ("plaintiffs", "defendants", "attorneys"):
-        if case[k]:
-            meta[k] = case[k]
-    meta.update({"judge": case["judge"] or meta.get("judge"),
-                 "complaint": {"dktid": din, "code": entry["code"] if entry else None,
-                               "description": entry["description"] if entry else None}})
-    style = row["case_style"]
-    if case["plaintiffs"] and case["defendants"]:
-        style = case["plaintiffs"][0] + " v. " + case["defendants"][0] + (f" (+{len(case['defendants']) - 1})" if len(case["defendants"]) > 1 else "")
+    meta, style = apply_case(meta, row["case_style"], case)
+    meta["complaint"] = {"dktid": din, "code": entry["code"] if entry else None,
+                         "description": entry["description"] if entry else None}
     conn.execute("""UPDATE foreclosure_cases SET complaint_status=?, complaint_din=?, complaint_pdf=?, complaint_sha256=?,
                     attempts=attempts+1, last_attempt=?, note=?, filing_date=COALESCE(?, filing_date),
                     case_status=COALESCE(?, case_status), case_style=?, metadata_json=? WHERE case_id=?""",
                  (status, din, path, sha, now(), note, case["file_date"], case["status"], style, json.dumps(meta), row["case_id"]))
     conn.commit()
     return status
+
+
+def apply_case(meta: dict, style: str | None, case: dict) -> tuple[dict, str | None]:
+    """Parties, attorney and judge from a parsed case view into the row's metadata and style."""
+    for k in ("plaintiffs", "defendants", "attorneys"):
+        if case[k]:
+            meta[k] = case[k]
+    meta["judge"] = case["judge"] or meta.get("judge")
+    meta["case_loaded"] = True
+    if case["plaintiffs"] and case["defendants"]:
+        style = case["plaintiffs"][0] + " v. " + case["defendants"][0] + (f" (+{len(case['defendants']) - 1})" if len(case["defendants"]) > 1 else "")
+    return meta, style
+
+
+def enrich_lower(conn, site, limit: int | None = None) -> int:
+    """Lower-band cases are never downloaded, but their case view (one request, no document) gives the
+    defendants and attorney the Complaints tab shows. Loaded once per case."""
+    rows = [r for r in conn.execute("SELECT * FROM foreclosure_cases WHERE county=? AND complaint_status='below_band_threshold'",
+                                    (COUNTY,)).fetchall()
+            if not json.loads(r["metadata_json"] or "{}").get("case_loaded")]
+    if limit:
+        rows = rows[:limit]
+    print(f"{len(rows)} lower-band Leon cases to fill from the case view")
+    done = 0
+    for row in rows:
+        meta = json.loads(row["metadata_json"] or "{}")
+        try:
+            case = parse_case(site.case(meta.get("caseid") or row["case_id"].removeprefix(ID_PREFIX)))
+        except BlockedError:
+            raise
+        except Exception as e:
+            print(f"  ERROR {row['case_number']}: {e}")
+            continue
+        meta, style = apply_case(meta, row["case_style"], case)
+        conn.execute("UPDATE foreclosure_cases SET case_style=?, case_status=COALESCE(?, case_status), metadata_json=? WHERE case_id=?",
+                     (style, case["status"], json.dumps(meta), row["case_id"]))
+        conn.commit()
+        done += 1
+        time.sleep(CASE_PAUSE)
+    return done
 
 
 def fetch_pending(conn, site, limit: int | None = None) -> dict:
@@ -387,6 +421,7 @@ def main():
             print(f"cases found {found}, new {new}")
         if not a.search_only and not a.extract_only:
             print("fetch results:", fetch_pending(conn, site, a.limit))
+            print("lower-band cases filled:", enrich_lower(conn, site))
         if a.extract:
             import complaints_extract
             key = os.environ.get("OPENAI_API_KEY")

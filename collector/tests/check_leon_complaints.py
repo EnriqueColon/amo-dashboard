@@ -176,6 +176,15 @@ check(lc.fetch_one(db, s_h, rows["LE:101"]) == "complaint_not_public" and not s_
 check(db.execute("SELECT note FROM foreclosure_cases WHERE case_id='LE:101'").fetchone()[0].startswith("Complaint not public yet"), "reason recorded")
 check(lc.fetch_one(db, FakeSite([dkt("10/30/2026", "500", "CCS", "CIVIL COVER SHEET")]), rows["LE:101"]) == "no_complaint_entry", "no complaint entry")
 
+# --- lower-band cases get their parties from the case view, once, with no download
+s_low = FakeSite()
+check(lc.enrich_lower(db, s_low) == 1 and not s_low.pdf_calls, "lower-band case filled without a download")
+r3 = db.execute("SELECT * FROM foreclosure_cases WHERE case_id='LE:102'").fetchone()
+m3 = json.loads(r3["metadata_json"])
+check(r3["complaint_status"] == "below_band_threshold" and m3["defendants"] == ["DOE, JANE", "UNKNOWN TENANT 1"]
+      and m3["attorneys"] == ["PAT COUNSEL"] and r3["case_style"].endswith("v. DOE, JANE (+1)"), f"lower-band fill {dict(r3)}")
+check(lc.enrich_lower(db, FakeSite()) == 0, "lower-band case loaded only once")
+
 if failures:
     print("FAIL")
     for f in failures:
