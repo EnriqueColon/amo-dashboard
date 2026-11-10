@@ -4,7 +4,7 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
-## 2026-11-10 (night) — LEON COMPLAINTS COLLECTOR BUILT (not deployed, not scheduled)
+## 2026-11-10 (night) — LEON COMPLAINTS COLLECTOR BUILT + DEPLOYED, BUT LEON'S SITE BLOCKS THE DROPLET (not scheduled); HILLSBOROUGH FORECLOSURE ROWS HIDDEN
 
 Owner: "Lets go with Leon County?"
 - **BUILT:** `collector/leon_complaints.py` (county `LEON`, ids `LE:<Clerk caseid>`, plain `requests`, no login, same UA), `collector/run_leon_complaints_daily.sh` (cron to add: `30 12 * * *`), `collector/tests/check_leon_complaints.py` (offline, inline HTML fixtures, made-up names; passes; Monroe check still passes), `docs/LEON_COMPLAINTS.md`. Server label `LEON: 'Leon'`; client blurb names Leon. `tsc --noEmit` clean.
@@ -12,7 +12,10 @@ Owner: "Lets go with Leon County?"
 - **CAPTCHA check:** result and case pages load `google.com/recaptcha/api.js` with no widget/sitekey/execute (form's `recaptcha_result` is commented out). First regex flagged that script → would have stopped every run; regex now matches only `g-recaptcha|data-sitekey|grecaptcha.execute/render|h-captcha|hcaptcha.com|cf-turnstile`.
 - **Live test (laptop, scratch DB `/tmp/county_probe/leon/run/`), 10 Aug–10 Nov:** 42 cases (7 band 3, 35 lower), 7/7 complaints downloaded (14–66 pp, all scans → full OCR, ~30 s per 66 pp), parties/attorney/judge/date filled. Reader text shows principal e.g. $815,000, $2,393,989.12, $645,000. Extraction NOT run. Bug found by the offline test and fixed: person names "DOE&nbsp;, JANE" → "DOE , JANE".
 - Terms: notice only (Rule 2.420, "reasonable manner", Clerk may charge for extensive use); no robots.txt. ~12 searches/day + a few case/document requests, 2–2.5 s pauses. No Clerk authorization on record (AOSC24-65), per owner's 10 Nov choice.
-- **NEXT (owner's go-ahead):** commit/push, deploy (`git pull`, `npm run build`, `pm2 restart amo-dashboard`), first pull `--days 30 --extract` on the droplet, cron `30 12 * * *`. Still pending from before: whether to hide the 24 Hillsborough foreclosure rows.
+- Pushed `8b2de2a`. Owner then chose: deploy with a one-week first pull, and HIDE the 24 Hillsborough foreclosure rows.
+- **Hillsborough rows hidden (`63e0d8e`):** `VISIBLE_COMPLAINTS_SQL` in `server/complaints.ts` (`COALESCE(c.county,'MIAMI-DADE') NOT IN ('HILLSBOROUGH')`) applied in `BASE_SQL` (Complaints tab, QC panel, feed via `complaintFeedRows`; single-case lookup now `AND c.case_id = ?`), `last_case_seen`, `server/email/complaintsSection.ts`, and the entity-snapshot complaints query in `routes.ts`. Rows stay in the DB.
+- **DEPLOYED 10 Nov 2026 17:15 UTC:** droplet 9d80c5a → 63e0d8e, old bundle `/root/dist.before_leon.20261110T171531Z`; PM2 online; / 302; filter present in `dist/index.cjs`. Not checked signed in.
+- **LEON BLOCKED FROM THE DROPLET:** first pull (`--days 7 --extract`, log `collector/leon_first_run.log`) died on connect timeout to `lforms.leonclerk.com`. From the droplet: `lforms` and `www.leonclerk.com` connect timeout, `cvweb.leonclerk.com` 403; laptop 200 at the same time; `cr.monroe-clerk.com` 200 from the droplet. Treated as a block: nothing stored, **no cron installed**, no proxy workaround. Options for the owner: ask the Leon Clerk to allow 165.22.35.75 (fits the AOSC24-65 authorization request), or run from a machine the Clerk accepts.
 
 ## 2026-11-10 (evening, later) — HILLSBOROUGH AOM RESUMED; HILLSBOROUGH FORECLOSURE STOPPED
 

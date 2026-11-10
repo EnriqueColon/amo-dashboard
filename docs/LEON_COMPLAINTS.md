@@ -1,6 +1,6 @@
 # Leon County Foreclosure Complaints — Collector
 
-**Status:** BUILT, NOT DEPLOYED (10 Nov 2026). Tested live from the laptop into a scratch database; awaiting the owner's go-ahead to deploy, run the first pull and schedule the daily job (proposed 12:30 UTC).
+**Status:** BUILT AND DEPLOYED, BLOCKED FROM THE SERVER, NOT SCHEDULED (10 Nov 2026). Tested live from the laptop into a scratch database. The code is on the droplet (`63e0d8e`), but the Leon Clerk's network refuses the droplet's address: `lforms.leonclerk.com` and `www.leonclerk.com` time out on connect, and `cvweb.leonclerk.com` answers 403. The same pages answer the laptop normally. The first one-week pull stopped before sending a request and stored nothing. No cron is installed. The collector is not to be routed through a proxy to get around this; running it needs either the Clerk allowing the droplet's address or a run from a machine the Clerk accepts (owner's decision).
 **Code:** `collector/leon_complaints.py`, `collector/run_leon_complaints_daily.sh`, `collector/tests/check_leon_complaints.py`
 
 ## In plain English
@@ -42,7 +42,8 @@ No credentials. Needs `OPENAI_API_KEY` (already in the droplet `.env`) and tesse
 
 - **Verified live (10 Nov 2026, laptop, plain HTTP, scratch database):** a search from 10 Aug to 10 Nov found 42 cases (7 in the $250,000+ band, 35 lower-band stored as not qualifying). All 7 complaints downloaded, and parties, attorney, judge and filing date were filled for each. The shared reader read all 7 (14 to 66 pages, all OCR); principal amounts were visible in the text, e.g. $815,000, $2,393,989.12, $645,000.
 - **Verified offline (`check_leon_complaints.py`):** band rules, the CAPTCHA check ignoring the unused script, search and case parsing, the per-letter merge, which docket entry is the complaint, storage next to a Miami-Dade-schema table, re-run idempotence, and each fetch outcome.
-- **Not verified:** extraction (not run on the laptop; it runs on the droplet after deploy); behavior from the droplet's address; behavior over many consecutive days.
+- **Tried from the droplet (10 Nov 2026, 17:16 UTC):** refused at the network level, as above. Monroe's site answered the droplet in the same check.
+- **Not verified:** extraction; behavior over many consecutive days.
 
 ## Permission
 
