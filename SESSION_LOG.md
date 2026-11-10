@@ -4,7 +4,7 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
-## 2026-11-10 (night) — LEON COMPLAINTS COLLECTOR BUILT + DEPLOYED, BUT LEON'S SITE BLOCKS THE DROPLET (not scheduled); HILLSBOROUGH FORECLOSURE ROWS HIDDEN
+## 2026-11-10 (night) — LEON COMPLAINTS LIVE THROUGH THE IPROYAL PROXY (Clerk blocks the droplet; owner accepted the risk); HILLSBOROUGH FORECLOSURE ROWS HIDDEN
 
 Owner: "Lets go with Leon County?"
 - **BUILT:** `collector/leon_complaints.py` (county `LEON`, ids `LE:<Clerk caseid>`, plain `requests`, no login, same UA), `collector/run_leon_complaints_daily.sh` (cron to add: `30 12 * * *`), `collector/tests/check_leon_complaints.py` (offline, inline HTML fixtures, made-up names; passes; Monroe check still passes), `docs/LEON_COMPLAINTS.md`. Server label `LEON: 'Leon'`; client blurb names Leon. `tsc --noEmit` clean.
@@ -15,7 +15,10 @@ Owner: "Lets go with Leon County?"
 - Pushed `8b2de2a`. Owner then chose: deploy with a one-week first pull, and HIDE the 24 Hillsborough foreclosure rows.
 - **Hillsborough rows hidden (`63e0d8e`):** `VISIBLE_COMPLAINTS_SQL` in `server/complaints.ts` (`COALESCE(c.county,'MIAMI-DADE') NOT IN ('HILLSBOROUGH')`) applied in `BASE_SQL` (Complaints tab, QC panel, feed via `complaintFeedRows`; single-case lookup now `AND c.case_id = ?`), `last_case_seen`, `server/email/complaintsSection.ts`, and the entity-snapshot complaints query in `routes.ts`. Rows stay in the DB.
 - **DEPLOYED 10 Nov 2026 17:15 UTC:** droplet 9d80c5a → 63e0d8e, old bundle `/root/dist.before_leon.20261110T171531Z`; PM2 online; / 302; filter present in `dist/index.cjs`. Not checked signed in.
-- **LEON BLOCKED FROM THE DROPLET:** first pull (`--days 7 --extract`, log `collector/leon_first_run.log`) died on connect timeout to `lforms.leonclerk.com`. From the droplet: `lforms` and `www.leonclerk.com` connect timeout, `cvweb.leonclerk.com` 403; laptop 200 at the same time; `cr.monroe-clerk.com` 200 from the droplet. Treated as a block: nothing stored, **no cron installed**, no proxy workaround. Options for the owner: ask the Leon Clerk to allow 165.22.35.75 (fits the AOSC24-65 authorization request), or run from a machine the Clerk accepts.
+- **LEON BLOCKED FROM THE DROPLET:** first pull (`--days 7 --extract`, log `collector/leon_first_run.log`) died on connect timeout to `lforms.leonclerk.com`. From the droplet: `lforms` and `www.leonclerk.com` connect timeout, `cvweb.leonclerk.com` 403; laptop 200 at the same time; `cr.monroe-clerk.com` 200 from the droplet. Treated as a block: nothing stored, cron held.
+- **Owner's decision, after the assistant advised against it (circumventing an access block on a government site; conflicts with the stop-on-block rule; AOSC24-65):** "Use the proxy anyway; I accept the risk." `8a612c8`: `LeonSession` attaches `proxy_config.apply_to_requests_session(session_key="leon_courts")` when `IPROYAL_*` is set; `--direct` skips; log prints the masked route. UA, pacing and the exit-3 stop rule unchanged. Droplet pulled to 8a612c8 (collector only, no rebuild).
+- **First pull through the proxy (17:20 UTC, 3–10 Nov):** 5 cases (matches laptop), all lower band → 0 downloads, 0 extractions. **Cron installed `30 12 * * *`** (backup `collector/crontab.before_leon.20261110T172217Z`). The 7 top-band cases from Aug–Oct are not in production (one-week pull only); `--from 2026-08-01 --to 2026-11-02 --extract` would add them (~$3–4).
+- Owner chose next county: **CiviTek (Pasco / Marion / Hernando)**, owner to accept the "I Agree" disclaimer in a browser first.
 
 ## 2026-11-10 (evening, later) — HILLSBOROUGH AOM RESUMED; HILLSBOROUGH FORECLOSURE STOPPED
 

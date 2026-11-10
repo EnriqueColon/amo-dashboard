@@ -1,8 +1,10 @@
 #!/bin/bash
 # Leon County foreclosure complaints (Commercial / Non-Homestead, band $250,000+): discover -> download -> read -> extract.
 #
-# NOT YET SCHEDULED. Cron entry to add once the owner approves (crontab -e), after the Monroe job (12:10 UTC):
+# Scheduled 10 Nov 2026 (root crontab on the droplet), after the Monroe job (12:10 UTC):
 #   30 12 * * * /opt/amo-dashboard/collector/run_leon_complaints_daily.sh >> /opt/amo-dashboard/collector/leon_complaints_daily.log 2>&1
+# The Clerk's network refuses the droplet's own address; the collector goes through the IPRoyal proxy configured in
+# .env (owner's decision, 10 Nov 2026). Without the IPROYAL_* variables every run fails on connect.
 #
 # Searches the last 10 days every run (a late-listed case is caught by the overlap; cases already held are skipped),
 # downloads each viewable complaint, retries non-viewable ones weekly for 8 weeks, then reads and extracts with the

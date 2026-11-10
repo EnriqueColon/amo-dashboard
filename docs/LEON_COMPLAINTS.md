@@ -1,6 +1,8 @@
 # Leon County Foreclosure Complaints — Collector
 
-**Status:** BUILT AND DEPLOYED, BLOCKED FROM THE SERVER, NOT SCHEDULED (10 Nov 2026). Tested live from the laptop into a scratch database. The code is on the droplet (`63e0d8e`), but the Leon Clerk's network refuses the droplet's address: `lforms.leonclerk.com` and `www.leonclerk.com` time out on connect, and `cvweb.leonclerk.com` answers 403. The same pages answer the laptop normally. The first one-week pull stopped before sending a request and stored nothing. No cron is installed. The collector is not to be routed through a proxy to get around this; running it needs either the Clerk allowing the droplet's address or a run from a machine the Clerk accepts (owner's decision).
+**Status:** LIVE THROUGH A PROXY (10 Nov 2026). Daily job at 12:30 UTC.
+
+**The Leon Clerk's network refuses the droplet's own address.** `lforms.leonclerk.com` and `www.leonclerk.com` time out on connect, and `cvweb.leonclerk.com` answers 403, while the same pages answer the laptop normally. The assistant advised against getting around this. The owner accepted the risk and decided to route the collector through the IPRoyal residential proxy already configured in the droplet's `.env` (`proxy_config.py`, Florida address, 30-minute session). The User-Agent still names the collector. The pacing and the stop-on-CAPTCHA/403/429 rule are unchanged, so if the proxy's address is refused too, the run stops. `--direct` skips the proxy (the laptop doesn't need it). Getting the Clerk to allow the droplet's address, as part of the authorization request, would remove the need for the proxy.
 **Code:** `collector/leon_complaints.py`, `collector/run_leon_complaints_daily.sh`, `collector/tests/check_leon_complaints.py`
 
 ## In plain English
@@ -36,13 +38,14 @@ AMO_DB_PATH=/tmp/leon.db collector/.venv/bin/python3 collector/leon_complaints.p
 collector/run_leon_complaints_daily.sh
 ```
 
-No credentials. Needs `OPENAI_API_KEY` (already in the droplet `.env`) and tesseract (already installed for the shared reader). Cron line, once approved: `30 12 * * *`, after Monroe's 12:10 UTC.
+No site credentials. Needs `OPENAI_API_KEY` and the `IPROYAL_*` proxy variables (both already in the droplet `.env`) and tesseract (already installed for the shared reader). Cron: `30 12 * * *`, after Monroe's 12:10 UTC.
 
 ## Verified, and not
 
 - **Verified live (10 Nov 2026, laptop, plain HTTP, scratch database):** a search from 10 Aug to 10 Nov found 42 cases (7 in the $250,000+ band, 35 lower-band stored as not qualifying). All 7 complaints downloaded, and parties, attorney, judge and filing date were filled for each. The shared reader read all 7 (14 to 66 pages, all OCR); principal amounts were visible in the text, e.g. $815,000, $2,393,989.12, $645,000.
 - **Verified offline (`check_leon_complaints.py`):** band rules, the CAPTCHA check ignoring the unused script, search and case parsing, the per-letter merge, which docket entry is the complaint, storage next to a Miami-Dade-schema table, re-run idempotence, and each fetch outcome.
-- **Tried from the droplet (10 Nov 2026, 17:16 UTC):** refused at the network level, as above. Monroe's site answered the droplet in the same check.
+- **Tried from the droplet directly (10 Nov 2026, 17:16 UTC):** refused at the network level, as above. Monroe's site answered the droplet in the same check.
+- **First pull on the droplet through the proxy (10 Nov 2026, 17:20 UTC, 3 to 10 Nov):** 5 cases found, matching the laptop's count for those days. All 5 are lower-band, so nothing was downloaded or extracted. Daily job scheduled at 12:30 UTC (crontab backup `collector/crontab.before_leon.20261110T172217Z`).
 - **Not verified:** extraction; behavior over many consecutive days.
 
 ## Permission
