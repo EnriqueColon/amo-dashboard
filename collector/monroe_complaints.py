@@ -388,6 +388,8 @@ def main():
             found, new = search_range(conn, site, d_from, d_to, a.include_lower_band)
             print(f"cases found {found}, new {new}")
         if not a.search_only and not a.extract_only:
+            if a.include_lower_band:
+                print(f"lower-band cases queued for reading: {complaints_collect.requeue_lower_band(conn, COUNTY)}")
             print("fetch results:", fetch_pending(conn, site, a.limit, a.include_lower_band))
         if a.extract:
             import complaints_extract

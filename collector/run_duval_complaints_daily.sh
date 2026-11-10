@@ -38,7 +38,7 @@ if [ -z "${DUVAL_CORE_USER:-}" ] || [ -z "${DUVAL_CORE_PASS:-}" ] || [ -z "${OPE
 fi
 export PATH="$PATH:/usr/bin"
 
-"$VENV/bin/python3" -u duval_complaints.py --days 10 --extract
+"$VENV/bin/python3" -u duval_complaints.py --days 10 --include-lower-band --extract
 status=$?
 [ $status -eq 3 ] && echo "duval_complaints.py STOPPED by a Clerk Bot Check (exit 3) — not retried"
 [ $status -ne 0 ] && [ $status -ne 3 ] && echo "duval_complaints.py FAILED (exit $status)"

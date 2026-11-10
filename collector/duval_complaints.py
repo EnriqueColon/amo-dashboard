@@ -475,6 +475,8 @@ def main():
             print(f"cases found {found}, new {new}")
             print(f"case pages read for date and full names: {fill_details(conn, core)}")
         if not a.search_only and not a.extract_only:
+            if a.include_lower_band:
+                print(f"lower-band cases queued for reading: {complaints_collect.requeue_lower_band(conn, COUNTY)}")
             print("fetch results:", fetch_pending(conn, core, a.limit))
         if a.extract:
             import complaints_extract

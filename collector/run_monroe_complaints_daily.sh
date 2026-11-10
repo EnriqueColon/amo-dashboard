@@ -39,7 +39,7 @@ if [ -z "${OPENAI_API_KEY:-}" ]; then
 fi
 export PATH="$PATH:/usr/bin"
 
-"$VENV/bin/python3" -u monroe_complaints.py --days 10 --extract
+"$VENV/bin/python3" -u monroe_complaints.py --days 10 --include-lower-band --extract
 status=$?
 [ $status -eq 3 ] && echo "monroe_complaints.py STOPPED: the site refused or showed a CAPTCHA (exit 3) — not retried"
 [ $status -ne 0 ] && [ $status -ne 3 ] && echo "monroe_complaints.py FAILED (exit $status)"

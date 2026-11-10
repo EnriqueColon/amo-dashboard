@@ -113,6 +113,15 @@ def ensure_county_schema(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def requeue_lower_band(conn: sqlite3.Connection, county: str) -> int:
+    """With --include-lower-band, cases stored earlier as below_band_threshold are fetched and read too, so the
+    Complaints tab shows their property, loan and default data. They still cannot meet the $500,000 test."""
+    n = conn.execute("""UPDATE foreclosure_cases SET complaint_status='pending', note=NULL
+                        WHERE county=? AND complaint_status='below_band_threshold'""", (county,)).rowcount
+    conn.commit()
+    return n
+
+
 def connect() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH, timeout=60)
     conn.execute("PRAGMA journal_mode=WAL")
