@@ -46,7 +46,9 @@ No site credentials. Needs `OPENAI_API_KEY` and the `IPROYAL_*` proxy variables 
 - **Verified offline (`check_leon_complaints.py`):** band rules, the CAPTCHA check ignoring the unused script, search and case parsing, the per-letter merge, which docket entry is the complaint, storage next to a Miami-Dade-schema table, re-run idempotence, and each fetch outcome.
 - **Tried from the droplet directly (10 Nov 2026, 17:16 UTC):** refused at the network level, as above. Monroe's site answered the droplet in the same check.
 - **First pull on the droplet through the proxy (10 Nov 2026, 17:20 UTC, 3 to 10 Nov):** 5 cases found, matching the laptop's count for those days. All 5 are lower-band, so nothing was downloaded or extracted. Daily job scheduled at 12:30 UTC (crontab backup `collector/crontab.before_leon.20261110T172217Z`).
-- **Not verified:** extraction; behavior over many consecutive days.
+- **Backfill on the droplet (10 Nov 2026, 1 Aug to 10 Nov, through the proxy):** 43 cases; 7 top-band complaints read; Mars Hotel LLC ($1,926,839, clause unread) and MidFlorida v. Victory Builders (principal unread) on the review list, the other 5 do not qualify. Lower-band cases get parties and attorney from the case page (no download).
+- **Search end date:** the site reads `end_date` as midnight at the start of that day; the collector sends the day after the window's last day. Before this fix, cases filed on each window's last day were missed.
+- **Not verified:** behavior over many consecutive days; extraction accuracy checked against the PDFs by a person.
 
 ## Permission
 
