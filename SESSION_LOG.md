@@ -4,6 +4,15 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-11-10 (late night, cont.) — CITRUS COMPLAINT FETCH VIA OWNER'S REGISTERED SCORSS ACCOUNT (built, not deployed)
+
+- Owner registered on `scorss.citrusclerk.org` and put `CITRUS_SCORSS_USER` / `CITRUS_SCORSS_PASS` in the laptop `.env` himself; copied to the droplet `.env` (backups `/root/env.before_citrus*.`). First sign-in refused (owner's typo, one attempt only), second works. Signed in: no Turnstile on search; complaint image `SHOW` downloads free as PDF.
+- `citrus_complaints.py` stage 2: `CitrusCourts` (login GET+POST `/index.php/site/login`; case search POST `/search` with `SearchForm[casenumber]=2026CA612`, `casenumberweb` honeypot left blank, form timestamp; `/viewimage` POST `casedocketid`+`imageprivacy`), `parse_docket`, `pick_complaint_entry` (earliest non-amended Complaint), `due_for_fetch` (CITRUS pending, or not_public/no_complaint_entry ≤8 wks old and last try ≥7 d), `fetch_one`/`fetch_pending`. Signed-out page text ("Welcome Guest" / "Anonymous users are required…") or 403/429 → exit 3; refused login → exit 4, never retried (lockout). Flags `--search-only --fetch-only --limit --include-lower-band --extract --model --budget`. Without the env vars: index only. `store_export` now merges metadata (keeps `complaint_doc`) and leaves pending notes empty.
+- SCORSS has no robots.txt (404); terms = liability disclaimer; fees only for VOR/non-imaged requests (never made).
+- Live scratch test (`/tmp/county_probe/citrus/run/t.db`): 3/3 downloaded (612, 614, 643; 29–34 pp, 0–9 OCR pages, all genuine complaints). Model read not tested locally (no OpenAI key on laptop) — first droplet run does it.
+- Wrapper now sources `.env`, needs `OPENAI_API_KEY`, runs `--days 14 --include-lower-band --extract`. Offline test extended (docket parse, picks, fetch statuses, retry timing, signed-out stop, metadata merge) and passes. UI blurb no longer says index-only.
+- **Not deployed.** Droplet still on `cc819ff`; pull needed before 11:30 UTC (Miami-Dade `due_for_fetch` county filter). Then first Citrus run (`--from 2026-01-01 --to today --include-lower-band --extract`) and cron `50 12 * * *` — awaiting owner's go-ahead.
+
 ## 2026-11-10 (late night) — CITRUS INDEX COLLECTOR BUILT (official bulk export); CIVITEK, BREVARD, VOLUSIA RULED OUT; MIAMI-DADE FETCH COUNTY FILTER FIXED
 
 - Owner accepted CiviTek's liability-only disclaimer and authorized the collector to click "I Agree". Checked Pasco (id 51) in the browser pane: Public → I Agree → `ocrs/app/search.xhtml`. **The search form renders Cloudflare Turnstile** (`turnstile.render("#cfWidget")`, `cf-turnstile-response` posted with both Person Search and Case Search). Scripted `requests` POST without the token returned the form, no results. Stopped under the CAPTCHA rule. Marion/Hernando use the same app. The 10 Nov survey's "no CAPTCHA" for CiviTek was wrong (it stopped at the entry page).

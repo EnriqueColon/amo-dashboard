@@ -241,7 +241,7 @@ export default function Complaints() {
         <h1 className="text-xl font-semibold">Complaints</h1>
         <span className="text-xs px-2 py-0.5 rounded bg-primary/15 text-primary font-medium">Open testing</span>
         <span className="text-sm text-muted-foreground ml-1">
-          Foreclosure complaints by county (Miami-Dade, Duval, Monroe, Leon and Citrus; Commercial and Non-Homestead Residential), read from each Clerk's records; Citrus shows the Clerk's case index only, no complaints read yet
+          Foreclosure complaints by county (Miami-Dade, Duval, Monroe, Leon and Citrus; Commercial and Non-Homestead Residential), read from each Clerk's records
         </span>
       </div>
 
