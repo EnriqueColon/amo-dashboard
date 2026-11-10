@@ -225,9 +225,10 @@ def due_for_fetch(conn):
     cutoff_retry = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
     cutoff_age = (date.today() - timedelta(weeks=RETRY_WEEKS)).isoformat()
     return conn.execute(
-        """SELECT * FROM foreclosure_cases WHERE complaint_status='pending'
-              OR (complaint_status IN ('complaint_not_public','no_complaint_entry')
-                  AND filing_date >= ? AND (last_attempt IS NULL OR last_attempt <= ?))
+        """SELECT * FROM foreclosure_cases WHERE COALESCE(county, 'MIAMI-DADE') = 'MIAMI-DADE'
+              AND (complaint_status='pending'
+                   OR (complaint_status IN ('complaint_not_public','no_complaint_entry')
+                       AND filing_date >= ? AND (last_attempt IS NULL OR last_attempt <= ?)))
            ORDER BY filing_date""", (cutoff_age, cutoff_retry)).fetchall()
 
 
