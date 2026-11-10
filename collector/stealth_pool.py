@@ -614,24 +614,36 @@ def _build_os_consistent_profile(browser_version: str) -> Tuple[str, str]:
 def _parse_env_proxy_pool() -> Optional[List[Dict[str, str]]]:
     """
     Parses optional comma-separated proxy URLs from STEALTH_PROXY_POOL in .env,
-    e.g. 'http://user:pass@host:port,http://user2:pass2@host2:port'.
+    or falls back to `proxy_config.playwright_proxy_dict()` (`IPROYAL_PROXY_URL` /
+    `IPROYAL_USER` + `IPROYAL_PASS`).
     """
     raw = os.environ.get("STEALTH_PROXY_POOL", "").strip()
-    if not raw:
-        return None
-    pool: List[Dict[str, str]] = []
-    for item in raw.split(","):
-        item = item.strip()
-        if not item:
-            continue
-        parsed = urlparse(item)
-        entry: Dict[str, str] = {"server": f"{parsed.scheme}://{parsed.hostname}:{parsed.port}"}
-        if parsed.username:
-            entry["username"] = parsed.username
-        if parsed.password:
-            entry["password"] = parsed.password
-        pool.append(entry)
-    return pool or None
+    if raw:
+        pool: List[Dict[str, str]] = []
+        for item in raw.split(","):
+            item = item.strip()
+            if not item:
+                continue
+            if "://" not in item:
+                item = f"http://{item}"
+            parsed = urlparse(item)
+            entry: Dict[str, str] = {"server": f"{parsed.scheme}://{parsed.hostname}:{parsed.port}"}
+            if parsed.username:
+                entry["username"] = parsed.username
+            if parsed.password:
+                entry["password"] = parsed.password
+            pool.append(entry)
+        if pool:
+            return pool
+
+    try:
+        import proxy_config
+        single = proxy_config.playwright_proxy_dict()
+        if single:
+            return [single]
+    except Exception:
+        pass
+    return None
 
 
 class StealthBrowserPool:

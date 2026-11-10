@@ -4,6 +4,13 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-11-10 — IPRoyal proxy configuration helper (`collector/proxy_config.py`)
+
+- Built `collector/proxy_config.py` + offline guardrail `collector/tests/check_proxy_config.py` (13 assertions, all passing) and wired `stealth_pool._parse_env_proxy_pool()` to inherit from it when `STEALTH_PROXY_POOL` is unset.
+- Supports either a full `IPROYAL_PROXY_URL` or component variables (`IPROYAL_USER` + `IPROYAL_PASS`, building the sticky Florida residential URL `_country-us_state-florida_session-<8hex>_lifetime-30m@geo.iproyal.com:12321`), redacts credentials in logs (`mask_proxy_url`), and exposes `--check` / `--test` CLI flags. Production untouched; owner configures `.env` in Terminal.
+
+---
+
 ## 2026-11-06 — STATE OF PLAY (handoff to Cursor; read this first)
 
 **Running on the droplet by itself (cron):** Miami-Dade complaints 11:30 UTC; **Duval complaints 11:50 UTC** (live since 5 Nov; first scheduled run 6 Nov clean); assignments daily pulls, nightly rebuild 08:30 UTC, Friday AI classification, Monday email. App at `origin/main` `c2667dd` (plus docs commits after it), PM2 `amo-dashboard`.

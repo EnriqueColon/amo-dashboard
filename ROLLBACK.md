@@ -1,3 +1,9 @@
+# Rollback — Optional IPRoyal proxy helper (`collector/proxy_config.py`, 10 Nov 2026)
+
+**State:** `collector/proxy_config.py` + `collector/tests/check_proxy_config.py` (offline) + fallback in `collector/stealth_pool.py`. No live collector or server code is changed; when `IPROYAL_PROXY_URL` / `IPROYAL_USER` / `IPROYAL_PASS` are unset, all functions return `None` (direct connection). **Revert:** `git revert HEAD` (no build or restart needed).
+
+---
+
 # Rollback — Duval complaints collector, lower-band label, County and Date Collected columns (4–6 Nov 2026)
 
 **State (DEPLOYED 4–6 Nov 2026; origin/main `c2667dd` on the droplet):** the Duval County complaints collector (`collector/duval_session.py`,
