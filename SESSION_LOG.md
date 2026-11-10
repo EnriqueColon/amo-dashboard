@@ -4,7 +4,14 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
-## 2026-11-10 (evening) — MONROE LIVE; HILLSBOROUGH DAILY PAUSED (owner instruction)
+## 2026-11-10 (evening, later) — HILLSBOROUGH AOM RESUMED; HILLSBOROUGH FORECLOSURE STOPPED
+
+- Owner clarified: keep the Hillsborough AOM pipeline running and stop only the foreclosure one. Cron line `45 13 * * * run_hillsborough_daily.sh` uncommented (backup `collector/crontab.before_hillsborough_resume.<ts>`); paused ~12 min, no run missed.
+- **Hillsborough foreclosure (`hillsborough_complaints.py`) had no cron, timer, PM2 app or process.** All 24 `county='HILLSBOROUGH'` `foreclosure_cases` rows share `first_seen` 2026-11-10T13:40:55Z = one manual run from the morning session (IPRoyal/CapSolver entry). Nothing to unschedule; recorded in CLAUDE.md + Cursor rule that it must not be scheduled or run. The 24 rows (13 pending, 11 below band) remain on the Complaints tab; owner not yet asked whether to hide them.
+
+---
+
+## 2026-11-10 (evening) — MONROE LIVE (owner instruction); Hillsborough pause below was REVERSED, see entry above
 
 - Pushed `0c56788` to `origin/main`. Droplet was at `5f6cb1f` (2 behind, incl. the undeployed New York commit `6163089`: `new_york_collect.py`, unscheduled, + county labels). `git pull --ff-only`, `npm run build` (no package.json change), `pm2 restart amo-dashboard` (#36), HTTP 302 OK. Droplet's local `package-lock.json` modification untouched. (`pm2 restart --update-env=false` is NOT a valid flag; it errors "Process or Namespace false not found" without restarting.)
 - First Monroe pull on the droplet (`--days 7 --extract`, nohup, log `collector/monroe_first_run.log`): 3 cases (3–10 Nov); 2 downloaded + extracted, $1.18; 26-CA-001307-K $421,971.37 and 26-CA-001305-P $331,600, both reinstate clause ⇒ do not qualify; 26-CA-001317-P not public (`PUBO`). Droplet IP not refused.
