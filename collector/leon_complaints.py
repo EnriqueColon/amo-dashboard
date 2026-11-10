@@ -100,7 +100,8 @@ class LeonSession:
         self._start()
         form = [("case_search_type", "civil"), ("search_method", "name"), ("idnt.last_name", ""), ("idnt.first_name", ""),
                 ("idnt.company_name", letter), ("wildCard", "contain"),
-                ("begin_date", d_from.isoformat()), ("end_date", d_to.isoformat()), ("CourtType", "CA")]
+                # end_date is read as midnight at the start of that day, so a case filed later on d_to needs d_to + 1
+                ("begin_date", d_from.isoformat()), ("end_date", (d_to + timedelta(days=1)).isoformat()), ("CourtType", "CA")]
         form += [("CaseType", c) for c in CASE_TYPES]
         form += [("pty.pty_cd", "PLTF"), ("real_case.stat_cd", ""), ("template", "main_search_judge"), ("action", "Search")]
         return self._check(self.s.post(BASE + "process.asp", data=form, headers={"Referer": BASE + "search_by_name.asp"},
