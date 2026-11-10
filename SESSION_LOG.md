@@ -4,6 +4,16 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-11-10 (night) — LEON COMPLAINTS COLLECTOR BUILT (not deployed, not scheduled)
+
+Owner: "Lets go with Leon County?"
+- **BUILT:** `collector/leon_complaints.py` (county `LEON`, ids `LE:<Clerk caseid>`, plain `requests`, no login, same UA), `collector/run_leon_complaints_daily.sh` (cron to add: `30 12 * * *`), `collector/tests/check_leon_complaints.py` (offline, inline HTML fixtures, made-up names; passes; Monroe check still passes), `docs/LEON_COMPLAINTS.md`. Server label `LEON: 'Leon'`; client blurb names Leon. `tsc --noEmit` clean.
+- **Route (plain HTTP, no bot filter):** GET `lforms.leonclerk.com/search_courts/search_by_name.asp` → POST `process.asp` (`idnt.company_name=<letter>`, `wildCard=contain`, `pty.pty_cd=PLTF`, YYYY-MM-DD dates, `CourtType=CA`, repeated `CaseType`, `template=main_search_judge`; Referer = form). Result table `searchresultstable`, one row per matching party, cap 250 rows. Company-name and last-name fields match the same names. Collector: weekly windows × letters AEIOUY, union by caseid. Codes searched: `MTFCC1-3`, `MTFCNHR1-3` (band 3 read, lower stored `below_band_threshold`); legacy `MTFC3` had 0 filings Aug–Nov. Case: GET `process.asp?report=full_view&caseid=N&jiscaseid=` (tables `parties_table`, `case_dsp_table`, `dockets_ecert_table`; checkbox value `caseid|dktid|BM|CODE|DESC|…`; complaint = `MTFC*` / "COMPLAINT", not amended; no `image_orders` link = not viewable → `complaint_not_public`, weekly retry 8 weeks). **PDF: `image_orders.asp?...&dktid=D&dktsource=BM` needs the case page as Referer** (else a 169-byte HTML stub); with it, `application/pdf` with a 169-byte HTML preamble — cut before `%PDF`.
+- **CAPTCHA check:** result and case pages load `google.com/recaptcha/api.js` with no widget/sitekey/execute (form's `recaptcha_result` is commented out). First regex flagged that script → would have stopped every run; regex now matches only `g-recaptcha|data-sitekey|grecaptcha.execute/render|h-captcha|hcaptcha.com|cf-turnstile`.
+- **Live test (laptop, scratch DB `/tmp/county_probe/leon/run/`), 10 Aug–10 Nov:** 42 cases (7 band 3, 35 lower), 7/7 complaints downloaded (14–66 pp, all scans → full OCR, ~30 s per 66 pp), parties/attorney/judge/date filled. Reader text shows principal e.g. $815,000, $2,393,989.12, $645,000. Extraction NOT run. Bug found by the offline test and fixed: person names "DOE&nbsp;, JANE" → "DOE , JANE".
+- Terms: notice only (Rule 2.420, "reasonable manner", Clerk may charge for extensive use); no robots.txt. ~12 searches/day + a few case/document requests, 2–2.5 s pauses. No Clerk authorization on record (AOSC24-65), per owner's 10 Nov choice.
+- **NEXT (owner's go-ahead):** commit/push, deploy (`git pull`, `npm run build`, `pm2 restart amo-dashboard`), first pull `--days 30 --extract` on the droplet, cron `30 12 * * *`. Still pending from before: whether to hide the 24 Hillsborough foreclosure rows.
+
 ## 2026-11-10 (evening, later) — HILLSBOROUGH AOM RESUMED; HILLSBOROUGH FORECLOSURE STOPPED
 
 - Owner clarified: keep the Hillsborough AOM pipeline running and stop only the foreclosure one. Cron line `45 13 * * * run_hillsborough_daily.sh` uncommented (backup `collector/crontab.before_hillsborough_resume.<ts>`); paused ~12 min, no run missed.

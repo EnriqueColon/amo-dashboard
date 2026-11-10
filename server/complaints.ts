@@ -60,6 +60,7 @@ const COUNTY_NAMES: Record<string, string> = {
   DUVAL: 'Duval',
   HILLSBOROUGH: 'Hillsborough',
   MONROE: 'Monroe',
+  LEON: 'Leon',
   'NEW-YORK': 'New York (Manhattan)',
   KINGS: 'Kings (Brooklyn)',
   QUEENS: 'Queens',
