@@ -1,6 +1,10 @@
-# Rollback — Optional IPRoyal proxy helper (`collector/proxy_config.py`, 10 Nov 2026)
+# Rollback — Optional IPRoyal proxy helper & session wiring (`collector/proxy_config.py`, `clerk_session.py`, `duval_session.py`, `stealth_pool.py`, 10 Nov 2026)
 
-**State:** `collector/proxy_config.py` + `collector/tests/check_proxy_config.py` (offline) + fallback in `collector/stealth_pool.py`. No live collector or server code is changed; when `IPROYAL_PROXY_URL` / `IPROYAL_USER` / `IPROYAL_PASS` are unset, all functions return `None` (direct connection). **Revert:** `git revert HEAD` (no build or restart needed).
+**State:** `collector/proxy_config.py` + `collector/tests/check_proxy_config.py` (offline) + optional proxy attachment in `collector/clerk_session.py`, `collector/duval_session.py`, and `collector/stealth_pool.py`. When `IPROYAL_PROXY_URL` / `IPROYAL_USER` / `IPROYAL_PASS` are unset in `/opt/amo-dashboard/.env`, `apply_to_requests_session()` is a no-op and all sessions connect directly as before.
+
+| Piece | Touches prod data? | Revert |
+|---|---|---|
+| `collector/proxy_config.py`, `clerk_session.py`, `duval_session.py`, `stealth_pool.py` | No database schema or derived table changes | `git revert <commit_sha>` (or remove `IPROYAL_*` / `CAPSOLVER_API_KEY` / `TWOCAPTCHA_API_KEY` from `.env` to return immediately to direct connection without reverting code) |
 
 ---
 

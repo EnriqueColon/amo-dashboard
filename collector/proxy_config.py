@@ -23,10 +23,48 @@ import argparse
 import hashlib
 import os
 import sys
+from pathlib import Path
 from typing import Dict, Optional
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import quote, urlparse, urlunparse
 
 import requests
+
+
+_DOTENV_LOADED = False
+
+
+def load_dotenv_if_present(env_path: Optional[str] = None) -> None:
+    """
+    Loads `.env` directly in Python once at startup (without shell expansion) so
+    special characters like `!` or `$` in passwords are never mangled by bash/zsh.
+    """
+    global _DOTENV_LOADED
+    if _DOTENV_LOADED and env_path is None:
+        return
+    _DOTENV_LOADED = True
+    if os.environ.get("PROXY_CONFIG_IGNORE_DOTENV") == "1":
+        return
+    candidates = [
+        Path(env_path) if env_path else None,
+        Path.cwd() / ".env",
+        Path(__file__).resolve().parent.parent / ".env",
+        Path("/opt/amo-dashboard/.env"),
+    ]
+    for p in candidates:
+        if p and p.is_file():
+            for raw_line in p.read_text(encoding="utf-8", errors="replace").splitlines():
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                if line.startswith("export "):
+                    line = line[len("export "):].strip()
+                k, v = line.split("=", 1)
+                k = k.strip()
+                v = v.strip()
+                if len(v) >= 2 and v[0] == v[-1] and v[0] in ('"', "'"):
+                    v = v[1:-1]
+                os.environ.setdefault(k, v)
+            break
 
 
 def build_proxy_url(session_key: str = "amo") -> Optional[str]:
@@ -34,6 +72,7 @@ def build_proxy_url(session_key: str = "amo") -> Optional[str]:
     Returns the configured HTTP/HTTPS proxy URL from environment variables, or
     None if no proxy is configured.
     """
+    load_dotenv_if_present()
     explicit = (
         os.environ.get("IPROYAL_PROXY_URL", "").strip()
         or os.environ.get("STEALTH_PROXY_POOL", "").split(",")[0].strip()
@@ -47,6 +86,9 @@ def build_proxy_url(session_key: str = "amo") -> Optional[str]:
     pw = os.environ.get("IPROYAL_PASS", "").strip()
     if not user or not pw:
         return None
+    # Strip any accidental trailing '!' appended to the 16-char alphanumeric IPRoyal proxy password
+    if len(pw) == 17 and pw.endswith("!") and pw[:-1].isalnum():
+        pw = pw[:-1]
 
     host = os.environ.get("IPROYAL_HOST", "geo.iproyal.com").strip() or "geo.iproyal.com"
     port = os.environ.get("IPROYAL_PORT", "12321").strip() or "12321"
@@ -59,11 +101,13 @@ def build_proxy_url(session_key: str = "amo") -> Optional[str]:
 
     # If the user already included _country- in IPROYAL_PASS, keep it as-is
     if "_country-" in pw:
-         formatted_pw = pw
+        formatted_pw = pw
     else:
         formatted_pw = f"{pw}_country-{country}_state-{state}_session-{sid}_lifetime-{lifetime}"
 
-    return f"http://{user}:{formatted_pw}@{host}:{port}"
+    safe_user = quote(user, safe="_-")
+    safe_pw = quote(formatted_pw, safe="_-")
+    return f"http://{safe_user}:{safe_pw}@{host}:{port}"
 
 
 def mask_proxy_url(url: Optional[str]) -> str:

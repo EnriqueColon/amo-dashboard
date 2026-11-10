@@ -21,6 +21,7 @@ import sys
 import time
 
 import requests
+import proxy_config
 
 BASE = "https://core.duvalclerk.com"
 SVC = f"{BASE}/internal/CoreWebSvc.asmx"
@@ -44,6 +45,7 @@ class Core:
         if not self._user or not self._pass:
             raise LoginError("DUVAL_CORE_USER / DUVAL_CORE_PASS are not set")
         self.s = requests.Session()
+        proxy_config.apply_to_requests_session(self.s, session_key="duval_core")
         self.s.headers["User-Agent"] = UA
         self.token = ""
         self._tab = 0

@@ -37,6 +37,7 @@ def check(label: str, got: Any, want: Any) -> None:
 
 
 def clear_proxy_env() -> None:
+    os.environ["PROXY_CONFIG_IGNORE_DOTENV"] = "1"
     for k in (
         "IPROYAL_PROXY_URL",
         "STEALTH_PROXY_POOL",

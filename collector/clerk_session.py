@@ -12,6 +12,7 @@ import os
 import sys
 
 import requests
+import proxy_config
 
 BASE = "https://www2.miamidadeclerk.gov"
 UMS = f"{BASE}/usermanagementservices"
@@ -23,6 +24,7 @@ def login(user: str | None = None, password: str | None = None) -> requests.Sess
     if not user or not password:
         raise RuntimeError("CLERK_OCS_USER / CLERK_OCS_PASS are not set")
     s = requests.Session()
+    proxy_config.apply_to_requests_session(s, session_key="miami_dade_ocs")
     s.headers["User-Agent"] = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124 Safari/537.36"
     s.get(f"{UMS}/?hs=OCS", timeout=30)
     r = s.post(f"{UMS}/Home/LoginOrRegister", timeout=30, allow_redirects=True,

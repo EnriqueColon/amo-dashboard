@@ -316,6 +316,11 @@ class CaptchaSolverWaterfall:
         poll_interval: float = 3.0,
         max_wait_seconds: float = 90.0,
     ):
+        try:
+            import proxy_config
+            proxy_config.load_dotenv_if_present()
+        except Exception:
+            pass
         self.capsolver_api_key = (
             capsolver_api_key
             if capsolver_api_key is not None

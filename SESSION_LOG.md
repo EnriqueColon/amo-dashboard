@@ -4,10 +4,12 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
-## 2026-11-10 — IPRoyal proxy configuration helper (`collector/proxy_config.py`)
+## 2026-11-10 — IPRoyal proxy, CapSolver & 2Captcha verified + wired (`collector/proxy_config.py`, `collector/stealth_pool.py`, `collector/clerk_session.py`, `collector/duval_session.py`)
 
-- Built `collector/proxy_config.py` + offline guardrail `collector/tests/check_proxy_config.py` (13 assertions, all passing) and wired `stealth_pool._parse_env_proxy_pool()` to inherit from it when `STEALTH_PROXY_POOL` is unset.
-- Supports either a full `IPROYAL_PROXY_URL` or component variables (`IPROYAL_USER` + `IPROYAL_PASS`, building the sticky Florida residential URL `_country-us_state-florida_session-<8hex>_lifetime-30m@geo.iproyal.com:12321`), redacts credentials in logs (`mask_proxy_url`), and exposes `--check` / `--test` CLI flags. Production untouched; owner configures `.env` in Terminal.
+- Built `collector/proxy_config.py` + offline guardrail `collector/tests/check_proxy_config.py` (13 assertions, all passing).
+- Configured Option B (`IPROYAL_USER` + `IPROYAL_PASS`) in `.env` with direct Python `.env` loading (`load_dotenv_if_present`), URL-encoding, and automatic stripping of any trailing `!` on the 16-char alphanumeric proxy password. Verified live via `proxy_config.py --test`: `PROXY OK: outbound IP is 172.58.134.89` (Florida sticky 30m residential session).
+- Verified `TWOCAPTCHA_API_KEY` (`api.2captcha.com/getBalance` -> HTTP 200, `$10` balance) and `CAPSOLVER_API_KEY` (`api.capsolver.com/getBalance` -> HTTP 200, `$10` balance) in `.env`, and wired `StealthBrowserPool` (`collector/stealth_pool.py`), `clerk_session.py` (`miami_dade_ocs`), and `duval_session.py` (`duval_core`) to load `proxy_config` automatically when configured (falling back cleanly to direct connection when unset).
+- All offline guardrails (`check_proxy_config.py`, `check_duval_complaints.py`, `check_stealth_pool.py`) green.
 
 ---
 
