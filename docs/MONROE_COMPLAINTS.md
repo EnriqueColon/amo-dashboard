@@ -1,6 +1,6 @@
 # Monroe County Foreclosure Complaints — Collector
 
-**Status:** BUILT, tested live against the Clerk's site from a laptop (10 Nov 2026). **Not deployed, not scheduled.**
+**Status:** LIVE (10 Nov 2026). Deployed; first one-week pull done on the droplet (3 cases: 2 read, neither qualifies; 1 not yet public); daily job scheduled at 12:10 UTC.
 **Code:** `collector/monroe_complaints.py`, `collector/run_monroe_complaints_daily.sh`, `collector/tests/check_monroe_complaints.py`
 
 ## In plain English
@@ -42,7 +42,8 @@ No credentials. Needs `OPENAI_API_KEY` (already in the droplet `.env`) and tesse
 
 - **Verified live (10 Nov 2026, laptop, plain HTTP, scratch database):** a search from 1 Oct to 10 Nov found all 10 cases the site lists. The results were 8 complaints downloaded, 1 ruled out on its claim amount, and 1 not yet public. One of the 8 was a TIFF filing, converted to PDF. Party, attorney, phone, UCN and claim-amount data were filled for every case. The shared reader was run on two of them: a 54-page PDF (51 pages OCR'd, "principal sum of $800,000") and the converted 28-page TIFF (read from its text layer, original principal $576,000).
 - **Verified offline (`check_monroe_complaints.py`):** band rules, the claim ceiling, party/header parsing, which docket entry is the complaint, storage next to a Miami-Dade-schema table, re-run idempotence, and each fetch outcome.
-- **Not verified:** extraction on Monroe complaints (no OpenAI call was made); a run from the droplet's address; behavior over many consecutive days.
+- **Verified on the droplet (10 Nov 2026, first pull, 3 Nov to 10 Nov):** 3 cases found; 2 complaints downloaded and extracted for $1.18 (26-CA-001307-K unpaid principal $421,971.37, 26-CA-001305-P $331,600; both below $500,000 and both with a right-to-reinstate clause, so neither qualifies); 26-CA-001317-P not yet public. The site did not refuse the droplet's address.
+- **Not verified:** behavior over many consecutive days; extraction accuracy checked against the PDFs by a person.
 
 ## Permission
 

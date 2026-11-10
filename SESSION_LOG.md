@@ -4,6 +4,16 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
+## 2026-11-10 (evening) — MONROE LIVE; HILLSBOROUGH DAILY PAUSED (owner instruction)
+
+- Pushed `0c56788` to `origin/main`. Droplet was at `5f6cb1f` (2 behind, incl. the undeployed New York commit `6163089`: `new_york_collect.py`, unscheduled, + county labels). `git pull --ff-only`, `npm run build` (no package.json change), `pm2 restart amo-dashboard` (#36), HTTP 302 OK. Droplet's local `package-lock.json` modification untouched. (`pm2 restart --update-env=false` is NOT a valid flag; it errors "Process or Namespace false not found" without restarting.)
+- First Monroe pull on the droplet (`--days 7 --extract`, nohup, log `collector/monroe_first_run.log`): 3 cases (3–10 Nov); 2 downloaded + extracted, $1.18; 26-CA-001307-K $421,971.37 and 26-CA-001305-P $331,600, both reinstate clause ⇒ do not qualify; 26-CA-001317-P not public (`PUBO`). Droplet IP not refused.
+- Cron added `10 12 * * * run_monroe_complaints_daily.sh >> collector/monroe_complaints_daily.log` (backup `collector/crontab.before_monroe.<ts>`).
+- **Hillsborough daily (`45 13 * * * run_hillsborough_daily.sh`, assignments: index feed + history + extraction) PAUSED**: line commented `# PAUSED 2026-11-10 by owner request: ...`; backup `collector/crontab.before_hillsborough_pause.20261110T164756Z`. Today's run had finished 14:29 UTC; nothing running. Hillsborough complaints discovery had no cron. Resume = uncomment.
+- Complaints API is not cached, so no cache bust needed.
+
+---
+
 ## 2026-11-10 (late afternoon) — MONROE COMPLAINTS COLLECTOR BUILT + live-tested (scratch DB); NOT deployed, NOT scheduled. MANATEE moved out: robots.txt disallows /CourtRecords/
 
 Owner: "start with the counties we can collect from, in the order you proposed" (Manatee → Monroe → Leon; Lee held); Clerk authorization (AOSC24-65) to be handled separately. Explained authorization = written request to each Clerk / Role 11 "Commercial purchasers of bulk records" notarized agreement; the rule covers automated *index* searches only, so document download needs the Clerk's explicit OK.
