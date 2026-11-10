@@ -55,7 +55,19 @@ function tablesExist(): boolean {
   return t.length === 2
 }
 
-const COUNTY_NAMES: Record<string, string> = { 'MIAMI-DADE': 'Miami-Dade', DUVAL: 'Duval', HILLSBOROUGH: 'Hillsborough' }
+const COUNTY_NAMES: Record<string, string> = {
+  'MIAMI-DADE': 'Miami-Dade',
+  DUVAL: 'Duval',
+  HILLSBOROUGH: 'Hillsborough',
+  'NEW-YORK': 'New York (Manhattan)',
+  KINGS: 'Kings (Brooklyn)',
+  QUEENS: 'Queens',
+  BRONX: 'Bronx',
+  RICHMOND: 'Richmond (Staten Island)',
+  NASSAU: 'Nassau',
+  SUFFOLK: 'Suffolk',
+  WESTCHESTER: 'Westchester',
+}
 /** One clean county name per row ('MIAMI-DADE' -> 'Miami-Dade'), from the pipeline's own county column, never from free text in the complaint. */
 export function countyLabel(c: string | null | undefined): string {
   const k = String(c || 'MIAMI-DADE').toUpperCase()

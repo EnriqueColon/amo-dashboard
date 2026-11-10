@@ -4,7 +4,7 @@
 
 | Piece | Touches prod data? | Revert |
 |---|---|---|
-| `collector/proxy_config.py`, `clerk_session.py`, `duval_session.py`, `collect_live.py`, `hillsborough_complaints.py`, `stealth_pool.py`, `server/complaints.ts` | No database schema or derived table changes | `git revert <commit_sha> && npm run build && pm2 restart amo-dashboard` (or remove `IPROYAL_*` / `CAPSOLVER_API_KEY` / `TWOCAPTCHA_API_KEY` from `/opt/amo-dashboard/.env` to return immediately to direct connection without reverting code) |
+| `collector/proxy_config.py`, `clerk_session.py`, `duval_session.py`, `collect_live.py`, `hillsborough_complaints.py`, `new_york_collect.py`, `stealth_pool.py`, `server/complaints.ts` | No database schema or derived table changes (`hillsborough_complaints.py` added 24 `county='HILLSBOROUGH'` rows to `foreclosure_cases`) | `git revert <commit_sha> && npm run build && pm2 restart amo-dashboard` (or remove `IPROYAL_*` / `CAPSOLVER_API_KEY` / `TWOCAPTCHA_API_KEY` from `/opt/amo-dashboard/.env` to return immediately to direct connection without reverting code; to remove Hillsborough rows: `sqlite3 miami_dade_amo.db "DELETE FROM foreclosure_cases WHERE county='HILLSBOROUGH';"` ) |
 
 ---
 
