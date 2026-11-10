@@ -68,6 +68,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import complaints_collect  # noqa: E402
 import complaints_extract  # noqa: E402
 import extract_pdfs  # noqa: E402
+import proxy_config  # noqa: E402
+import stealth_pool  # noqa: E402
 
 COUNTY = "HILLSBOROUGH"
 DAILY_FILINGS_BASE = os.environ.get(
@@ -331,6 +333,7 @@ def list_daily_csv_urls(session: Optional[requests.Session] = None) -> List[Tupl
     public directory.
     """
     s = session or requests.Session()
+    proxy_config.apply_to_requests_session(s, session_key="hillsborough_civil")
     resp = s.get(DAILY_FILINGS_BASE, timeout=HTTP_TIMEOUT)
     resp.raise_for_status()
     out: List[Tuple[str, str]] = []
@@ -416,6 +419,7 @@ def _search_name_variants(raw_name: str) -> List[str]:
 
 def search_or_by_party(party_query: str, session: Optional[requests.Session] = None) -> List[Dict[str, Any]]:
     s = session or requests.Session()
+    proxy_config.apply_to_requests_session(s, session_key="hillsborough_or")
     resp = s.post(OR_SEARCH_URL, json={"PartyName": [party_query]}, timeout=60)
     if resp.status_code != 200:
         return []
@@ -740,6 +744,7 @@ def main() -> None:
 
     if args.daily:
         s = requests.Session()
+        proxy_config.apply_to_requests_session(s, session_key="hillsborough_civil")
         urls = list_daily_csv_urls(s)
         for day_iso, url in urls[-args.days:]:
             resp = s.get(url, timeout=HTTP_TIMEOUT)

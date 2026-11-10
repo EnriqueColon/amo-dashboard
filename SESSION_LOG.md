@@ -4,12 +4,13 @@ Read this at the start of a session before re-deriving context. Most recent entr
 
 ---
 
-## 2026-11-10 — IPRoyal proxy, CapSolver & 2Captcha verified + wired (`collector/proxy_config.py`, `collector/stealth_pool.py`, `collector/clerk_session.py`, `collector/duval_session.py`)
+## 2026-11-10 — IPRoyal proxy, CapSolver & 2Captcha verified + wired (`collector/proxy_config.py`, `collector/stealth_pool.py`, `collector/clerk_session.py`, `collector/duval_session.py`, `collector/collect_live.py`, `collector/hillsborough_complaints.py`, `server/complaints.ts`)
 
 - Built `collector/proxy_config.py` + offline guardrail `collector/tests/check_proxy_config.py` (13 assertions, all passing).
-- Configured Option B (`IPROYAL_USER` + `IPROYAL_PASS`) in `.env` with direct Python `.env` loading (`load_dotenv_if_present`), URL-encoding, and automatic stripping of any trailing `!` on the 16-char alphanumeric proxy password. Verified live via `proxy_config.py --test`: `PROXY OK: outbound IP is 172.58.134.89` (Florida sticky 30m residential session).
-- Verified `TWOCAPTCHA_API_KEY` (`api.2captcha.com/getBalance` -> HTTP 200, `$10` balance) and `CAPSOLVER_API_KEY` (`api.capsolver.com/getBalance` -> HTTP 200, `$10` balance) in `.env`, and wired `StealthBrowserPool` (`collector/stealth_pool.py`), `clerk_session.py` (`miami_dade_ocs`), and `duval_session.py` (`duval_core`) to load `proxy_config` automatically when configured (falling back cleanly to direct connection when unset).
-- All offline guardrails (`check_proxy_config.py`, `check_duval_complaints.py`, `check_stealth_pool.py`) green.
+- Configured Option B (`IPROYAL_USER` + `IPROYAL_PASS`) in local `.env` and on the droplet (`/opt/amo-dashboard/.env`, backup `.env.before_proxy.*`) with direct Python `.env` loading (`load_dotenv_if_present`), URL-encoding, and automatic stripping of any trailing `!` on the 16-char alphanumeric proxy password. Verified live locally and on droplet via `proxy_config.py --test`: `PROXY OK: outbound IP is 172.58.134.89` (Florida sticky 30m residential session).
+- Verified `TWOCAPTCHA_API_KEY` (`api.2captcha.com/getBalance` -> HTTP 200, `$10` balance) and `CAPSOLVER_API_KEY` (`api.capsolver.com/getBalance` -> HTTP 200, `$10` balance) in `.env`, exposed synchronous helpers (`solve_captcha_sync`, `refresh_requests_session_sync`) in `collector/stealth_pool.py` (with loopback `127.0.0.1,localhost,::1` proxy bypass), and wired `clerk_session.py`, `duval_session.py`, `collect_live.py`, and `hillsborough_complaints.py` to use `proxy_config` + `stealth_pool`.
+- Ran `hillsborough_complaints.py --daily --days 10` on the droplet (24 Hillsborough cases stored: 12 Band-3 `pending`, 12 `below_band_threshold`), and updated `server/complaints.ts` (`shape` / `sheetFields`) so unread cases display `plaintiff`, `defendants`, and `attorney_name` from `metadata_json`.
+- All guardrails (`check_stealth_pool.py`, `check_proxy_config.py`, `check_hillsborough_complaints.py`, `check_duval_complaints.py`, `check_cap_partition.py`, `npm run check`) green.
 
 ---
 

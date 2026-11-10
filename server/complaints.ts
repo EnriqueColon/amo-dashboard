@@ -72,14 +72,14 @@ export function collectedOn(firstSeen: string | null | undefined): string | null
 
 type Row = {
   case_id: string; case_number: string; case_type: string; filing_date: string | null; case_style: string | null
-  complaint_status: string; complaint_pdf: string | null; note: string | null; county: string | null; first_seen: string | null
+  complaint_status: string; complaint_pdf: string | null; note: string | null; county: string | null; first_seen: string | null; metadata_json: string | null
   result_json: string | null; extracted_at: string | null
   decision: string | null; review_address: string | null; review_note: string | null
 }
 
 const BASE_SQL = `
   SELECT c.case_id, c.case_number, c.case_type, c.filing_date, c.case_style, c.complaint_status,
-         c.complaint_pdf, c.note, c.county, c.first_seen, e.result_json, e.extracted_at,
+         c.complaint_pdf, c.note, c.county, c.first_seen, c.metadata_json, e.result_json, e.extracted_at,
          r.decision, r.address AS review_address, r.note AS review_note
   FROM foreclosure_cases c
   LEFT JOIN foreclosure_extractions e ON e.case_id = c.case_id AND e.model = ?
@@ -97,13 +97,16 @@ const yn = (v: any) => (v === true ? 'Yes' : v === false ? 'No' : null)
 
 export type SheetField = { key: string; label: string; value: string | null; group: string; wide?: boolean }
 
-function sheetFields(row: Row, res: any, address: string | null): SheetField[] {
+function sheetFields(row: Row, res: any, address: string | null, meta: any = null): SheetField[] {
   const notes: any[] = res?.notes ?? []
   const props: any[] = res?.properties ?? []
   const att = res?.attorney ?? {}
   const f = (group: string, key: string, label: string, value: any, wide = false): SheetField =>
     ({ group, key, label, value: value == null || value === '' ? null : String(value), wide })
   const sumUnpaid = notes.filter(n => n.unpaid_principal != null).reduce((a, n) => a + Number(n.unpaid_principal), 0)
+  const metaPlaintiffs = join(meta?.plaintiffs ?? [])
+  const metaDefendants = join(meta?.defendants ?? [])
+  const metaAttorneys = join(meta?.attorneys?.filter((a: string) => a && a !== 'No Attorney') ?? [])
   return [
     f('Case', 'case_number', 'Case Number', row.case_number),
     f('Case', 'case_type', 'Clerk Case Type', row.case_type),
@@ -113,12 +116,12 @@ function sheetFields(row: Row, res: any, address: string | null): SheetField[] {
     f('Case', 'date_filed', 'Date Filed', res?.date_filed ?? row.filing_date),
     f('Case', 'clerk_filing_date', 'Clerk Filing Date', row.filing_date),
     f('Case', 'collected_on', 'Date Collected', collectedOn(row.first_seen)),
-    f('Parties', 'plaintiff', 'Plaintiff', res?.plaintiff, true),
-    f('Parties', 'attorney_name', 'Plaintiff Attorney Name', att.name),
+    f('Parties', 'plaintiff', 'Plaintiff', res?.plaintiff ?? metaPlaintiffs, true),
+    f('Parties', 'attorney_name', 'Plaintiff Attorney Name', att.name ?? metaAttorneys),
     f('Parties', 'attorney_email', 'Plaintiff Attorney Email', (att.emails ?? []).join('; ')),
     f('Parties', 'attorney_phone', 'Plaintiff Attorney Phone', att.phone),
     f('Parties', 'attorney_firm', 'Plaintiff Attorney Firm', att.firm),
-    f('Parties', 'defendants', 'Defendant', join(res?.defendants ?? []), true),
+    f('Parties', 'defendants', 'Defendant', join(res?.defendants ?? []) ?? metaDefendants, true),
     f('Property', 'address', 'Property Address', address ?? join(props.map(p => p.property_address)), true),
     f('Property', 'address_source', 'Address Source', join(props.map(p => p.address_source)), true),
     f('Property', 'address_body', 'Address Printed in Complaint Body', join(props.map(p => p.address_body)), true),
@@ -193,6 +196,8 @@ function resultReason(row: Row, res: any, notes: any[]): string {
 
 function shape(row: Row, detail = false) {
   const res = row.result_json ? JSON.parse(row.result_json) : null
+  let meta: any = null
+  try { meta = row.metadata_json ? JSON.parse(row.metadata_json) : null } catch { meta = null }
   const notes: any[] = res?.notes ?? []
   const props: any[] = res?.properties ?? []
   const verdict: boolean | null | undefined = res ? res.computed_meets_criteria : undefined
@@ -207,7 +212,7 @@ function shape(row: Row, detail = false) {
     collected_on: collectedOn(row.first_seen),
     filing_date: row.filing_date, case_style: row.case_style,
     status: row.complaint_status === 'downloaded' ? (res ? 'extracted' : 'downloaded') : row.complaint_status,
-    plaintiff: res?.plaintiff ?? null,
+    plaintiff: res?.plaintiff ?? (meta?.plaintiffs?.[0] ?? null),
     is_foreclosure: res ? res.is_mortgage_foreclosure !== false : null,
     result_reason: resultReason(row, res, notes),
     verdict: res == null ? (row.complaint_status === 'below_band_threshold' ? 'no' : 'pending') : verdict === true ? 'qualifies' : verdict === false ? 'no' : 'unclear',
@@ -221,7 +226,7 @@ function shape(row: Row, detail = false) {
     review_reasons: res?.review_reasons ?? [],
     review: reviewed ? { decision: row.decision, address: row.review_address, note: row.review_note } : null,
     extracted_at: row.extracted_at,
-    sheet: sheetFields(row, res, address),
+    sheet: sheetFields(row, res, address, meta),
   }
   if (detail && res) {
     out.result = {

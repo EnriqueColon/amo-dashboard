@@ -767,8 +767,9 @@ class StealthBrowserPool:
         Fail-Safe 3: Sticky Session-to-Proxy Binding.
         Keeps the same proxy IP for a domain across requests and only rotates when
         `rotate=True` (after a timeout or failed challenge).
+        Never routes loopback (`127.0.0.1` / `localhost`) through an external proxy.
         """
-        if not self.proxy_pool:
+        if not self.proxy_pool or domain in ("127.0.0.1", "localhost", "::1"):
             return None
         if not rotate and domain in self._sticky_proxies:
             return self._sticky_proxies[domain]
@@ -796,7 +797,10 @@ class StealthBrowserPool:
         if exec_path and os.path.exists(exec_path):
             launch_kwargs["executable_path"] = exec_path
         if self.proxy_pool:
-            launch_kwargs["proxy"] = {"server": "http://per-context"}
+            launch_kwargs["proxy"] = {
+                "server": "http://per-context",
+                "bypass": "127.0.0.1,localhost,::1",
+            }
 
         logger.info(
             f"[Gen {gen_id}] Launching fresh Chromium instance "
@@ -1171,3 +1175,39 @@ class StealthBrowserPool:
                 path=c.get("path", "/"),
             )
         return http_session
+
+
+# ── Synchronous & Async Helpers Callable by Collector Scripts ────────────────
+
+def solve_captcha_sync(
+    page_url: str,
+    sitekey: str,
+    challenge_kind: str = "recaptcha_v2",
+) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Synchronous entrypoint for HTTP collector scripts (`requests.Session`) to
+    call the CapSolver -> 2Captcha waterfall directly when they have a `sitekey`
+    and `page_url`. Returns `(token, provider_name)` or `(None, None)`.
+    """
+    waterfall = CaptchaSolverWaterfall()
+    return asyncio.run(waterfall.solve(challenge_kind, page_url, sitekey))
+
+
+def refresh_requests_session_sync(
+    http_session: requests.Session,
+    target_url: str,
+    state_dir: str = "./session_states",
+) -> requests.Session:
+    """
+    Synchronous entrypoint for HTTP collector scripts (`requests.Session`):
+    launches `StealthBrowserPool` (with IPRoyal proxy + CapSolver -> 2Captcha
+    waterfall + 5-layer circuit breaker), resolves any active challenge on
+    `target_url`, and copies the cleared cookies + User-Agent back into
+    `http_session`.
+    """
+    async def _run() -> requests.Session:
+        async with StealthBrowserPool(state_dir=state_dir, max_concurrency=1) as pool:
+            return await pool.refresh_requests_session(http_session, target_url)
+
+    return asyncio.run(_run())
+

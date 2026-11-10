@@ -13,6 +13,7 @@ import sys
 
 import requests
 import proxy_config
+import stealth_pool
 
 BASE = "https://www2.miamidadeclerk.gov"
 UMS = f"{BASE}/usermanagementservices"
@@ -26,10 +27,17 @@ def login(user: str | None = None, password: str | None = None) -> requests.Sess
     s = requests.Session()
     proxy_config.apply_to_requests_session(s, session_key="miami_dade_ocs")
     s.headers["User-Agent"] = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124 Safari/537.36"
-    s.get(f"{UMS}/?hs=OCS", timeout=30)
+    r0 = s.get(f"{UMS}/?hs=OCS", timeout=30)
+    if stealth_pool.is_captcha_or_block_response(r0.status_code, r0.text):
+        stealth_pool.refresh_requests_session_sync(s, f"{UMS}/?hs=OCS")
     r = s.post(f"{UMS}/Home/LoginOrRegister", timeout=30, allow_redirects=True,
                data={"ApplicationCallID": "OCS", "userName": user,
                      "password": password, "ServicesType": "Individual", "btnCall": "Login"})
+    if stealth_pool.is_captcha_or_block_response(r.status_code, r.text):
+        stealth_pool.refresh_requests_session_sync(s, f"{UMS}/?hs=OCS")
+        r = s.post(f"{UMS}/Home/LoginOrRegister", timeout=30, allow_redirects=True,
+                   data={"ApplicationCallID": "OCS", "userName": user,
+                         "password": password, "ServicesType": "Individual", "btnCall": "Login"})
     r.raise_for_status()
     s.get(f"{BASE}/ocs/", timeout=30)
     if not is_logged_in(s):

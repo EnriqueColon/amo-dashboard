@@ -385,10 +385,20 @@ async def run(start_iso: str, end_iso: str, doc_types: list[str]):
              f"× {len(doc_types)} doc types")
 
     async with async_playwright() as pw:
-        browser = await pw.chromium.launch(
-            headless=True,
-            args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
-        )
+        launch_kwargs: dict = {
+            "headless": True,
+            "args": ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu",
+                     "--disable-blink-features=AutomationControlled"],
+            "ignore_default_args": ["--enable-automation"],
+        }
+        try:
+            import proxy_config
+            pw_proxy = proxy_config.playwright_proxy_dict(session_key="miami_dade_or")
+            if pw_proxy:
+                launch_kwargs["proxy"] = pw_proxy
+        except Exception:
+            pass
+        browser = await pw.chromium.launch(**launch_kwargs)
         ctx  = await browser.new_context(
             viewport={"width": 1280, "height": 900},
             user_agent=(
@@ -397,6 +407,11 @@ async def run(start_iso: str, end_iso: str, doc_types: list[str]):
                 "Chrome/124.0.0.0 Safari/537.36"
             ),
         )
+        try:
+            import stealth_pool
+            await ctx.add_init_script(stealth_pool.StealthBrowserPool.build_stealth_init_script("Linux x86_64"))
+        except Exception:
+            pass
         page = await ctx.new_page()
         await login(page)
 

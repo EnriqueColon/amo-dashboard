@@ -1,10 +1,10 @@
-# Rollback — Optional IPRoyal proxy helper & session wiring (`collector/proxy_config.py`, `clerk_session.py`, `duval_session.py`, `stealth_pool.py`, 10 Nov 2026)
+# Rollback — Optional IPRoyal proxy helper & session wiring (`collector/proxy_config.py`, `clerk_session.py`, `duval_session.py`, `collect_live.py`, `hillsborough_complaints.py`, `stealth_pool.py`, `server/complaints.ts`, 10 Nov 2026)
 
-**State:** `collector/proxy_config.py` + `collector/tests/check_proxy_config.py` (offline) + optional proxy attachment in `collector/clerk_session.py`, `collector/duval_session.py`, and `collector/stealth_pool.py`. When `IPROYAL_PROXY_URL` / `IPROYAL_USER` / `IPROYAL_PASS` are unset in `/opt/amo-dashboard/.env`, `apply_to_requests_session()` is a no-op and all sessions connect directly as before.
+**State:** `collector/proxy_config.py` + `collector/tests/check_proxy_config.py` (offline) + optional proxy/stealth wiring in `collector/clerk_session.py`, `collector/duval_session.py`, `collector/collect_live.py`, `collector/hillsborough_complaints.py`, and `collector/stealth_pool.py`, plus `metadata_json` party display fallback in `server/complaints.ts`. Droplet `.env` backup saved at `/opt/amo-dashboard/.env.before_proxy.*`.
 
 | Piece | Touches prod data? | Revert |
 |---|---|---|
-| `collector/proxy_config.py`, `clerk_session.py`, `duval_session.py`, `stealth_pool.py` | No database schema or derived table changes | `git revert <commit_sha>` (or remove `IPROYAL_*` / `CAPSOLVER_API_KEY` / `TWOCAPTCHA_API_KEY` from `.env` to return immediately to direct connection without reverting code) |
+| `collector/proxy_config.py`, `clerk_session.py`, `duval_session.py`, `collect_live.py`, `hillsborough_complaints.py`, `stealth_pool.py`, `server/complaints.ts` | No database schema or derived table changes | `git revert <commit_sha> && npm run build && pm2 restart amo-dashboard` (or remove `IPROYAL_*` / `CAPSOLVER_API_KEY` / `TWOCAPTCHA_API_KEY` from `/opt/amo-dashboard/.env` to return immediately to direct connection without reverting code) |
 
 ---
 
