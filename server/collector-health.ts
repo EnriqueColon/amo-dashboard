@@ -50,6 +50,7 @@ const JOBS: Job[] = [
   { id: 'weekly_review', label: 'Friday 14-day completeness review', group: 'Checks and processing', log: 'weekly_review.log', format: 'marker', cron: { utc: ['17:00'], days: 'Fri' }, expectH: 7 * D + 6, maxRunH: 3 },
   { id: 'normalize_nightly', label: 'Nightly rebuild of the analysis tables', group: 'Checks and processing', log: 'batch/normalize_nightly.log', format: 'marker', cron: { utc: ['08:30'] }, expectH: D + 3, maxRunH: 5 },
   { id: 'facility_tick', label: 'Document reading queue (every 20 min)', group: 'Checks and processing', log: 'batch/tick.log', format: 'activity', cron: { utc: [], days: 'every 20 minutes' }, expectH: 1.5, maxRunH: 1 },
+  { id: 'retry_failed_reads', label: 'Weekly retry of failed document reads', group: 'Checks and processing', log: 'retry_failed_reads.log', format: 'marker', cron: { utc: ['05:00'], days: 'Sat' }, expectH: 7 * D + 6, maxRunH: 6 },
   { id: 'bank_stress', label: 'Bank Stress / FDIC refresh', group: 'Checks and processing', log: 'bank_stress.log', format: 'marker', cron: { utc: ['03:00'], days: 'Sun' }, expectH: 7 * D + 6, maxRunH: 3 },
 
   { id: 'weekly_email', label: 'Monday email report', group: 'Email and backups', log: 'email.log', format: 'email', cron: { utc: ['12:00'], days: 'Mon' }, expectH: 7 * D + 6, maxRunH: 4 },
@@ -212,7 +213,7 @@ function schedule(job: Job): string {
   const today = new Date().toISOString().slice(0, 10);
   const times = job.cron.utc.map(t =>
     new Date(`${today}T${t}:00Z`).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' }));
-  const days: Record<string, string> = { Fri: 'Fridays', Sun: 'Sundays', Mon: 'Mondays' };
+  const days: Record<string, string> = { Fri: 'Fridays', Sat: 'Saturdays', Sun: 'Sundays', Mon: 'Mondays' };
   return `${job.cron.days ? days[job.cron.days] ?? job.cron.days : 'Daily'} ${times.join(', ')} ET`;
 }
 
