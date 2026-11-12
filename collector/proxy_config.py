@@ -121,8 +121,31 @@ def mask_proxy_url(url: Optional[str]) -> str:
     return urlunparse((parsed.scheme, host_port, parsed.path, "", "", ""))
 
 
+# The proxy is OPT-IN per collector session. Only the session keys listed here
+# (or in PROXY_SESSION_KEYS in .env, comma-separated) ever go through it; every
+# other collector connects directly even when IPROYAL_* is set.
+#
+# Why (12 Nov 2026): the IPRoyal credentials were added to .env on 10 Nov for
+# Leon only (owner's decision). Every collector that called this module then
+# silently switched to the proxy, and IPRoyal refuses to tunnel to any .gov
+# host (CONNECT -> 403 Forbidden). The Miami-Dade Official Records collector
+# and the Miami-Dade complaints collector (both miamidadeclerk.gov) failed at
+# login on every run from 10 Nov 17:30 UTC; the Clerk itself was fine direct.
+DEFAULT_PROXY_SESSION_KEYS = ("leon_courts",)
+
+
+def proxy_allowed(session_key: str) -> bool:
+    """True only for session keys that are meant to use the proxy."""
+    load_dotenv_if_present()
+    raw = os.environ.get("PROXY_SESSION_KEYS", "").strip()
+    keys = {k.strip() for k in raw.split(",") if k.strip()} if raw else set(DEFAULT_PROXY_SESSION_KEYS)
+    return session_key in keys
+
+
 def requests_proxies(session_key: str = "amo") -> Optional[Dict[str, str]]:
     """Returns `{'http': url, 'https': url}` for `requests.Session.proxies`, or None."""
+    if not proxy_allowed(session_key):
+        return None
     url = build_proxy_url(session_key=session_key)
     if not url:
         return None
@@ -151,6 +174,8 @@ def playwright_proxy_dict(session_key: str = "amo") -> Optional[Dict[str, str]]:
     Returns `{ 'server': 'http://host:port', 'username': ..., 'password': ... }`
     suitable for Playwright `new_context(proxy=...)` or `StealthBrowserPool`.
     """
+    if not proxy_allowed(session_key):
+        return None
     url = build_proxy_url(session_key=session_key)
     if not url:
         return None

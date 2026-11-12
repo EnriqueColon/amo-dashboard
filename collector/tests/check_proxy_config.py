@@ -48,6 +48,7 @@ def clear_proxy_env() -> None:
         "IPROYAL_COUNTRY",
         "IPROYAL_STATE",
         "IPROYAL_LIFETIME",
+        "PROXY_SESSION_KEYS",
     ):
         os.environ.pop(k, None)
 
@@ -62,6 +63,7 @@ def run_tests() -> None:
     print("\n2. Testing IPRoyal component env vars (IPROYAL_USER + IPROYAL_PASS)...")
     os.environ["IPROYAL_USER"] = "testuser123"
     os.environ["IPROYAL_PASS"] = "secretpass456"
+    os.environ["PROXY_SESSION_KEYS"] = "hillsborough,amo"  # opt these keys in for the structure checks
     url = proxy_config.build_proxy_url(session_key="hillsborough")
     check("Starts with http://testuser123:", url is not None and url.startswith("http://testuser123:"), True)
     check("Includes Florida targeting and 30m sticky lifetime", "_country-us_state-florida_session-" in (url or "") and "_lifetime-30m@geo.iproyal.com:12321" in (url or ""), True)
@@ -92,6 +94,21 @@ def run_tests() -> None:
         proxy_config.build_proxy_url(),
         "http://myuser:mypass_country-us_state-florida@geo.iproyal.com:12321",
     )
+    clear_proxy_env()
+
+    print("\n4. Proxy is opt-in per session key (12 Nov 2026 incident: IPRoyal refuses .gov)...")
+    os.environ["IPROYAL_USER"] = "testuser123"
+    os.environ["IPROYAL_PASS"] = "secretpass456"
+    check("default: leon_courts uses the proxy", proxy_config.requests_proxies("leon_courts") is not None, True)
+    for key in ("miami_dade_or", "miami_dade_ocs", "duval_core", "hillsborough_civil", "nyc_acris", "amo"):
+        check(f"default: {key} connects directly", proxy_config.requests_proxies(key), None)
+    check("default: Miami-Dade Playwright session connects directly", proxy_config.playwright_proxy_dict("miami_dade_or"), None)
+    s = requests.Session()
+    check("apply_to_requests_session returns None for Miami-Dade", proxy_config.apply_to_requests_session(s, session_key="miami_dade_ocs"), None)
+    check("...and leaves the session without a proxy", s.proxies.get("https"), None)
+    os.environ["PROXY_SESSION_KEYS"] = "duval_core"
+    check("PROXY_SESSION_KEYS overrides the default (duval in)", proxy_config.requests_proxies("duval_core") is not None, True)
+    check("PROXY_SESSION_KEYS overrides the default (leon out)", proxy_config.requests_proxies("leon_courts"), None)
     clear_proxy_env()
 
 
