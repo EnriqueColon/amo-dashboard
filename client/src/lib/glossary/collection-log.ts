@@ -99,4 +99,35 @@ export const GLOSSARY: Record<string, MetricDef> = {
     howCalculated: 'Count of records stored by that run, after de-duplicating by instrument number.',
     whyValuable: 'Zero on a weekday for a large county is unusual; a sudden drop against the usual daily volume is an early sign of a feed or portal change.',
   },
+  // ── Scheduled jobs (collector health panel, 12 Nov 2026) ───────────────────
+  'collection-log:Job': {
+    definition: 'One scheduled job on the server: a county pull, a complaints collector, a check, the email or a backup.',
+    howCalculated: 'Every entry in the server\'s crontab is listed, grouped by what it does.',
+    whyValuable: 'One place to see that every part of the pipeline is still running, not just the county pulls.',
+  },
+  'collection-log:Schedule': {
+    definition: 'When the job is meant to run, in Eastern time.',
+    howCalculated: 'Converted from the server\'s UTC crontab with today\'s offset. The server does not change for daylight saving, so these times move by an hour in March and November.',
+    whyValuable: 'Tells you whether a job that has not run lately is late or simply not due yet.',
+  },
+  'collection-log:Last run': {
+    definition: 'When the job last started, and how long ago.',
+    howCalculated: 'The newest "starting" line in the job\'s own log on the server. A job is marked overdue when this is older than its schedule allows (for example 27 hours for a daily job).',
+    whyValuable: 'A job that silently stopped being scheduled shows up here as overdue.',
+  },
+  'collection-log:Result': {
+    definition: 'How the last run ended: OK, failed, running, overdue or a warning.',
+    howCalculated: 'Read from the job\'s "done" line (its exit code or status). A run with no "done" line after its longest normal runtime counts as failed ("did not finish"). For a failure, the error the job logged is shown underneath, with any credentials removed.',
+    whyValuable: 'This is the alarm. A red row means the job ran and did not do its work, which is what happened to the Miami-Dade pull from 10 to 12 Nov 2026 while the county check kept showing the gap.',
+  },
+  'collection-log:Last worked': {
+    definition: 'When the job last finished successfully.',
+    howCalculated: 'The newest run whose "done" line reports exit 0 or status=ok.',
+    whyValuable: 'For a failing job, the gap between this and now is how much work needs catching up.',
+  },
+  'collection-log:Recent runs': {
+    definition: 'The job\'s last runs, newest on the left: green worked, red failed, grey still running.',
+    howCalculated: 'Up to 14 runs, read from the tail of the job\'s log.',
+    whyValuable: 'Separates a one-off failure from a job that has been failing for days.',
+  },
 }

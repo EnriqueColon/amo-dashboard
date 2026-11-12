@@ -4,6 +4,7 @@ import { apiRequest } from '@/lib/queryClient';
 import { Skeleton } from '@/components/ui/skeleton';
 import { DefTerm } from '@/components/DefTerm';
 import ComplaintsQc from '@/components/ComplaintsQc';
+import CollectorHealth from '@/components/CollectorHealth';
 import { documentUrl } from '@/lib/doc-url';
 import {
   CheckCircle, AlertTriangle, XCircle, MinusCircle, ClipboardList, ShieldCheck, ShieldAlert,
@@ -310,9 +311,11 @@ export default function CollectionLog() {
         <ClipboardList size={20} className="text-muted-foreground" />
         <div>
           <h1 className="text-xl font-semibold">Collection Log</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Is everything the county clerks list in the tool? Proof by county, then the history of every collection run</p>
+          <p className="text-sm text-muted-foreground mt-0.5">Is every scheduled job running and working, and is everything the county clerks list in the tool? Job health first, then proof by county, then the history of every collection run</p>
         </div>
       </div>
+
+      <CollectorHealth />
 
       <CompletenessProof />
 

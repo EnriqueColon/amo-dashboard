@@ -35,6 +35,10 @@ VALID_TYPES = {'BANK', 'SERVICER', 'PRIVATE_CREDIT', 'GSE', 'MERS', 'TRUST', 'OT
 
 # High-confidence sources that the LLM should NOT override
 HIGH_CONFIDENCE_SOURCES = {'user_override', 'manual_override', 'fdic_match', 'suffix_gse', 'suffix_banking', 'suffix_trust_name'}
+# One "?" per source, built from the set: the queries below had five written out by
+# hand, and adding the sixth source made the weekly run crash on 6 Nov 2026
+# ("Incorrect number of bindings supplied").
+HIGH_CONF_PLACEHOLDERS = ", ".join("?" * len(HIGH_CONFIDENCE_SOURCES))
 
 MERS_PATTERN = re.compile(r'^MERS$|MORTGAGE ELECTRONIC', re.IGNORECASE)
 GSE_PATTERN = re.compile(
@@ -134,12 +138,12 @@ def enrich(force_reclassify: bool = False):
     # - Currently typed OTHER or not yet cached
     if force_reclassify:
         # Re-classify everything that isn't high-confidence
-        candidates = conn.execute("""
+        candidates = conn.execute(f"""
             SELECT en.entity, en.total_vol
             FROM entity_nodes en
             LEFT JOIN entity_classifications ec ON en.entity = ec.name
             WHERE en.total_vol >= ?
-              AND COALESCE(ec.confidence_source, 'default') NOT IN (?, ?, ?, ?, ?)
+              AND COALESCE(ec.confidence_source, 'default') NOT IN ({HIGH_CONF_PLACEHOLDERS})
             ORDER BY en.total_vol DESC
         """, (MIN_VOL, *HIGH_CONFIDENCE_SOURCES)).fetchall()
     else:
@@ -165,7 +169,7 @@ def enrich(force_reclassify: bool = False):
 
     to_classify = list({e: v for e, v in candidates + uncached}.items())
     high_conf_count = conn.execute(
-        "SELECT COUNT(*) FROM entity_classifications WHERE confidence_source IN (?, ?, ?, ?, ?)",
+        f"SELECT COUNT(*) FROM entity_classifications WHERE confidence_source IN ({HIGH_CONF_PLACEHOLDERS})",
         tuple(HIGH_CONFIDENCE_SOURCES)
     ).fetchone()[0]
 

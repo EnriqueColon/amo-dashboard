@@ -5,6 +5,7 @@ import { registerBankStressRoutes } from './bank-stress';
 import { registerComplaintsRoutes, VISIBLE_COMPLAINTS_SQL } from './complaints';
 import { registerEntityFdicRoutes } from './entity-fdic';
 import { registerStreetViewRoutes } from './streetview';
+import { registerCollectorHealthRoutes } from './collector-health';
 import { registerFeedRoutes } from './feed';
 import { registerEntitySecRoutes } from './entity-sec';
 import { registerFdicAnalyticsRoutes } from './fdic-analytics';
@@ -1460,6 +1461,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   registerBankStressRoutes(app);
   registerComplaintsRoutes(app);
   registerStreetViewRoutes(app);
+  registerCollectorHealthRoutes(app);
   registerEntityFdicRoutes(app);
   registerFeedRoutes(app);
   registerEntitySecRoutes(app);
