@@ -326,13 +326,19 @@ def build_rows(docs: dict[str, dict], names: dict[str, dict]) -> list[dict]:
 # ── Modes ────────────────────────────────────────────────────────────────────
 
 def collect_file(sftp, doc_path: str, name_path: str, label: str,
-                 doc_types: set[str], start: str | None, end: str | None) -> int:
+                 doc_types: set[str], start: str | None, end: str | None,
+                 span: tuple[str, str] | None = None) -> int:
+    # The window written to collection_log. A daily file is read with no date
+    # filter, so start/end are None and the log rows came out blank (2,630 of
+    # them by 13 Nov 2026); `span` names the dates the file covers instead.
+    log_from = start or (span[0] if span else '')
+    log_to = end or (span[1] if span else '')
     log.info(f'── {label} ──')
     log.info(f'  reading {doc_path}')
     docs = parse_doc_records(read_remote_text(sftp, doc_path), doc_types, start, end)
     log.info(f'  {len(docs):,} matching document(s) after doc-type/date filter')
     if not docs:
-        log_collection(start or '', end or '', 0, 'OK', f'{COUNTY}:{label}',
+        log_collection(log_from, log_to, 0, 'OK', f'{COUNTY}:{label}',
                        county=COUNTY)
         return 0
 
@@ -345,7 +351,7 @@ def collect_file(sftp, doc_path: str, name_path: str, label: str,
     log.info(f'  [DB] {inserted:,} new row(s) inserted'
              + (f' — {collisions} COLLISION(S)' if collisions else ''))
 
-    log_collection(start or '', end or '', len(rows),
+    log_collection(log_from, log_to, len(rows),
                    'ERROR' if collisions else 'OK', f'{COUNTY}:{label}',
                    county=COUNTY)
     return inserted
@@ -358,6 +364,7 @@ def run_year(sftp, year: int, doc_types: set[str],
         f'{YEARLY_DIR}/CY{year}doc-rec.txt',
         f'{YEARLY_DIR}/CY{year}nme-rec.txt',
         f'CY{year}', doc_types, start, end,
+        span=(f'{year}-01-01', f'{year}-12-31'),
     )
 
 
@@ -391,6 +398,7 @@ def run_daily(sftp, doc_types: set[str],
             f'{DAILY_DIR}/{entry}',
             f'{DAILY_DIR}/{entry.replace("doc-ver", "nme-ver")}',
             file_date, doc_types, None, None,
+            span=(file_date, file_date),
         )
     return total
 

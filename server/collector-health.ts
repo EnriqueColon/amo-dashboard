@@ -120,6 +120,12 @@ const TS = '(\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\dZ)';
 const START_RE = new RegExp(`^=== .+? starting: ${TS}`);
 const DONE_A = new RegExp(`^=== .+? done: ${TS}(?: — (?:exit (\\d+)|status=(\\S+)))? ===`);
 const DONE_B = new RegExp(`^=== .+? done — exit (\\d+): ${TS} ===`);
+// run_nightly_normalize.sh when another rebuild (the Friday weekly run) is
+// already going: it waits, restarts the app to publish that rebuild, and skips
+// its own. That is a good run, not a missing one — before 13 Nov 2026 these two
+// lines matched nothing and every Friday showed the job as overdue.
+const WAIT_RE = new RegExp(`^=== .+?: another rebuild is running \\(${TS}\\)`);
+const SKIP_RE = new RegExp(`^=== other rebuild finished \\(${TS}\\)`);
 
 // Wrappers that write "=== <job> starting: TS" … "=== <job> done: TS — exit N ===".
 function parseMarker(text: string): Run[] {
@@ -127,13 +133,18 @@ function parseMarker(text: string): Run[] {
   const runs: Run[] = [];
   let cur: { started: string; from: number } | null = null;
   lines.forEach((line, i) => {
-    let m = line.match(START_RE);
+    let m = line.match(START_RE) ?? line.match(WAIT_RE);
     if (m) {
       if (cur) runs.push({ started: cur.started, finished: null, ok: false, result: 'did not finish', reason: reasonFrom(lines.slice(cur.from, i)) });
       cur = { started: m[1], from: i };
       return;
     }
     let finished: string | null = null, exit: string | undefined, status: string | undefined;
+    if ((m = line.match(SKIP_RE))) {
+      runs.push({ started: cur?.started ?? null, finished: m[1], ok: true, result: 'skipped (weekly run rebuilt)' });
+      cur = null;
+      return;
+    }
     if ((m = line.match(DONE_A))) { finished = m[1]; exit = m[2]; status = m[3]; }
     else if ((m = line.match(DONE_B))) { finished = m[2]; exit = m[1]; }
     if (!finished) return;
@@ -214,7 +225,17 @@ function schedule(job: Job): string {
   const times = job.cron.utc.map(t =>
     new Date(`${today}T${t}:00Z`).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' }));
   const days: Record<string, string> = { Fri: 'Fridays', Sat: 'Saturdays', Sun: 'Sundays', Mon: 'Mondays' };
-  return `${job.cron.days ? days[job.cron.days] ?? job.cron.days : 'Daily'} ${times.join(', ')} ET`;
+  let day = job.cron.days;
+  // The weekday is a UTC weekday too: Sunday 03:00 UTC is Saturday 10 PM
+  // Eastern, so a time that falls on the previous Eastern day moves the day back.
+  if (day) {
+    const order = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const t = new Date(`${today}T${job.cron.utc[0]}:00Z`);
+    const etDate = t.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+    if (etDate < today && order.includes(day)) day = order[(order.indexOf(day) + 6) % 7];
+  }
+  const names: Record<string, string> = { ...days, Tue: 'Tuesdays', Wed: 'Wednesdays', Thu: 'Thursdays' };
+  return `${day ? names[day] ?? day : 'Daily'} ${times.join(', ')} ET`;
 }
 
 export function jobHealth(job: Job, now = Date.now()): JobHealth {

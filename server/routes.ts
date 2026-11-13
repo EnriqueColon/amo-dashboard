@@ -343,7 +343,21 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       GROUP BY assignee_canon
       ORDER BY count DESC LIMIT 10
     `),
-    collectionLog:       db.prepare(`SELECT date_from, date_to, records_found, status FROM collection_log WHERE ${countyPredicate()} ORDER BY date_from DESC`),
+    // Broward rows written before 13 Nov 2026 have blank dates (the collector
+    // passed no window for a daily file); the file is named in doc_type —
+    // "BROWARD:2026-11-09" for a daily file, "BROWARD:CY2024" for a yearly
+    // export — so the window is recovered from that at read time.
+    collectionLog:       db.prepare(`
+      SELECT
+        COALESCE(NULLIF(date_from, ''),
+          CASE WHEN doc_type GLOB 'BROWARD:[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' THEN substr(doc_type, 9)
+               WHEN doc_type GLOB 'BROWARD:CY[0-9][0-9][0-9][0-9]' THEN substr(doc_type, 11) || '-01-01' END) AS date_from,
+        COALESCE(NULLIF(date_to, ''),
+          CASE WHEN doc_type GLOB 'BROWARD:[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' THEN substr(doc_type, 9)
+               WHEN doc_type GLOB 'BROWARD:CY[0-9][0-9][0-9][0-9]' THEN substr(doc_type, 11) || '-12-31' END) AS date_to,
+        records_found, status
+      FROM collection_log WHERE ${countyPredicate()}
+      ORDER BY date_from DESC, collected_at DESC`),
   };
 
   // ─── POST /api/cache/bust ─────────────────────────────────────────────────
@@ -469,7 +483,10 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     });
 
     const collection = db.prepare(`
-      SELECT COALESCE(county, 'MIAMI-DADE') AS county, MAX(collected_at) AS last_collected
+      -- collected_at is SQLite CURRENT_TIMESTAMP: UTC with no zone marker, which a
+      -- browser reads as local time (it showed collections 5 h in the future).
+      SELECT COALESCE(county, 'MIAMI-DADE') AS county,
+             strftime('%Y-%m-%dT%H:%M:%SZ', MAX(collected_at)) AS last_collected
       FROM collection_log GROUP BY COALESCE(county, 'MIAMI-DADE')`).all();
 
     res.json({
