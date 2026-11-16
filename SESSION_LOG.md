@@ -4569,3 +4569,12 @@ Owner wants a new pipeline: Miami-Dade Clerk circuit-civil foreclosure complaint
 - Also: HOMEBRIDGE FINANCIAL SERVICES (730 filings) → www.homebridge.com, `manual`, 145 px logo fetched.
 - Also: JG SOUTH FLORIDA DEVELOPMENT (1 filing, not a target) → thejgdevelopmentgroup.com, `manual`, 180 px logo fetched.
 - Owner ruled out Trellis (16 Nov 2026) for complaints in any county; noted in HILLSBOROUGH_COMPLAINTS_SCOPE.md §3.
+
+### 16 Nov 2026 — Manual Complaint Intake (Hillsborough 3-day trial) LIVE 16:56 UTC (`65fb8cf`)
+- Owner asked for a way to get Hillsborough complaints without Trellis (ruled out) and without automating HOVER (bot wall, not bypassed). Built a hand-download flow: Data → **Manual Complaint Intake** (`#/complaint-intake`, Trial badge; county-neutral name per owner).
+- Daily job `collector/run_hillsborough_handpull_daily.sh`, cron **13:00 UTC**: `hillsborough_complaints.py --daily --days 3 --extract` (extract now Hillsborough-only via new `process_pending(case_ids=)`). Band-3 cases = pending = "To download".
+- Upload: `POST /api/hillsborough-test/:caseId/upload` (raw PDF ≤60 MB, %PDF check) → `complaints_pdfs/HC_<case>_COMPLAINT.pdf`, status downloaded, spawns `hillsborough_complaints.py --read-case <id>`; skip/unskip/reread routes. Hillsborough still hidden from Complaints tab.
+- Tested: locally (upload, non-PDF refused, other-county refused, skip/undo, read-error + retry); on a prod DB copy (real daily file: 10 cases for 13 Nov; one-case read of a stand-in complaint = qualifies, 7 min, $0.73). Trial copy removed.
+- Live first run: 6 to download (13 Nov filings). 10–12 Nov filings not pulled (job was off). Crontab backup `collector/crontab.before_complaint_intake.*`; dist backup `/root/dist.before_complaint_intake.20261116T165545Z`.
+- **Owner decides after 3 days (~19 Nov):** integrate into the Complaints tab, or remove the cron line.
+- OpenAI spend 16 Nov ≈ $8: website-suggestion run (425 searches, gpt-4.1-mini) + $0.73 trial read; owner's figure checks out.
