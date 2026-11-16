@@ -4619,3 +4619,4 @@ Owner wants a new pipeline: Miami-Dade Clerk circuit-civil foreclosure complaint
 - Also: PACIFIC LIFE INSURANCE (320) + PACIFIC LIFE INVESTOR (1) → www.pacificlife.com, `manual`, 180 px.
 - Also: all 7 Lennar names (LENNAR MORTGAGE 337, LENNAR MTG 52, LENNAR HOMES 7, + 4 variants) → www.lennar.com, `manual`, 180 px.
 - Also: M&T BANK (340), MANUFACTURERS AND TRADERS TRUST (13), M&T REALTY CAPITAL (3+1), M AND T BANK, M&T HOLDING → www.mtb.com, `manual`, 300 px.
+- Also: all 17 JPMorgan-named entities (JPMORGAN CHASE 5,096 — was FDIC/chase.com logo, now jpmorgan.com per owner; J P MORGAN MORTGAGE ACQUISITION 435; JPM mortgage/CMBS trusts) → www.jpmorgan.com, `manual`, 152 px. ~60 "CHASE …" names (Chase Home Lending trusts, Chase Home Finance, Chase Manhattan Mortgage) not changed, owner to decide.
