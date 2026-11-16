@@ -4568,3 +4568,4 @@ Owner wants a new pipeline: Miami-Dade Clerk circuit-civil foreclosure complaint
 - Later the same day: SELENE FINANCE → www.selenefinance.com; PRUDENTIAL INSURANCE OF AMERICA and THE PRUDENTIAL INSURANCE OF AMERICA → www.prudential.com (32 px icon via Google). All set as `manual`, logos fetched. Session closed.
 - Also: HOMEBRIDGE FINANCIAL SERVICES (730 filings) → www.homebridge.com, `manual`, 145 px logo fetched.
 - Also: JG SOUTH FLORIDA DEVELOPMENT (1 filing, not a target) → thejgdevelopmentgroup.com, `manual`, 180 px logo fetched.
+- Owner ruled out Trellis (16 Nov 2026) for complaints in any county; noted in HILLSBOROUGH_COMPLAINTS_SCOPE.md §3.
