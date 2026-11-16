@@ -41,6 +41,32 @@ function ensureExtractions() {
     input_tokens INTEGER, output_tokens INTEGER, result_json TEXT NOT NULL, PRIMARY KEY (case_id, model))`)
 }
 
+/** Name words (3+ letters, not legal filler) from a party name. */
+const STOP = new Set(['THE', 'AND', 'LLC', 'INC', 'CORP', 'CORPORATION', 'COMPANY', 'BANK', 'TRUST', 'NATIONAL', 'ASSOCIATION',
+  'MORTGAGE', 'FINANCIAL', 'SERVICES', 'LENDING', 'HOME', 'LOAN', 'LOANS', 'FUND', 'CAPITAL', 'AKA', 'DBA', 'UNKNOWN', 'SPOUSE',
+  'TENANT', 'POSSESSION', 'HEIRS', 'NOT', 'ITS', 'INDIVIDUAL', 'CAPACITY', 'SOLELY', 'TRUSTEE', 'FOR', 'OF'])
+const words = (s: string | null | undefined) =>
+  new Set((String(s ?? '').toUpperCase().match(/[A-Z]{3,}/g) ?? []).filter(w => !STOP.has(w)))
+
+/**
+ * Does the read complaint name the same borrower as the Clerk's case list? The case style is
+ * "PLAINTIFF vs DEFENDANT"; a complaint that does not name the defendant is most likely the wrong file. Returns a warning, or null when the names match (or there is too little to compare).
+ */
+export function nameMismatch(caseStyle: string | null, resultJson: string | null): string | null {
+  if (!caseStyle || !resultJson) return null
+  let res: any
+  try { res = JSON.parse(resultJson) } catch { return null }
+  const [plaintiffSide, defendantSide] = caseStyle.split(/\s+vs\.?\s+/i)
+  const read = words([res.plaintiff, ...(res.defendants ?? []).map((d: any) => (typeof d === 'string' ? d : d?.name))].join(' '))
+  const p = words(plaintiffSide), d = words(defendantSide)
+  if (!read.size || (!p.size && !d.size)) return null
+  const hit = (ws: Set<string>) => [...ws].some(w => read.has(w))
+  // The borrower (defendant) tells cases apart; one lender files many. Fall back to the plaintiff only
+  // when the case list gives no defendant name.
+  if (d.size ? hit(d) : hit(p)) return null
+  return `This complaint does not name this case's borrower (case: ${caseStyle}; complaint: ${res.plaintiff ?? '?'} vs ${(res.defendants ?? []).map((x: any) => (typeof x === 'string' ? x : x?.name)).filter(Boolean)[0] ?? '?'}). It may be the wrong file: check it, then upload the right one.`
+}
+
 function caseRow(caseId: string): Row | undefined {
   ensureExtractions()
   return getDb().prepare(`
@@ -103,6 +129,7 @@ export function registerHillsboroughHandpullRoutes(app: Express) {
         plaintiffs: meta?.plaintiffs ?? [], defendants: meta?.defendants ?? [],
         reading: !!rd && !rd.error && !r.result_json, read_error: rd?.error ?? null,
         read: !!r.result_json, verdict: s.verdict, principal: s.principal, address: s.address,
+        name_warning: nameMismatch(r.case_style, r.result_json),
         reason: s.result_reason, has_pdf: !!r.complaint_pdf,
       }
     })
@@ -134,11 +161,16 @@ export function registerHillsboroughHandpullRoutes(app: Express) {
       const buf = req.body as Buffer
       if (!Buffer.isBuffer(buf) || buf.length < 1000) return res.status(400).json({ error: 'No file received' })
       if (buf.subarray(0, 5).toString('latin1') !== '%PDF-') return res.status(400).json({ error: 'That file is not a PDF' })
+      // The same file already attached to another case means the wrong PDF was picked (16 Nov 2026: one
+      // complaint was uploaded to two cases).
+      const sha = crypto.createHash('sha256').update(buf).digest('hex')
+      const dup = getDb().prepare(`SELECT case_number FROM foreclosure_cases WHERE complaint_sha256 = ? AND case_id <> ?`)
+        .get(sha, caseId) as { case_number: string } | undefined
+      if (dup) return res.status(409).json({ error: `This file is already uploaded for case ${dup.case_number}. Download the complaint for ${row.case_number} from HOVER.` })
       fs.mkdirSync(PDF_DIR, { recursive: true })
       const safe = row.case_number.replace(/[^A-Z0-9-]/gi, '')
       const file = path.join(PDF_DIR, `HC_${safe}_COMPLAINT.pdf`)
       fs.writeFileSync(file, buf)
-      const sha = crypto.createHash('sha256').update(buf).digest('hex')
       const db = getDb()
       db.prepare(`UPDATE foreclosure_cases SET complaint_status = 'downloaded', complaint_pdf = ?, complaint_sha256 = ?,
                   attempts = attempts + 1, last_attempt = ?, note = 'uploaded by hand (hand-pull test)' WHERE case_id = ?`)

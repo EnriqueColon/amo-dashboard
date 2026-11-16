@@ -113,6 +113,19 @@ function TodoRow({ r, onDone }: { r: any; onDone: () => void }) {
 }
 
 function DoneRow({ r, onDone }: { r: any; onDone: () => void }) {
+  const input = useRef<HTMLInputElement>(null);
+  const [error, setError] = useState<string | null>(null);
+  const replace = useMutation({
+    mutationFn: async (file: File) => {
+      const res = await fetch(`/api/hillsborough-test/${encodeURIComponent(r.case_id)}/upload`, {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/pdf' }, body: file,
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error || `Upload failed (${res.status})`);
+    },
+    onSuccess: () => { setError(null); onDone(); },
+    onError: (e: Error) => setError(e.message),
+  });
   const reread = useMutation({
     mutationFn: () => apiRequest('POST', `/api/hillsborough-test/${encodeURIComponent(r.case_id)}/reread`),
     onSuccess: onDone,
@@ -127,10 +140,20 @@ function DoneRow({ r, onDone }: { r: any; onDone: () => void }) {
           <a href={`/api/complaints/${encodeURIComponent(r.case_id)}/pdf`} target="_blank" rel="noopener noreferrer"
             className="inline-flex items-center gap-0.5 text-primary hover:underline"><FileText size={11} />PDF</a>
           <span className="text-muted-foreground">uploaded {et(r.uploaded_at)}</span>
+          <input ref={input} type="file" accept="application/pdf,.pdf" className="hidden"
+            onChange={e => { const f = e.target.files?.[0]; if (f) replace.mutate(f); e.target.value = ''; }} />
+          <button onClick={() => input.current?.click()} disabled={replace.isPending}
+            className="inline-flex items-center gap-0.5 text-[11px] text-muted-foreground hover:text-primary" title="Wrong file? Upload the right complaint for this case">
+            <Upload size={10} />{replace.isPending ? 'Uploading…' : 'Replace file'}
+          </button>
         </div>
         <p className="mt-0.5 truncate text-muted-foreground" title={r.case_style || ''}>{r.case_style}</p>
+        {r.name_warning && (
+          <p className="mt-0.5 text-[11px] text-amber-700 inline-flex items-start gap-1"><AlertTriangle size={12} className="mt-px shrink-0" />{r.name_warning}</p>
+        )}
         {r.read && r.reason && <p className="mt-0.5 text-[11px]">{r.reason}</p>}
         {r.read && r.address && <p className="text-[11px] text-muted-foreground">{r.address}</p>}
+        {error && <p className="mt-0.5 text-[11px] text-red-600">{error}</p>}
         {r.read_error && (
           <p className="mt-0.5 text-[11px] text-red-600">
             {r.read_error}{' '}
