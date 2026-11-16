@@ -4614,3 +4614,4 @@ Owner wants a new pipeline: Miami-Dade Clerk circuit-civil foreclosure complaint
 - Also: BENWORTH CAPITAL PARTNERS (217) → benworthcapital.com (same site/logo as target BENWORTH CAPITAL), `manual`.
 - Also: all 11 loanDepot names (LOANDEPOT COM 696, LOANDEPOT DOT COM 8, + 9 variants) → www.loandepot.com, `manual`, SVG logo.
 - Also: all 6 CrossCountry names (CROSSCOUNTRY MORTGAGE 453, CROSSCOUNTRY MTG 49, + 4 misspellings) → www.crosscountrymortgage.com (main site, not the forms. link given), `manual`, 180 px.
+- Also: COMPUTERSHARE TRUST (364) + COMPUTER SHARE DELWARE TRUST (1) → www.computershare.com (main site, not the transferstock. link), `manual`, 32 px.
