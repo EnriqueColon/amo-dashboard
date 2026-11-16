@@ -10,8 +10,10 @@ import { Upload, ExternalLink, Check, Loader2, AlertTriangle, FileText, RotateCc
 const KEY = ['/api/hillsborough-test'];
 const HOVER = 'https://hover.hillsclerk.com/';
 // HOVER's case-number search page. HOVER has no address for a single case (its searches live in the
-// browser, not the link), so this opens the search and the row shows the three boxes to fill.
-const HOVER_SEARCH = 'https://hover.hillsclerk.com/html/case/caseSearch.html#nav-CaseNumber-tab';
+// browser, not the link), so this opens the search. `amo_case` is read only by our Chrome add-on
+// (tools/hover-helper), which fills the three boxes; HOVER ignores it. The person clicks Search.
+const hoverSearchUrl = (caseNumber: string) =>
+  `https://hover.hillsclerk.com/html/case/caseSearch.html?amo_case=${encodeURIComponent(caseNumber)}#nav-CaseNumber-tab`;
 
 /** "26-CA-012231" -> HOVER's three boxes: Year (2 digits), Court Type, Number (6 digits). */
 function hoverParts(caseNumber: string) {
@@ -57,7 +59,7 @@ function TodoRow({ r, onDone }: { r: any; onDone: () => void }) {
   // Copies the 6-digit Number (the only box worth pasting) and opens HOVER's case search in one tab, reused.
   const openHover = async () => {
     try { await navigator.clipboard.writeText(parts ? parts.number : r.case_number); setCopied(true); setTimeout(() => setCopied(false), 2500); } catch { /* clipboard blocked */ }
-    window.open(HOVER_SEARCH, 'hover-search');
+    window.open(hoverSearchUrl(r.case_number), 'hover-search');
   };
   const drop = (e: React.DragEvent) => {
     e.preventDefault(); setOver(false);
@@ -74,7 +76,7 @@ function TodoRow({ r, onDone }: { r: any; onDone: () => void }) {
           <span className="rounded bg-primary/10 text-primary px-1.5 py-0.5 text-[10px] font-medium">Hillsborough</span>
           <span className="font-mono font-semibold text-sm">{r.case_number}</span>
           <button onClick={openHover} className="inline-flex items-center gap-0.5 text-[11px] text-primary hover:underline"
-            title="Opens HOVER's case-number search and copies the Number for pasting">
+            title="Opens HOVER's case-number search. With the Chrome helper the boxes are filled for you; without it, the Number is copied for pasting">
             {copied ? <><Check size={11} />Number copied, paste it in HOVER</> : <><ExternalLink size={11} />Find in HOVER</>}
           </button>
           <span className="text-muted-foreground">Filed {r.filing_date}</span>
@@ -163,8 +165,10 @@ export default function HillsboroughTest() {
         <p className="text-sm mt-1">For counties whose Clerk site can't be read automatically, so a person downloads each complaint. <b>Counties: Hillsborough.</b></p>
         <p className="text-xs text-muted-foreground mt-1">
           A three-day trial. Each morning the system lists new Hillsborough foreclosures that could qualify ($250,000-or-more band).
-          For each one: click <b>Find in HOVER</b> (opens <a href={HOVER} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline inline-flex items-center gap-0.5">HOVER<ExternalLink size={10} /></a>'s case search and copies the Number),
-          fill the three boxes shown on the row, download the <b>Complaint</b>, then drag it from Chrome's download bubble onto the row (or click <b>Upload PDF</b>). It is read automatically in a few minutes (scanned complaints take longer).
+          For each one: click <b>Find in HOVER</b> (opens <a href={HOVER} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline inline-flex items-center gap-0.5">HOVER<ExternalLink size={10} /></a>'s case search; with the Chrome helper the boxes are filled, so just click Search),
+          download the <b>Complaint</b>, then drag it from Chrome's download bubble onto the row (or click <b>Upload PDF</b>).
+          {' '}<a href="/api/complaint-intake/helper.zip" className="text-primary hover:underline font-medium">Get the Chrome helper</a>{' '}
+          <span title="Unzip it, open chrome://extensions, turn on Developer mode, click Load unpacked and choose the hover-helper folder.">(install: unzip, chrome://extensions, Developer mode, Load unpacked)</span>. It is read automatically in a few minutes (scanned complaints take longer).
           These cases are not on the Complaints tab until the test is agreed.
         </p>
       </div>

@@ -149,6 +149,15 @@ export function registerHillsboroughHandpullRoutes(app: Express) {
       res.json({ ok: true, bytes: buf.length })
     })
 
+  // The Chrome add-on that fills HOVER's search boxes (tools/hover-helper; zip rebuilt per its README).
+  app.get('/api/complaint-intake/helper.zip', (_req: Request, res: Response) => {
+    const zip = path.join(ROOT, 'tools', 'hover-helper.zip')
+    if (!fs.existsSync(zip)) return res.status(404).json({ error: 'helper not packaged' })
+    res.setHeader('Content-Type', 'application/zip')
+    res.setHeader('Content-Disposition', 'attachment; filename="hover-helper.zip"')
+    fs.createReadStream(zip).pipe(res)
+  })
+
   app.post('/api/hillsborough-test/:caseId/reread', (req: Request, res: Response) => {
     const row = caseRow(String(req.params.caseId))
     if (!row?.complaint_pdf) return res.status(404).json({ error: 'No uploaded file for this case' })
