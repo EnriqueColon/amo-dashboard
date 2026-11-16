@@ -4624,3 +4624,4 @@ Owner wants a new pipeline: Miami-Dade Clerk circuit-civil foreclosure complaint
 - Also: FACEBANK INTERNATIONAL (212) → facebank.pr, `manual`, 150 px.
 - Also: ANCHOR LOANS (231) + ANCHOR LOANS A DELAWARE (1) → www.anchorloans.com, `manual`. Anchor Assets XVIII/IV/XVII/XVI (funding vehicles, ~149) and Anchor Mortgage Trust 2024 RTL 1 offered to owner; Anchor Bank / Anchor Nationwide Loans are different firms.
 - Also: ROCKET MORTGAGE (1,498), ROCKET MTG (152), ROCKET MTG ITS SUCCESSORS AND ASSIGNS (2) → www.rocketmortgage.com (main site, not launchpad.), `manual`, 150 px.
+- Also: A&D MORTGAGE (402), A&D MTG (15), A AND D MORTGAGE (2) → www.admortgageservicing.com, `manual`; logo swapped by hand for the 192 px rendition of their 32 px icon (their image server resizes via ?width=).
