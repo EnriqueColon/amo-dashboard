@@ -1,5 +1,7 @@
 /**
- * Hillsborough complaints, HAND-PULL TEST (owner, 16 Nov 2026: three-day trial before deciding to integrate).
+ * Manual Complaint Intake: counties whose complaints a person downloads (HAND_COUNTIES).
+ * Hillsborough (trial from 16 Nov 2026) and Broward (added 16 Nov 2026; case list from lis pendens in the
+ * county feed, collector/broward_complaints_intake.py; the person skips Homestead cases on the case page).
  *
  * The Clerk's document site (HOVER) blocks programs, so a person downloads each complaint in a normal
  * browser and drops the PDF on the #/complaint-intake (Data → Manual Complaint Intake) page. Everything else is automatic:
@@ -30,7 +32,11 @@ const ROOT = process.cwd()
 const PDF_DIR = process.env.COMPLAINTS_DIR || path.join(ROOT, 'complaints_pdfs')
 const COLLECTOR = path.join(ROOT, 'collector')
 const MAX_PDF_BYTES = 60 * 1024 * 1024
-const WINDOW_DAYS = 7 // the list shows cases filed in the last week; older ones are not part of the test
+const WINDOW_DAYS = 7 // the list shows cases filed (or first listed) in the last week
+/** Counties whose complaints a person downloads (Data -> Manual Complaint Intake). Broward: owner, 16 Nov 2026. */
+export const HAND_COUNTIES = ['HILLSBOROUGH', 'BROWARD']
+const HAND_SQL = `c.county IN (${HAND_COUNTIES.map(c => `'${c}'`).join(', ')})`
+const FILE_PREFIX: Record<string, string> = { HILLSBOROUGH: 'HC', BROWARD: 'BR' }
 
 const reading = new Map<string, { started: string; error?: string }>()
 
@@ -49,7 +55,7 @@ function caseRow(caseId: string): Row | undefined {
            NULL AS decision, NULL AS review_address, NULL AS review_note
     FROM foreclosure_cases c
     LEFT JOIN foreclosure_extractions e ON e.case_id = c.case_id AND e.model = ?
-    WHERE c.case_id = ? AND c.county = 'HILLSBOROUGH'`).get(MODEL, caseId) as Row | undefined
+    WHERE c.case_id = ? AND ${HAND_SQL}`).get(MODEL, caseId) as Row | undefined
 }
 
 function startRead(caseId: string) {
@@ -57,7 +63,7 @@ function startRead(caseId: string) {
   reading.set(caseId, { started: new Date().toISOString() })
   const venv = path.join(COLLECTOR, '.venv', 'bin', 'python3')
   const py = fs.existsSync(venv) ? venv : 'python3'
-  const child = spawn(py, ['-u', 'hillsborough_complaints.py', '--read-case', caseId, '--ingest-dir', PDF_DIR], {
+  const child = spawn(py, ['-u', 'complaints_read_case.py', caseId], {
     cwd: COLLECTOR,
     env: { ...process.env, AMO_DB_PATH: process.env.AMO_DB_PATH || path.join(ROOT, 'miami_dade_amo.db'), COMPLAINTS_DIR: PDF_DIR },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -89,15 +95,15 @@ export function registerHillsboroughHandpullRoutes(app: Express) {
              NULL AS decision, NULL AS review_address, NULL AS review_note
       FROM foreclosure_cases c
       LEFT JOIN foreclosure_extractions e ON e.case_id = c.case_id AND e.model = ?
-      WHERE c.county = 'HILLSBOROUGH' AND c.filing_date >= date('now', ?)
-      ORDER BY c.filing_date DESC, c.case_number`).all(MODEL, `-${WINDOW_DAYS} day`) as (Row & { last_attempt: string | null })[]
+      WHERE ${HAND_SQL} AND (c.filing_date >= date('now', ?) OR substr(c.first_seen, 1, 10) >= date('now', ?))
+      ORDER BY c.filing_date DESC, c.case_number`).all(MODEL, `-${WINDOW_DAYS} day`, `-${WINDOW_DAYS} day`) as (Row & { last_attempt: string | null })[]
     const out = rows.map(r => {
       let meta: any = null
       try { meta = r.metadata_json ? JSON.parse(r.metadata_json) : null } catch { meta = null }
       const s = shape(r)
       const rd = reading.get(r.case_id)
       return {
-        case_id: r.case_id, case_number: r.case_number, case_type: r.case_type, filing_date: r.filing_date,
+        case_id: r.case_id, case_number: r.case_number, case_type: r.case_type, filing_date: r.filing_date, county: r.county,
         case_style: r.case_style, first_seen: r.first_seen, status: r.complaint_status, note: r.note,
         uploaded_at: r.complaint_status === 'downloaded' ? r.last_attempt : null,
         plaintiffs: meta?.plaintiffs ?? [], defendants: meta?.defendants ?? [],
@@ -121,8 +127,8 @@ export function registerHillsboroughHandpullRoutes(app: Express) {
       byDay.set(d, v)
     }
     const days = [...byDay.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([day, v]) => ({ day, ...v }))
-    const last = db.prepare(`SELECT MAX(first_seen) AS t FROM foreclosure_cases WHERE county = 'HILLSBOROUGH'`).get() as { t: string | null }
-    res.json({ window_days: WINDOW_DAYS, todo, done, skipped, below_band: below, days, last_case_seen: last.t })
+    const last = db.prepare(`SELECT MAX(first_seen) AS t FROM foreclosure_cases c WHERE ${HAND_SQL}`).get() as { t: string | null }
+    res.json({ window_days: WINDOW_DAYS, counties: HAND_COUNTIES, todo, done, skipped, below_band: below, days, last_case_seen: last.t })
   })
 
   app.post('/api/hillsborough-test/:caseId/upload',
@@ -130,13 +136,13 @@ export function registerHillsboroughHandpullRoutes(app: Express) {
     (req: Request, res: Response) => {
       const caseId = String(req.params.caseId)
       const row = caseRow(caseId)
-      if (!row) return res.status(404).json({ error: 'Not a Hillsborough case on the list' })
+      if (!row) return res.status(404).json({ error: 'Not a case on the Manual Complaint Intake list' })
       const buf = req.body as Buffer
       if (!Buffer.isBuffer(buf) || buf.length < 1000) return res.status(400).json({ error: 'No file received' })
       if (buf.subarray(0, 5).toString('latin1') !== '%PDF-') return res.status(400).json({ error: 'That file is not a PDF' })
       fs.mkdirSync(PDF_DIR, { recursive: true })
       const safe = row.case_number.replace(/[^A-Z0-9-]/gi, '')
-      const file = path.join(PDF_DIR, `HC_${safe}_COMPLAINT.pdf`)
+      const file = path.join(PDF_DIR, `${FILE_PREFIX[row.county ?? ''] ?? 'XX'}_${safe}_COMPLAINT.pdf`)
       fs.writeFileSync(file, buf)
       const sha = crypto.createHash('sha256').update(buf).digest('hex')
       const db = getDb()

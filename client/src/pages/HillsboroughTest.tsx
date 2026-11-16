@@ -1,5 +1,5 @@
-// Hillsborough complaints, HAND-PULL TEST (owner, 16 Nov 2026: three-day trial before deciding to integrate).
-// The Clerk's site (HOVER) blocks programs, so a person downloads each complaint and drops it here;
+// Manual Complaint Intake (owner, 16 Nov 2026): Hillsborough and Broward complaints downloaded by a person.
+// The Clerks' sites (HOVER; Broward's CAPTCHA'd case search) block programs, so a person downloads each complaint and drops it here;
 // the server reads it straight away with the same reader and $500,000 test as every other county
 // (server/hillsborough-handpull.ts). Menu: Data → Manual Complaint Intake (#/complaint-intake); built county-neutral in name so other hand-pulled counties can join.
 import { useRef, useState } from 'react';
@@ -21,6 +21,10 @@ function hoverParts(caseNumber: string) {
   if (!m) return null;
   return { year: m[1].slice(-2), type: m[2].toUpperCase(), number: m[3].padStart(6, '0').slice(-6) };
 }
+
+// Broward's case search (CAPTCHA on each search, answered by the person). No per-case address either.
+const BROWARD_SEARCH = 'https://www.browardclerk.org/Web2/CaseSearchECA/Index/';
+const COUNTY_LABEL: Record<string, string> = { HILLSBOROUGH: 'Hillsborough', BROWARD: 'Broward' };
 
 const usd0 = (v: number | null) => (v == null ? null : v.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }));
 const et = (iso: string | null) => (iso ? new Date(iso).toLocaleString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) + ' ET' : '');
@@ -55,11 +59,13 @@ function TodoRow({ r, onDone }: { r: any; onDone: () => void }) {
     mutationFn: (reason: string) => apiRequest('POST', `/api/hillsborough-test/${encodeURIComponent(r.case_id)}/skip`, { reason }),
     onSuccess: onDone,
   });
-  const parts = hoverParts(r.case_number);
-  // Copies the 6-digit Number (the only box worth pasting) and opens HOVER's case search in one tab, reused.
-  const openHover = async () => {
-    try { await navigator.clipboard.writeText(parts ? parts.number : r.case_number); setCopied(true); setTimeout(() => setCopied(false), 2500); } catch { /* clipboard blocked */ }
-    window.open(hoverSearchUrl(r.case_number), 'hover-search');
+  const broward = r.county === 'BROWARD';
+  const parts = broward ? null : hoverParts(r.case_number);
+  // Hillsborough: copies the 6-digit Number and opens HOVER's case search (the Chrome helper fills the boxes).
+  // Broward: copies the whole case number and opens the Clerk's case search.
+  const openSearch = async () => {
+    try { await navigator.clipboard.writeText(broward ? r.case_number : parts ? parts.number : r.case_number); setCopied(true); setTimeout(() => setCopied(false), 2500); } catch { /* clipboard blocked */ }
+    window.open(broward ? BROWARD_SEARCH : hoverSearchUrl(r.case_number), broward ? 'broward-search' : 'hover-search');
   };
   const drop = (e: React.DragEvent) => {
     e.preventDefault(); setOver(false);
@@ -73,19 +79,25 @@ function TodoRow({ r, onDone }: { r: any; onDone: () => void }) {
     >
       <div className="flex-1 min-w-0 text-xs">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="rounded bg-primary/10 text-primary px-1.5 py-0.5 text-[10px] font-medium">Hillsborough</span>
+          <span className="rounded bg-primary/10 text-primary px-1.5 py-0.5 text-[10px] font-medium">{COUNTY_LABEL[r.county] ?? r.county}</span>
           <span className="font-mono font-semibold text-sm">{r.case_number}</span>
-          <button onClick={openHover} className="inline-flex items-center gap-0.5 text-[11px] text-primary hover:underline"
-            title="Opens HOVER's case-number search. With the Chrome helper the boxes are filled for you; without it, the Number is copied for pasting">
-            {copied ? <><Check size={11} />Number copied, paste it in HOVER</> : <><ExternalLink size={11} />Find in HOVER</>}
+          <button onClick={openSearch} className="inline-flex items-center gap-0.5 text-[11px] text-primary hover:underline"
+            title={broward ? "Opens the Broward Clerk's case search and copies the case number for pasting"
+              : "Opens HOVER's case-number search. With the Chrome helper the boxes are filled for you; without it, the Number is copied for pasting"}>
+            {copied ? <><Check size={11} />Copied, paste it in the search</> : <><ExternalLink size={11} />{broward ? 'Find in Broward Clerk' : 'Find in HOVER'}</>}
           </button>
-          <span className="text-muted-foreground">Filed {r.filing_date}</span>
+          <span className="text-muted-foreground">{broward ? 'Lis pendens recorded' : 'Filed'} {r.filing_date}</span>
           <span className="rounded bg-muted px-1.5 py-0.5 text-[10px]">{r.case_type}</span>
         </div>
         <p className="mt-0.5 truncate" title={r.case_style || ''}>{r.case_style}</p>
         {parts && (
           <p className="mt-1 text-[11px] text-muted-foreground">
             In HOVER: Year <b className="font-mono text-foreground">{parts.year}</b> · Court Type <b className="font-mono text-foreground">{parts.type}</b> · Number <b className="font-mono text-foreground">{parts.number}</b>
+          </p>
+        )}
+        {broward && (
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            On the case page check <b className="text-foreground">Case Type</b>: Homestead can't qualify, so Skip it. Download the Complaint for Commercial or Non-Homestead.
           </p>
         )}
         {error && <p className="mt-0.5 text-[11px] text-red-600">{error}</p>}
@@ -102,7 +114,8 @@ function TodoRow({ r, onDone }: { r: any; onDone: () => void }) {
           onChange={e => { if (e.target.value) skip.mutate(e.target.value); }}
           className="h-7 rounded-md border border-border bg-background text-[11px] text-muted-foreground px-1" title="Use when the complaint can't be downloaded">
           <option value="" disabled>Skip…</option>
-          <option value="Complaint not on HOVER yet">Not on HOVER yet</option>
+          {broward && <option value="Homestead (can't qualify)">Homestead</option>}
+          <option value={broward ? 'Complaint not online yet' : 'Complaint not on HOVER yet'}>{broward ? 'Not online yet' : 'Not on HOVER yet'}</option>
           <option value="Complaint not public (confidential)">Not public</option>
           <option value="Not a foreclosure / wrong case">Wrong case</option>
           <option value="Skipped (other)">Other</option>
@@ -121,6 +134,7 @@ function DoneRow({ r, onDone }: { r: any; onDone: () => void }) {
     <li className="px-4 py-2.5 flex items-start gap-3 text-xs">
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
+          <span className="rounded bg-primary/10 text-primary px-1.5 py-0.5 text-[10px] font-medium">{COUNTY_LABEL[r.county] ?? r.county}</span>
           <span className="font-mono font-semibold">{r.case_number}</span>
           <Verdict r={r} />
           {r.principal != null && <span>Principal <b>{usd0(r.principal)}</b></span>}
@@ -162,11 +176,12 @@ export default function HillsboroughTest() {
     <div className="max-w-5xl mx-auto p-4 space-y-4">
       <div>
         <h1 className="text-lg font-semibold">Manual Complaint Intake <span className="ml-1 align-middle text-xs px-2 py-0.5 rounded bg-primary/15 text-primary font-medium">Trial</span></h1>
-        <p className="text-sm mt-1">For counties whose Clerk site can't be read automatically, so a person downloads each complaint. <b>Counties: Hillsborough.</b></p>
+        <p className="text-sm mt-1">For counties whose Clerk site can't be read automatically, so a person downloads each complaint. <b>Counties: Hillsborough, Broward.</b></p>
         <p className="text-xs text-muted-foreground mt-1">
-          A three-day trial. Each morning the system lists new Hillsborough foreclosures that could qualify ($250,000-or-more band).
-          For each one: click <b>Find in HOVER</b> (opens <a href={HOVER} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline inline-flex items-center gap-0.5">HOVER<ExternalLink size={10} /></a>'s case search; with the Chrome helper the boxes are filled, so just click Search),
-          download the <b>Complaint</b>, then drag it from Chrome's download bubble onto the row (or click <b>Upload PDF</b>).
+          A trial. Each morning the system lists new foreclosures to download. <b>Hillsborough:</b> only the $250,000-or-more band, from the Clerk's daily case file.
+          {' '}<b>Broward:</b> lender foreclosures found through the county's daily records file (about a week behind; no property type, so check it on the case page and Skip Homestead).
+          {' '}<b>Hillsborough</b>, for each one: click <b>Find in HOVER</b> (opens <a href={HOVER} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline inline-flex items-center gap-0.5">HOVER<ExternalLink size={10} /></a>'s case search; with the Chrome helper the boxes are filled, so just click Search),
+          download the <b>Complaint</b>. <b>Broward:</b> click <b>Find in Broward Clerk</b>, paste the case number, open the case, check its type, download the <b>Complaint</b>. Then drag it from Chrome's download bubble onto the row (or click <b>Upload PDF</b>).
           {' '}<a href="/api/complaint-intake/helper.zip" className="text-primary hover:underline font-medium">Get the Chrome helper</a>{' '}
           <span title="Unzip it, open chrome://extensions, turn on Developer mode, click Load unpacked and choose the hover-helper folder.">(install: unzip, chrome://extensions, Developer mode, Load unpacked)</span>. It is read automatically in a few minutes (scanned complaints take longer).
           Once read, each one also appears on the Complaints tab (not yet in the Monday email).
@@ -208,6 +223,7 @@ export default function HillsboroughTest() {
               <ul className="divide-y divide-border/40">
                 {data.skipped.map((r: any) => (
                   <li key={r.case_id} className="px-4 py-2 text-xs flex items-center gap-2">
+                    <span className="rounded bg-primary/10 text-primary px-1.5 py-0.5 text-[10px] font-medium">{COUNTY_LABEL[r.county] ?? r.county}</span>
                     <span className="font-mono font-semibold">{r.case_number}</span>
                     <span className="text-muted-foreground">{r.note}</span>
                     <button onClick={() => unskip.mutate(r.case_id)} className="ml-auto inline-flex items-center gap-0.5 text-primary hover:underline"><X size={11} />Undo</button>
