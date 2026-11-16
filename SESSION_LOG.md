@@ -4585,3 +4585,4 @@ Owner wants a new pipeline: Miami-Dade Clerk circuit-civil foreclosure complaint
 - 16 Nov 2026 ~17:45 UTC: second duplicate: Nevaeh complaint (26-CA-012269) also uploaded to 26-CA-012258 (Caraballo); 012258 reset to pending, file moved to /root/HC_26-CA-012258_wrong_upload_nevaeh_copy.pdf. Hillsborough PDFs live in /opt/amo-dashboard/complaints_pdfs/HC_<case>_COMPLAINT.pdf.
 - Also: KIAVI FUNDING (94 filings) → www.kiavi.com, `manual`, logo fetched.
 - Also: GLADSTONE GROUP (1 filing) → gstoneinc.com, `manual`.
+- Also: FIRSTKEY MORTGAGE (980) and FIRSTKEY MTG (130) → www.firstkeymortgage.com, `manual`, 40 px logo. FirstKey Master Funding trusts / FirstKey Lending left without (not asked).
