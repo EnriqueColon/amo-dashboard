@@ -169,7 +169,7 @@ export default function HillsboroughTest() {
           download the <b>Complaint</b>, then drag it from Chrome's download bubble onto the row (or click <b>Upload PDF</b>).
           {' '}<a href="/api/complaint-intake/helper.zip" className="text-primary hover:underline font-medium">Get the Chrome helper</a>{' '}
           <span title="Unzip it, open chrome://extensions, turn on Developer mode, click Load unpacked and choose the hover-helper folder.">(install: unzip, chrome://extensions, Developer mode, Load unpacked)</span>. It is read automatically in a few minutes (scanned complaints take longer).
-          These cases are not on the Complaints tab until the test is agreed.
+          Once read, each one also appears on the Complaints tab (not yet in the Monday email).
         </p>
       </div>
 

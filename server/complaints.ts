@@ -94,7 +94,11 @@ export type Row = {
 
 /** Counties whose complaint rows stay in the database but are not shown anywhere (owner, 10 Nov 2026: Hillsborough's
  * foreclosure step is stopped and its one manual run is hidden). SQL condition on `foreclosure_cases c`. */
-export const VISIBLE_COMPLAINTS_SQL = `COALESCE(c.county, 'MIAMI-DADE') NOT IN ('HILLSBOROUGH')`
+// Owner, 16 Nov 2026: Hillsborough complaints uploaded by hand (Manual Complaint Intake trial) show like any
+// county's; its cases still waiting for a download, or below the $250k band, stay on the intake page only.
+export const VISIBLE_COMPLAINTS_SQL = `(COALESCE(c.county, 'MIAMI-DADE') <> 'HILLSBOROUGH' OR c.complaint_status = 'downloaded')`
+/** The Monday email leaves Hillsborough out until the trial is agreed (owner decides ~19 Nov 2026). */
+export const EMAIL_COMPLAINTS_SQL = `COALESCE(c.county, 'MIAMI-DADE') <> 'HILLSBOROUGH'`
 
 const BASE_SQL = `
   SELECT c.case_id, c.case_number, c.case_type, c.filing_date, c.case_style, c.complaint_status,

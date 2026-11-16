@@ -7,7 +7,8 @@
  *     foreclosures from the Clerk's free daily case file; the $250,000-or-more band is "To download";
  *   - an upload is saved to COMPLAINTS_DIR, marked downloaded, and read at once by
  *     `hillsborough_complaints.py --read-case` (same reader and $500,000 test as every other county).
- * Hillsborough stays hidden from the Complaints tab (VISIBLE_COMPLAINTS_SQL) until the owner decides.
+ * Uploaded (read) Hillsborough complaints show on the Complaints tab like any county (owner, 16 Nov 2026);
+ * the Monday email leaves them out until the trial is agreed (EMAIL_COMPLAINTS_SQL).
  * This server never contacts HOVER.
  *
  *   GET  /api/hillsborough-test                    to-download list, done list, per-day counts

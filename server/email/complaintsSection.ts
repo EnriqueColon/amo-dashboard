@@ -6,7 +6,7 @@
  * Renders nothing when the complaints pipeline has not run on this database.
  */
 import type Database from 'better-sqlite3';
-import { countyLabel, VISIBLE_COMPLAINTS_SQL } from '../complaints'
+import { countyLabel, EMAIL_COMPLAINTS_SQL } from '../complaints'
 
 type Ui = {
   esc: (v: any) => string; fmtMoney: (v: number) => string; trunc: (s: string | null | undefined, n: number) => string
@@ -28,7 +28,7 @@ export function buildComplaintsSection(db: Database.Database, sendDate: string, 
     FROM foreclosure_cases c
     LEFT JOIN foreclosure_extractions e ON e.case_id = c.case_id AND e.model = ?
     LEFT JOIN foreclosure_reviews r ON r.case_id = c.case_id
-    WHERE ${VISIBLE_COMPLAINTS_SQL}`).all(model) as any[]
+    WHERE ${EMAIL_COMPLAINTS_SQL}`).all(model) as any[]
   if (!rows.length) return null
 
   const parsed = rows.map(r => {
