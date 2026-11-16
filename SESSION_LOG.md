@@ -4567,3 +4567,4 @@ Owner wants a new pipeline: Miami-Dade Clerk circuit-civil foreclosure complaint
 - /api/entity-logos is auth-gated, so a website set straight in the DB gets its logo on the next logged-in page load, or run `fetchLogo` via tsx.
 - Later the same day: SELENE FINANCE → www.selenefinance.com; PRUDENTIAL INSURANCE OF AMERICA and THE PRUDENTIAL INSURANCE OF AMERICA → www.prudential.com (32 px icon via Google). All set as `manual`, logos fetched. Session closed.
 - Also: HOMEBRIDGE FINANCIAL SERVICES (730 filings) → www.homebridge.com, `manual`, 145 px logo fetched.
+- Also: JG SOUTH FLORIDA DEVELOPMENT (1 filing, not a target) → thejgdevelopmentgroup.com, `manual`, 180 px logo fetched.
