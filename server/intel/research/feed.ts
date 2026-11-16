@@ -2,6 +2,7 @@ import { unstable_cache } from "../cache-shim"
 import { callOpenAiJson, getOpenAiApiKey } from "../openai"
 import { newsCalendarDayET } from "@shared/news/news-tab-cache"
 import { loadFeedArchive, saveFeedReports } from "./db"
+import { checkReportLinks, summarize } from "./link-check"
 
 export type ResearchReport = {
   id: string
@@ -41,6 +42,11 @@ const PUBLISHERS = [
   { name: "Green Street",         site: "greenstreet.com",          focus: "REIT valuations, commercial property prices, cap rates, sector outlooks" },
   { name: "Walker & Dunlop",      site: "walkerdunlop.com",         focus: "multifamily lending, CRE debt markets, agency/CMBS originations" },
 ]
+
+export function siteForPublisher(publisher: string): string | undefined {
+  const p = publisher.toLowerCase().trim()
+  return PUBLISHERS.find((x) => x.name.toLowerCase() === p)?.site
+}
 
 const TOPICS = [
   "Distressed/CMBS",
@@ -254,6 +260,23 @@ async function fetchResearchFeedUncached(): Promise<ResearchFeedResponse> {
 
   if (deduped.length === 0) {
     notes.push("No reports returned from any publisher.")
+  }
+
+  // The model sometimes writes a link from the title instead of the real one;
+  // check each link, repair it from the publisher's sitemap or drop it (link-check.ts).
+  try {
+    const checked = await checkReportLinks(deduped, siteForPublisher)
+    for (const { report, result } of checked) {
+      if (result.status === "fixed" || result.status === "dropped") {
+        console.log(`[intel] research link ${result.status}: ${report.publisher} "${report.title}" ${result.was || "(none)"} -> ${result.url || "(no link)"}`)
+      }
+      report.url = result.url
+    }
+    const s = summarize(checked)
+    console.log(`[intel] research links: ${s.ok} ok, ${s.fixed} fixed, ${s.dropped} removed, ${s.unverified} not checkable`)
+    if (s.fixed || s.dropped) notes.push(`Links checked: ${s.fixed} corrected, ${s.dropped} removed (not found on the publisher's site).`)
+  } catch (err) {
+    console.warn("[intel] research link check failed:", err instanceof Error ? err.message : err)
   }
 
   // Persist fresh results and load archive in parallel
