@@ -4590,3 +4590,4 @@ Owner wants a new pipeline: Miami-Dade Clerk circuit-civil foreclosure complaint
 - Also: INTERNATIONAL FINANCE BANK (target, 20) + INTERNATIONAL FIN BANK + INTERNATIONAL FINANCIAL BANK → www.ifbbank.com (32 px); ONITY MORTGAGE (168) + ONITY MTG (15) + 2 misspelled Onity Mortgage Corporation names → www.onitymortgage.com (180 px). Onity Loan Acquisition trusts left without (not asked).
 - Also: ALTO CAPITAL (630) → altocapital.com, `manual`.
 - Also: NFM (22), NFM LENDING (4), NFM . DBA NFM LENDING (1) → nfmlending.com, `manual`.
+- Also: FREEDOM MORTGAGE (5,106) + FREEDOM MORGAGE (2) → www.freedommortgage.com, `manual`.
