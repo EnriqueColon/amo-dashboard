@@ -4627,3 +4627,4 @@ Owner wants a new pipeline: Miami-Dade Clerk circuit-civil foreclosure complaint
 - Also: A&D MORTGAGE (402), A&D MTG (15), A AND D MORTGAGE (2) → www.admortgageservicing.com, `manual`; logo swapped by hand for the 192 px rendition of their 32 px icon (their image server resizes via ?width=).
 - Also: VELOCITY COMMERCIAL CAPITAL (867) → www.velocitymortgage.com (confirmed in Chrome: Velocity Mortgage Capital / Velocity Financial), `manual`. Site is Cloudflare-blocked from the droplet; 32 px icon stored by hand (header logo is white-on-dark, unusable). Velocity loan trusts (~10) left out, consistent with owner leaving Anchor vehicles out.
 - Also: all 13 US Small Business Administration names (U S SMALL BUSINESS ADMINISTRATION 353 + 12 misspellings) → www.sba.gov (agency site, not the usa.gov directory page the owner sent), `manual`, SBA seal 180 px.
+- Also: PLANET HOME LENDING (362) → www.planethomelending.com, `manual`.
