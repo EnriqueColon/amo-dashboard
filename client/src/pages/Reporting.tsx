@@ -21,6 +21,7 @@ import {
 import { EntityPicker, EntityReport } from '@/components/EntityReport';
 import CrossCountyNote from '@/components/CrossCountyNote';
 import { CountyCell } from '@/components/CountyCell';
+import EntityAvatar from '@/components/EntityAvatar';
 import { FilterHint } from '@/components/FilterHint';
 import {
   CATEGORY_DEFS, DOC_TYPE_DEFS, REVIEW_DEFS, DIRECTION_DEFS,
@@ -351,11 +352,6 @@ const NOUN_BY_CLASS: Record<string, [string, string]> = {
   'Other':          ['a document', 'documents'],
 };
 
-function initials(name: string): string {
-  const words = (name || '?').replace(/[^A-Za-z0-9 ]/g, ' ').split(/\s+/).filter(Boolean);
-  return ((words[0]?.[0] || '?') + (words[1]?.[0] || '')).toUpperCase();
-}
-
 function fmtFeedDate(d: string | null | undefined): string {
   if (!d) return '';
   const dt = new Date(`${d.slice(0, 10)}T12:00:00`);
@@ -427,8 +423,8 @@ function FeedCard({ group, foreclosures, onOpenEntity, onReview, onUnreview }: {
     <article className="bg-card border border-border rounded-xl px-4 py-3 hover:border-primary/30 transition-colors">
       <div className="flex gap-3">
         <button onClick={() => onOpenEntity(r.assignor_canon)} title={`Open ${r.assignor_canon}'s profile`}
-          className={`w-10 h-10 rounded-full shrink-0 flex items-center justify-center text-xs font-semibold ${AVATAR_STYLE[r.assignor_type] || 'bg-muted text-muted-foreground'}`}>
-          {initials(r.assignor_canon)}
+          className="shrink-0 rounded-full">
+          <EntityAvatar name={r.assignor_canon} fallbackClass={AVATAR_STYLE[r.assignor_type] || 'bg-muted text-muted-foreground'} />
         </button>
         <div className="flex-1 min-w-0">
           {/* Headline: who did what to whom */}
@@ -862,7 +858,10 @@ function FollowingCard({ targets, onOpenEntity, onShowForYou }: { targets: any[]
         <ul className="space-y-1">
           {top.map(t => (
             <li key={t.entity} className="flex items-center justify-between gap-2 text-[11px]">
-              <button onClick={() => onOpenEntity(t.entity)} className="truncate text-left hover:text-primary hover:underline" title={t.entity}>{t.entity}</button>
+              <button onClick={() => onOpenEntity(t.entity)} className="flex items-center gap-1.5 min-w-0 text-left hover:text-primary hover:underline" title={t.entity}>
+                <EntityAvatar name={t.entity} size="w-5 h-5" textSize="text-[8px]" />
+                <span className="truncate">{t.entity}</span>
+              </button>
               <span className="text-muted-foreground shrink-0 tabular-nums" title={t.txns_90d ? 'Filings in the last 90 days' : 'Most recent filing'}>
                 {t.txns_90d ? `${t.txns_90d} · 90d` : t.last_activity ? `last ${t.last_activity}` : '—'}
               </span>

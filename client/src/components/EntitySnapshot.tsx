@@ -8,6 +8,7 @@ import { apiRequest } from '@/lib/queryClient';
 import DocLink from './DocLink';
 import EntityFdicSection from './EntityFdicSection';
 import EntitySecSection from './EntitySecSection';
+import EntityWebsiteSection from './EntityWebsiteSection';
 import { Skeleton } from '@/components/ui/skeleton';
 import { BarChart, Bar, XAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { Crosshair, Building2, FileText, Landmark, Gavel, Info, MapPin } from 'lucide-react';
@@ -84,6 +85,7 @@ export default function EntitySnapshot({ entityName, entityType, onNavigate }: {
         ))}
       </div>
 
+      <EntityWebsiteSection entityName={entityName} />
       <EntityFdicSection entityName={entityName} entityType={entityType} />
       <EntitySecSection entityName={entityName} entityType={entityType} />
 

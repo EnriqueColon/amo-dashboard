@@ -41,7 +41,8 @@ export default function EntityFdicSection({ entityName, entityType }: { entityNa
   });
   const { data: meta } = useQuery({ queryKey: ['bs-meta'], queryFn: loadBsMeta, enabled: openCert != null, staleTime: 3600_000 });
   const url = `/api/entity/${encodeURIComponent(entityName)}/fdic`;
-  const done = () => { setPicking(false); qc.invalidateQueries({ queryKey: key }); };
+  // The bank's website (and so its logo) follows the charter: refresh those too.
+  const done = () => { setPicking(false); qc.invalidateQueries({ queryKey: key }); qc.invalidateQueries({ queryKey: ['/api/entity/website', entityName] }); qc.invalidateQueries({ queryKey: ['/api/entity-logos'] }); };
   const setLink = useMutation({ mutationFn: (body: object) => apiRequest('PUT', url, body).then(r => r.json()), onSuccess: done });
   const reset = useMutation({ mutationFn: () => apiRequest('DELETE', url).then(r => r.json()), onSuccess: done });
 

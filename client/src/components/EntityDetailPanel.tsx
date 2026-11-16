@@ -5,6 +5,7 @@ import CategoryBadge from './CategoryBadge';
 import ColHeader from './ColHeader';
 import DocLink from './DocLink';
 import EntitySnapshot from './EntitySnapshot';
+import EntityAvatar from './EntityAvatar';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   X, ArrowRight, TrendingUp, TrendingDown, Network,
@@ -233,6 +234,7 @@ export default function EntityDetailPanel({ entityName, onClose, onNavigate }: P
             ) : (
               <>
                 <div className="flex items-center gap-2 flex-wrap">
+                  <EntityAvatar name={entityName} size="w-9 h-9" />
                   <h2 className="text-lg font-bold text-foreground truncate">{entityName}</h2>
 
                   {/* Editable entity type */}

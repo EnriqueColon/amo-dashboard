@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import EntityAvatar from '@/components/EntityAvatar';
 import { useLocation } from 'wouter';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
@@ -270,7 +271,10 @@ export default function Targets() {
               ) : sorted.map((r: any, i: number) => (
                 <tr key={r.entity} className={`border-b border-border/30 ${i % 2 === 0 ? 'bg-background' : 'bg-muted/10'}`}>
                   <td className="px-3 py-2 max-w-[240px]">
-                    <span className="font-medium truncate block" title={r.entity}>{r.entity}</span>
+                    <span className="flex items-center gap-2 min-w-0">
+                      <EntityAvatar name={r.entity} size="w-6 h-6" textSize="text-[9px]" />
+                      <span className="font-medium truncate block" title={r.entity}>{r.entity}</span>
+                    </span>
                   </td>
                   <td className={`px-3 py-2 whitespace-nowrap text-[9px] font-semibold ${TYPE_COLOR[r.entity_type] || 'text-muted-foreground'}`}>
                     {r.entity_type || '—'}
