@@ -5,10 +5,20 @@
 import { useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
-import { Upload, Copy, ExternalLink, Check, Loader2, AlertTriangle, FileText, RotateCcw, X } from 'lucide-react';
+import { Upload, ExternalLink, Check, Loader2, AlertTriangle, FileText, RotateCcw, X } from 'lucide-react';
 
 const KEY = ['/api/hillsborough-test'];
 const HOVER = 'https://hover.hillsclerk.com/';
+// HOVER's case-number search page. HOVER has no address for a single case (its searches live in the
+// browser, not the link), so this opens the search and the row shows the three boxes to fill.
+const HOVER_SEARCH = 'https://hover.hillsclerk.com/html/case/caseSearch.html#nav-CaseNumber-tab';
+
+/** "26-CA-012231" -> HOVER's three boxes: Year (2 digits), Court Type, Number (6 digits). */
+function hoverParts(caseNumber: string) {
+  const m = /^(\d{2,4})-([A-Z]{2})-(\d{1,7})/i.exec(caseNumber.trim());
+  if (!m) return null;
+  return { year: m[1].slice(-2), type: m[2].toUpperCase(), number: m[3].padStart(6, '0').slice(-6) };
+}
 
 const usd0 = (v: number | null) => (v == null ? null : v.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }));
 const et = (iso: string | null) => (iso ? new Date(iso).toLocaleString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) + ' ET' : '');
@@ -43,8 +53,11 @@ function TodoRow({ r, onDone }: { r: any; onDone: () => void }) {
     mutationFn: (reason: string) => apiRequest('POST', `/api/hillsborough-test/${encodeURIComponent(r.case_id)}/skip`, { reason }),
     onSuccess: onDone,
   });
-  const copy = async () => {
-    try { await navigator.clipboard.writeText(r.case_number); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* clipboard blocked */ }
+  const parts = hoverParts(r.case_number);
+  // Copies the 6-digit Number (the only box worth pasting) and opens HOVER's case search in one tab, reused.
+  const openHover = async () => {
+    try { await navigator.clipboard.writeText(parts ? parts.number : r.case_number); setCopied(true); setTimeout(() => setCopied(false), 2500); } catch { /* clipboard blocked */ }
+    window.open(HOVER_SEARCH, 'hover-search');
   };
   const drop = (e: React.DragEvent) => {
     e.preventDefault(); setOver(false);
@@ -60,13 +73,19 @@ function TodoRow({ r, onDone }: { r: any; onDone: () => void }) {
         <div className="flex items-center gap-2 flex-wrap">
           <span className="rounded bg-primary/10 text-primary px-1.5 py-0.5 text-[10px] font-medium">Hillsborough</span>
           <span className="font-mono font-semibold text-sm">{r.case_number}</span>
-          <button onClick={copy} className="inline-flex items-center gap-0.5 text-[11px] text-primary hover:underline" title="Copy the case number, then paste it into HOVER's case search">
-            {copied ? <><Check size={11} />Copied</> : <><Copy size={11} />Copy</>}
+          <button onClick={openHover} className="inline-flex items-center gap-0.5 text-[11px] text-primary hover:underline"
+            title="Opens HOVER's case-number search and copies the Number for pasting">
+            {copied ? <><Check size={11} />Number copied, paste it in HOVER</> : <><ExternalLink size={11} />Find in HOVER</>}
           </button>
           <span className="text-muted-foreground">Filed {r.filing_date}</span>
           <span className="rounded bg-muted px-1.5 py-0.5 text-[10px]">{r.case_type}</span>
         </div>
         <p className="mt-0.5 truncate" title={r.case_style || ''}>{r.case_style}</p>
+        {parts && (
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            In HOVER: Year <b className="font-mono text-foreground">{parts.year}</b> · Court Type <b className="font-mono text-foreground">{parts.type}</b> · Number <b className="font-mono text-foreground">{parts.number}</b>
+          </p>
+        )}
         {error && <p className="mt-0.5 text-[11px] text-red-600">{error}</p>}
       </div>
       <div className="flex items-center gap-2 shrink-0">
@@ -144,8 +163,8 @@ export default function HillsboroughTest() {
         <p className="text-sm mt-1">For counties whose Clerk site can't be read automatically, so a person downloads each complaint. <b>Counties: Hillsborough.</b></p>
         <p className="text-xs text-muted-foreground mt-1">
           A three-day trial. Each morning the system lists new Hillsborough foreclosures that could qualify ($250,000-or-more band).
-          For each one: <b>Copy</b> the case number, open <a href={HOVER} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline inline-flex items-center gap-0.5">HOVER<ExternalLink size={10} /></a>,
-          search it, download the <b>Complaint</b>, then click <b>Upload PDF</b> (or drag the file onto the row). It is read automatically in a few minutes (scanned complaints take longer).
+          For each one: click <b>Find in HOVER</b> (opens <a href={HOVER} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline inline-flex items-center gap-0.5">HOVER<ExternalLink size={10} /></a>'s case search and copies the Number),
+          fill the three boxes shown on the row, download the <b>Complaint</b>, then drag it from Chrome's download bubble onto the row (or click <b>Upload PDF</b>). It is read automatically in a few minutes (scanned complaints take longer).
           These cases are not on the Complaints tab until the test is agreed.
         </p>
       </div>
