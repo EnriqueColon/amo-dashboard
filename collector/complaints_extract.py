@@ -327,7 +327,8 @@ def spent_today(conn, model: str) -> float:
     return sum(cost_usd(model, r[0] or 0, r[1] or 0) for r in rows)
 
 
-def process_pending(conn, model: str, api_key: str, limit: int | None = None, budget_usd: float | None = None) -> dict:
+def process_pending(conn, model: str, api_key: str, limit: int | None = None, budget_usd: float | None = None,
+                    case_ids: list[str] | None = None) -> dict:
     """Read + extract every downloaded complaint that has no extraction from this model yet. Stops, without
     error, when today's spend (extraction + address-repair page reads) reaches budget_usd; the rest waits for
     the next run."""
@@ -338,6 +339,9 @@ def process_pending(conn, model: str, api_key: str, limit: int | None = None, bu
                            WHERE complaint_status='downloaded' AND complaint_pdf IS NOT NULL AND case_id NOT IN
                                  (SELECT case_id FROM foreclosure_extractions WHERE model=?)
                            ORDER BY filing_date DESC""", (model,)).fetchall()
+    if case_ids is not None:  # one county, or one hand-uploaded case (hillsborough_complaints.py --read-case)
+        wanted = set(case_ids)
+        rows = [r for r in rows if r["case_id"] in wanted]
     rows = rows[:limit] if limit else rows
     done = failed = 0
     stopped_for_budget = False

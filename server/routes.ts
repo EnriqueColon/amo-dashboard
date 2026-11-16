@@ -3,6 +3,7 @@ import type { Server } from 'http';
 import { getDb } from './db';
 import { registerBankStressRoutes } from './bank-stress';
 import { registerComplaintsRoutes, VISIBLE_COMPLAINTS_SQL } from './complaints';
+import { registerHillsboroughHandpullRoutes } from './hillsborough-handpull';
 import { registerEntityFdicRoutes } from './entity-fdic';
 import { registerStreetViewRoutes } from './streetview';
 import { registerCollectorHealthRoutes } from './collector-health';
@@ -1479,6 +1480,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   // which was in turn removed on 2026-10-27 (stage 4 of the Bank Stress work).
   registerBankStressRoutes(app);
   registerComplaintsRoutes(app);
+  registerHillsboroughHandpullRoutes(app);
   registerStreetViewRoutes(app);
   registerCollectorHealthRoutes(app);
   registerEntityFdicRoutes(app);

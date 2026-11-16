@@ -727,6 +727,8 @@ def main() -> None:
     ap.add_argument("--extract", action="store_true", help="Run complaints_extract on downloaded packets/complaints")
     ap.add_argument("--model", default=os.environ.get("COMPLAINTS_MODEL", "gpt-5.5"))
     ap.add_argument("--budget", type=float, default=float(os.environ.get("COMPLAINTS_DAILY_BUDGET_USD", "15")))
+    ap.add_argument("--read-case", type=str, default=None,
+                    help="Read and extract one hand-uploaded case now (e.g. HC:26-CA-011777); used by the server after an upload")
     args = ap.parse_args()
 
     conn = complaints_collect.connect()
@@ -763,12 +765,17 @@ def main() -> None:
         or_counts = fetch_pending_official_records(conn, pdf_dir, limit=args.limit)
         log.info(f"Official Records packet assembly results: {or_counts}")
 
-    if args.extract:
+    if args.extract or args.read_case:
         key = os.environ.get("OPENAI_API_KEY")
         if not key:
             raise RuntimeError("OPENAI_API_KEY is not set")
-        ex = complaints_extract.process_pending(conn, args.model, key, limit=args.limit, budget_usd=args.budget)
+        # Hillsborough rows only: never read another county's queue from this job.
+        ids = [args.read_case] if args.read_case else [
+            r["case_id"] for r in conn.execute("SELECT case_id FROM foreclosure_cases WHERE county=?", (COUNTY,))]
+        ex = complaints_extract.process_pending(conn, args.model, key, limit=args.limit, budget_usd=args.budget, case_ids=ids)
         log.info(f"Extraction results: {ex}")
+        if args.read_case and ex.get("failed"):
+            sys.exit(1)
 
 
 if __name__ == "__main__":

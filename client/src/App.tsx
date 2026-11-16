@@ -23,6 +23,7 @@ import Targets from '@/pages/Targets';
 import Entities from '@/pages/Entities';
 import CollectionLog from '@/pages/CollectionLog';
 import Complaints from '@/pages/Complaints';
+import HillsboroughTest from '@/pages/HillsboroughTest';
 import NotFound from '@/pages/not-found';
 
 export default function App() {
@@ -56,6 +57,7 @@ export default function App() {
                 <Route path="/entities" component={Entities} />
                 <Route path="/collection-log" component={CollectionLog} />
                 <Route path="/complaints" component={Complaints} />
+                <Route path="/hillsborough-test" component={HillsboroughTest} />
                 <Route component={NotFound} />
               </Switch>
             </main>

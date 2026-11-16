@@ -85,7 +85,7 @@ export function collectedOn(firstSeen: string | null | undefined): string | null
   return d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
 }
 
-type Row = {
+export type Row = {
   case_id: string; case_number: string; case_type: string; filing_date: string | null; case_style: string | null
   complaint_status: string; complaint_pdf: string | null; note: string | null; county: string | null; first_seen: string | null; metadata_json: string | null
   result_json: string | null; extracted_at: string | null
@@ -216,7 +216,7 @@ function resultReason(row: Row, res: any, notes: any[]): string {
   return 'Cannot tell yet: ' + (why.length ? why.join('; ') : 'a value the test needs could not be read') + '. It is on the review list.'
 }
 
-function shape(row: Row, detail = false) {
+export function shape(row: Row, detail = false) {
   const res = row.result_json ? JSON.parse(row.result_json) : null
   let meta: any = null
   try { meta = row.metadata_json ? JSON.parse(row.metadata_json) : null } catch { meta = null }
