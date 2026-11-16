@@ -4611,3 +4611,4 @@ Owner wants a new pipeline: Miami-Dade Clerk circuit-civil foreclosure complaint
 - UWM logo: uwm.com serves only a 16 px favicon, so the blue "UWM" letters were cropped by hand from its header logo (contentstack uwm-logo.svg) and stored as SVG in `entity_logos` (domain www.uwm.com, status ok; never refetched). Same treatment as Citizens.
 - Also: PARAMOUNT RESIDENTIAL MORTGAGE (738) + 3 misspelled "…MTG GROUP" names → www.prmg.net, `manual`, 180 px. Paramount Capital Lending / Paramount Bank left out (different firms).
 - 16 Nov 2026 deployed `9593de2`: Entities tab shows grey initials where a firm has no logo (owner chose initials over type icons / coloured initials). dist backup `/root/dist.before_entities_initials.*`.
+- Also: BENWORTH CAPITAL PARTNERS (217) → benworthcapital.com (same site/logo as target BENWORTH CAPITAL), `manual`.
