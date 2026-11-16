@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import EntityAvatar from '@/components/EntityAvatar';
+import WebsiteSuggestionsCard from '@/components/WebsiteSuggestionsCard';
 import { useLocation } from 'wouter';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
@@ -224,6 +225,8 @@ export default function Targets() {
 
       <EntitySearch targeted={targetedSet} adding={addMutation.isPending}
         onAdd={entity => addMutation.mutate(entity)} />
+
+      <WebsiteSuggestionsCard />
 
       {/* Watchlist */}
       <div className="bg-card border border-border rounded-lg overflow-hidden">

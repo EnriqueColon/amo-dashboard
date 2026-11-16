@@ -9,6 +9,7 @@ import { registerCollectorHealthRoutes } from './collector-health';
 import { registerFeedRoutes } from './feed';
 import { registerEntitySecRoutes } from './entity-sec';
 import { registerEntityLogoRoutes } from './entity-logos';
+import { registerWebsiteSuggestionRoutes } from './entity-website-suggest';
 import { registerFdicAnalyticsRoutes } from './fdic-analytics';
 import { registerIntelRoutes } from './intel/routes';
 import { registerChatRoutes } from './chat';
@@ -1484,6 +1485,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   registerFeedRoutes(app);
   registerEntitySecRoutes(app);
   registerEntityLogoRoutes(app);
+  registerWebsiteSuggestionRoutes(app);
   registerFdicAnalyticsRoutes(app);
   registerChatRoutes(app);
 

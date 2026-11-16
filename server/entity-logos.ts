@@ -35,12 +35,12 @@ const FDIC_REFRESH_MS = 7 * 24 * 3600_000
 
 // ── tables ───────────────────────────────────────────────────────────────────
 
-function ensureTables(db: Database.Database) {
+export function ensureTables(db: Database.Database) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS entity_websites (
       entity     TEXT PRIMARY KEY,
       domain     TEXT,                 -- NULL = "no website" chosen by hand
-      source     TEXT NOT NULL,        -- 'manual'
+      source     TEXT NOT NULL,        -- 'manual' (typed) | 'reviewed' (accepted suggestion)
       updated_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS entity_logos (
@@ -93,7 +93,7 @@ function isPrivateAddress(ip: string): boolean {
   return x === '::1' || x === '::' || x.startsWith('fc') || x.startsWith('fd') || x.startsWith('fe80')
 }
 
-async function hostIsPublic(host: string): Promise<boolean> {
+export async function hostIsPublic(host: string): Promise<boolean> {
   if (!toDomain(host)) return false
   try {
     const addrs = await lookup(host, { all: true })
@@ -104,7 +104,7 @@ async function hostIsPublic(host: string): Promise<boolean> {
 }
 
 /** GET with manual redirects; every hop must be http(s) on a public host. */
-async function safeGet(url: string, maxBytes: number, timeoutMs = 10_000): Promise<{ status: number; url: string; type: string; body: Buffer } | null> {
+export async function safeGet(url: string, maxBytes: number, timeoutMs = 10_000): Promise<{ status: number; url: string; type: string; body: Buffer } | null> {
   let current = url
   for (let hop = 0; hop < 5; hop++) {
     let u: URL
@@ -275,7 +275,7 @@ async function refreshFdicWebsites(db: Database.Database): Promise<void> {
 
 // ── which website a firm has ─────────────────────────────────────────────────
 
-type Site = { domain: string | null; source: 'manual' | 'fdic' | null; cert?: number | null }
+type Site = { domain: string | null; source: 'manual' | 'reviewed' | 'fdic' | null; cert?: number | null }
 
 /** FDIC WEBADDR that is a consumer brand, not the firm (checked 16 Nov 2026). */
 const BRAND_SITES: Record<string, string> = {
@@ -295,8 +295,9 @@ function isBankLike(db: Database.Database, entity: string): boolean {
 }
 
 export function websiteFor(db: Database.Database, entity: string): Site {
-  const manual = db.prepare(`SELECT domain FROM entity_websites WHERE entity = ?`).get(entity) as { domain: string | null } | undefined
-  if (manual) return { domain: manual.domain, source: 'manual' }
+  // 'manual' = typed on the card; 'reviewed' = an AI suggestion a person accepted (entity-website-suggest.ts).
+  const manual = db.prepare(`SELECT domain, source FROM entity_websites WHERE entity = ?`).get(entity) as { domain: string | null; source: string } | undefined
+  if (manual) return { domain: manual.domain, source: manual.source === 'reviewed' ? 'reviewed' : 'manual' }
   if (!isBankLike(db, entity)) return { domain: null, source: null }
   // A one-word name ("FIRST") only takes an FDIC bank whose name is exactly that word;
   // otherwise it would borrow the largest bank whose name merely starts with it.
@@ -318,7 +319,7 @@ const inFlight = new Set<string>()
 let queue: string[] = []
 let running = 0
 
-function enqueue(db: Database.Database, domains: string[]) {
+export function enqueue(db: Database.Database, domains: string[]) {
   for (const d of domains) if (!inFlight.has(d)) { inFlight.add(d); queue.push(d) }
   while (running < 3 && queue.length) {
     const d = queue.shift()!
