@@ -10,7 +10,10 @@
  *     (apple-touch-icon / <link rel=icon> / favicon.ico, the largest wins; Google's public
  *     favicon service as a last resort, which receives only the domain name). Served from
  *     /api/logo/:domain, so a viewer's browser never contacts the firm's site.
- *   - Scope: firms on Targets plus any firm with a hand-typed website.
+ *   - Scope: firms on Targets, every firm typed BANK with 10+ filings (so the big banks in
+ *     the feed, e.g. Wells Fargo, which are not targets), and any firm with a hand-typed website.
+ *   - BRAND_SITES: FDIC lists a few banks under a consumer brand's site (Goldman Sachs Bank
+ *     USA -> marcus.com); the firm's own site is used instead.
  *   - Firms without a website or whose icon can't be fetched keep their initials.
  * Phase 2 (not built): AI-suggested websites for non-bank targets, confirmed by a person.
  *
@@ -22,7 +25,8 @@ import type Database from 'better-sqlite3'
 import { lookup } from 'dns/promises'
 import net from 'net'
 import { getDb } from './db'
-import { fdicHoldingCompany } from './entity-fdic'
+import { fdicCandidates, fdicHoldingCompany, normBankName } from './entity-fdic'
+import { openBankStressDb } from './bank-stress'
 
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36'
 const MAX_ICON_BYTES = 1_000_000
@@ -273,6 +277,12 @@ async function refreshFdicWebsites(db: Database.Database): Promise<void> {
 
 type Site = { domain: string | null; source: 'manual' | 'fdic' | null; cert?: number | null }
 
+/** FDIC WEBADDR that is a consumer brand, not the firm (checked 16 Nov 2026). */
+const BRAND_SITES: Record<string, string> = {
+  'www.marcus.com': 'www.goldmansachs.com',      // Goldman Sachs Bank USA
+  'www.etrade.com': 'www.morganstanley.com',     // Morgan Stanley Private Bank
+}
+
 function isBankLike(db: Database.Database, entity: string): boolean {
   const typed = db.prepare(`SELECT 1 FROM entity_nodes WHERE entity = ? AND entity_type = 'BANK'
                             UNION SELECT 1 FROM entity_classifications WHERE name = ? AND category = 'BANK' LIMIT 1`).get(entity, entity)
@@ -288,10 +298,18 @@ export function websiteFor(db: Database.Database, entity: string): Site {
   const manual = db.prepare(`SELECT domain FROM entity_websites WHERE entity = ?`).get(entity) as { domain: string | null } | undefined
   if (manual) return { domain: manual.domain, source: 'manual' }
   if (!isBankLike(db, entity)) return { domain: null, source: null }
+  // A one-word name ("FIRST") only takes an FDIC bank whose name is exactly that word;
+  // otherwise it would borrow the largest bank whose name merely starts with it.
+  const linked = db.prepare(`SELECT 1 FROM entity_fdic_links WHERE entity = ? AND status = 'confirmed'`).get(entity)
+  if (!linked && !normBankName(entity).includes(' ')) {
+    const bs = openBankStressDb()
+    if (!bs || !fdicCandidates(bs, entity)[0]?.exact) return { domain: null, source: null }
+  }
   const fdic = fdicHoldingCompany(entity)
   if (!fdic) return { domain: null, source: null }
   const w = db.prepare(`SELECT webaddr FROM fdic_websites WHERE cert = ?`).get(fdic.cert) as { webaddr: string | null } | undefined
-  return { domain: toDomain(w?.webaddr), source: 'fdic', cert: fdic.cert }
+  const d = toDomain(w?.webaddr)
+  return { domain: d ? (BRAND_SITES[d] ?? d) : null, source: 'fdic', cert: fdic.cert }
 }
 
 // ── background fill ──────────────────────────────────────────────────────────
@@ -329,12 +347,13 @@ export function registerEntityLogoRoutes(app: Express) {
   const db = getDb()
   ensureTables(db)
 
-  // Map of firm name -> logo URL for every firm that has one (Targets + hand-typed websites).
+  // Map of firm name -> logo URL for every firm that has one (Targets, busy banks, hand-typed websites).
   // Also starts fetching logos not yet tried, so they appear on a later load.
   app.get('/api/entity-logos', async (_req: Request, res: Response) => {
     await refreshFdicWebsites(db)
     const names = new Set<string>()
     for (const r of db.prepare(`SELECT entity FROM target_entities`).all() as { entity: string }[]) names.add(r.entity)
+    for (const r of db.prepare(`SELECT entity FROM entity_nodes WHERE entity_type = 'BANK' AND total_vol >= 10`).all() as { entity: string }[]) names.add(r.entity)
     for (const r of db.prepare(`SELECT entity FROM entity_websites WHERE domain IS NOT NULL`).all() as { entity: string }[]) names.add(r.entity)
 
     const logos = new Map<string, { status: string; fetched_at: string }>()
