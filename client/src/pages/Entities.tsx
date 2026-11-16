@@ -11,7 +11,7 @@ import { Search, ChevronRight, Info, Network } from 'lucide-react';
 import CrossCountyNote from '@/components/CrossCountyNote';
 import { FilterHint } from '@/components/FilterHint';
 import { ENTITY_TYPE_DEFS } from '@/lib/filterDefinitions';
-import { useEntityLogos } from '@/components/EntityAvatar';
+import { useEntityLogos, initials } from '@/components/EntityAvatar';
 
 const TYPE_FILTERS = ['', 'BANK', 'PRIVATE_CREDIT', 'TRUST', 'GSE', 'SERVICER', 'MERS', 'OTHER'];
 
@@ -19,7 +19,7 @@ export default function Entities() {
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
   const [selected, setSelected] = useState<string | null>(null);
-  // Firm logo next to the name when we have one (no initials here: most of the 13,000 names have none).
+  // Firm logo next to the name when we have one; initials otherwise (owner, 16 Nov 2026).
   const logos = useEntityLogos();
 
   // Canonical network entities — the only ones with transaction data
@@ -145,7 +145,9 @@ export default function Entities() {
                                   onError={ev => { (ev.currentTarget.parentElement as HTMLElement).style.visibility = 'hidden'; }} />
                               </span>
                             ) : (
-                              <span className="w-5 h-5 shrink-0" aria-hidden="true" />
+                              <span className="w-5 h-5 rounded-full shrink-0 bg-muted text-muted-foreground flex items-center justify-center text-[8px] font-semibold" aria-hidden="true">
+                                {initials(e.entity)}
+                              </span>
                             )}
                             <span
                               className="group-hover:text-primary transition-colors truncate block"
