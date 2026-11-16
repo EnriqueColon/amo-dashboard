@@ -15,7 +15,7 @@ const et = (iso: string | null) => (iso ? new Date(iso).toLocaleString('en-US', 
 
 function Verdict({ r }: { r: any }) {
   if (r.read_error) return <span className="inline-flex items-center gap-1 text-red-600"><AlertTriangle size={12} />Read failed</span>;
-  if (r.reading) return <span className="inline-flex items-center gap-1 text-muted-foreground"><Loader2 size={12} className="animate-spin" />Reading… (about a minute)</span>;
+  if (r.reading) return <span className="inline-flex items-center gap-1 text-muted-foreground"><Loader2 size={12} className="animate-spin" />Reading… (a few minutes)</span>;
   if (!r.read) return <span className="text-muted-foreground">Not read yet</span>;
   const style = r.verdict === 'qualifies' ? 'bg-emerald-100 text-emerald-800' : r.verdict === 'no' ? 'bg-muted text-muted-foreground' : 'bg-amber-100 text-amber-800';
   const label = r.verdict === 'qualifies' ? 'Qualifies' : r.verdict === 'no' ? 'Does not qualify' : 'Unclear';
@@ -143,7 +143,7 @@ export default function HillsboroughTest() {
         <p className="text-xs text-muted-foreground mt-1">
           A three-day trial. Each morning the system lists new Hillsborough foreclosures that could qualify ($250,000-or-more band).
           For each one: <b>Copy</b> the case number, open <a href={HOVER} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline inline-flex items-center gap-0.5">HOVER<ExternalLink size={10} /></a>,
-          search it, download the <b>Complaint</b>, then click <b>Upload PDF</b> (or drag the file onto the row). It is read in about a minute.
+          search it, download the <b>Complaint</b>, then click <b>Upload PDF</b> (or drag the file onto the row). It is read automatically in a few minutes (scanned complaints take longer).
           These cases are not on the Complaints tab until the test is agreed.
         </p>
       </div>
