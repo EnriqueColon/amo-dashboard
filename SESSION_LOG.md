@@ -4591,3 +4591,4 @@ Owner wants a new pipeline: Miami-Dade Clerk circuit-civil foreclosure complaint
 - Also: ALTO CAPITAL (630) → altocapital.com, `manual`.
 - Also: NFM (22), NFM LENDING (4), NFM . DBA NFM LENDING (1) → nfmlending.com, `manual`.
 - Also: FREEDOM MORTGAGE (5,106) + FREEDOM MORGAGE (2) → www.freedommortgage.com, `manual`.
+- Owner (16 Nov): Hillsborough intake is forward-only from the 17 Nov 8 AM ET run; do NOT backfill the 10–12 Nov filings.
