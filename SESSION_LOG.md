@@ -4616,3 +4616,4 @@ Owner wants a new pipeline: Miami-Dade Clerk circuit-civil foreclosure complaint
 - Also: all 6 CrossCountry names (CROSSCOUNTRY MORTGAGE 453, CROSSCOUNTRY MTG 49, + 4 misspellings) → www.crosscountrymortgage.com (main site, not the forms. link given), `manual`, 180 px.
 - Also: COMPUTERSHARE TRUST (364) + COMPUTER SHARE DELWARE TRUST (1) → www.computershare.com (main site, not the transferstock. link), `manual`, 32 px.
 - Also: LONGBRIDGE FINANCIAL (416) + LONGBRIDGE FIN (2) → longbridge-financial.com, `manual`.
+- Also: PACIFIC LIFE INSURANCE (320) + PACIFIC LIFE INVESTOR (1) → www.pacificlife.com, `manual`, 180 px.
