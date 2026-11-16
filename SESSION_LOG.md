@@ -4605,3 +4605,4 @@ Owner wants a new pipeline: Miami-Dade Clerk circuit-civil foreclosure complaint
 - 16 Nov 2026 deployed `62d2000`: Entities tab shows the firm logo (20 px, no initials) next to the name when one exists; blank slot keeps names aligned. Live check: 134 logos on the list. dist backup `/root/dist.before_entities_logos.*`.
 - Also: LAKEVIEW LOAN SERVICING (4,536) + misspellings LAKEVIEW LAON SERVICING, LAKEVIEW OAN SEVICING → lakeview.com, `manual`. Lakeview Community Capital / Lakeview Lending left without (not asked).
 - Also: all Churchill Real Estate vehicles → churchillre.com (`manual`): CHURCHILL FUNDING I (1,780), CHURCHILL MRA FUNDING I (183), FINDUNG I, MRA FUNDING 1, MRA FUNDING, MRS FUNDING I; target CHURCHILL REAL ESTATE already had it. CHURCHILL MORTGAGE (2) deliberately left out: different company.
+- Also: all 8 Carrington names (CARRINGTON MORTGAGE 1,458, CARRINGTON MTG SERVICES 266, + 6 spelling variants) → www.carringtonmortgage.com, `manual`.
