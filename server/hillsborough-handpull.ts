@@ -2,7 +2,7 @@
  * Hillsborough complaints, HAND-PULL TEST (owner, 16 Nov 2026: three-day trial before deciding to integrate).
  *
  * The Clerk's document site (HOVER) blocks programs, so a person downloads each complaint in a normal
- * browser and drops the PDF on the #/hillsborough-test page. Everything else is automatic:
+ * browser and drops the PDF on the #/complaint-uploads (Data → Complaint Uploads: Hillsborough) page. Everything else is automatic:
  *   - collector/run_hillsborough_handpull_daily.sh stores each day's new Commercial / Non-Homestead
  *     foreclosures from the Clerk's free daily case file; the $250,000-or-more band is "To download";
  *   - an upload is saved to COMPLAINTS_DIR, marked downloaded, and read at once by

@@ -5,7 +5,7 @@
 # This job does everything else:
 #   1. reads the Clerk's free daily case file (last 3 days, overlapping so nothing is missed) and stores
 #      Commercial / Non-Homestead mortgage foreclosures; the $250,000-or-more band waits as "pending"
-#      on the dashboard's #/hillsborough-test page ("To download");
+#      on the dashboard's #/complaint-uploads (Data → Complaint Uploads: Hillsborough) page ("To download");
 #   2. reads any complaint uploaded there that the instant read missed (the server reads each upload
 #      straight away; this is the backstop).
 # It never contacts HOVER. No proxy (proxy_config default). Spend cap: COMPLAINTS_DAILY_BUDGET_USD, as the

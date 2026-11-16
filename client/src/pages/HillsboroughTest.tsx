@@ -1,7 +1,7 @@
 // Hillsborough complaints, HAND-PULL TEST (owner, 16 Nov 2026: three-day trial before deciding to integrate).
 // The Clerk's site (HOVER) blocks programs, so a person downloads each complaint and drops it here;
 // the server reads it straight away with the same reader and $500,000 test as every other county
-// (server/hillsborough-handpull.ts). Not linked from the menu; reached from the Complaints tab.
+// (server/hillsborough-handpull.ts). Menu: Data → Complaint Uploads: Hillsborough (#/complaint-uploads).
 import { useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
@@ -139,7 +139,7 @@ export default function HillsboroughTest() {
   return (
     <div className="max-w-5xl mx-auto p-4 space-y-4">
       <div>
-        <h1 className="text-lg font-semibold">Hillsborough complaints: hand-download test</h1>
+        <h1 className="text-lg font-semibold">Complaint Uploads: Hillsborough <span className="ml-1 align-middle text-xs px-2 py-0.5 rounded bg-primary/15 text-primary font-medium">Trial</span></h1>
         <p className="text-xs text-muted-foreground mt-1">
           A three-day trial. Each morning the system lists new Hillsborough foreclosures that could qualify ($250,000-or-more band).
           For each one: <b>Copy</b> the case number, open <a href={HOVER} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline inline-flex items-center gap-0.5">HOVER<ExternalLink size={10} /></a>,

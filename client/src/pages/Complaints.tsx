@@ -243,9 +243,6 @@ export default function Complaints() {
         <span className="text-sm text-muted-foreground ml-1">
           Foreclosure complaints by county (Miami-Dade, Duval, Monroe, Leon and Citrus; Commercial and Non-Homestead Residential), read from each Clerk's records
         </span>
-        <a href="#/hillsborough-test" className="ml-auto text-xs text-primary hover:underline" title="Three-day trial: Hillsborough complaints downloaded by hand">
-          Hillsborough test →
-        </a>
       </div>
 
       {sum && sum.active === false ? (

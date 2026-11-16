@@ -57,7 +57,8 @@ export default function App() {
                 <Route path="/entities" component={Entities} />
                 <Route path="/collection-log" component={CollectionLog} />
                 <Route path="/complaints" component={Complaints} />
-                <Route path="/hillsborough-test" component={HillsboroughTest} />
+                <Route path="/complaint-uploads" component={HillsboroughTest} />
+                <Route path="/hillsborough-test">{() => <Redirect to="/complaint-uploads" replace />}</Route>
                 <Route component={NotFound} />
               </Switch>
             </main>

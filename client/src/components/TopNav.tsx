@@ -2,6 +2,7 @@ import { Link, useLocation } from 'wouter';
 import {
   BarChart2, FileText, CheckCircle, Shield, Building2, ClipboardList, LayoutList, LogOut, Crosshair,
   Landmark, FileSignature, MessageSquare, Gauge, Users, Newspaper, Scale, BookOpen, Gavel, ChevronDown, Menu, X,
+  Upload,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useCounty, COUNTY_OPTIONS, type CountyScope } from '@/lib/county';
@@ -47,6 +48,7 @@ const MENUS: Menu[] = [
       { href: '/assignments', icon: FileText, label: 'Raw Assignments' },
       // UCC Filings and Clean Transactions are document views, not analyses (owner, 29 Oct 2026).
       { href: '/complaints', icon: Gavel, label: 'Complaints', badge: 'Open testing' },
+      { href: '/complaint-uploads', icon: Upload, label: 'Complaint Uploads: Hillsborough', badge: 'Trial' },
       { href: '/ucc', icon: FileSignature, label: 'UCC Filings' },
       { href: '/clean-events', icon: CheckCircle, label: 'Clean Transactions' },
       { href: '/entities', icon: Building2, label: 'Entities' },
