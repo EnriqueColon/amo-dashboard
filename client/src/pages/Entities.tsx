@@ -11,6 +11,7 @@ import { Search, ChevronRight, Info, Network } from 'lucide-react';
 import CrossCountyNote from '@/components/CrossCountyNote';
 import { FilterHint } from '@/components/FilterHint';
 import { ENTITY_TYPE_DEFS } from '@/lib/filterDefinitions';
+import { useEntityLogos } from '@/components/EntityAvatar';
 
 const TYPE_FILTERS = ['', 'BANK', 'PRIVATE_CREDIT', 'TRUST', 'GSE', 'SERVICER', 'MERS', 'OTHER'];
 
@@ -18,6 +19,8 @@ export default function Entities() {
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
   const [selected, setSelected] = useState<string | null>(null);
+  // Firm logo next to the name when we have one (no initials here: most of the 13,000 names have none).
+  const logos = useEntityLogos();
 
   // Canonical network entities — the only ones with transaction data
   const { data: nodes, isLoading } = useQuery({
@@ -135,11 +138,21 @@ export default function Entities() {
                         className="border-b border-border/50 hover:bg-muted/20 cursor-pointer group transition-colors"
                       >
                         <td className="px-3 py-2.5 font-medium max-w-[260px]">
-                          <span
-                            className="group-hover:text-primary transition-colors truncate block"
-                            title={e.entity}
-                          >
-                            {e.entity}
+                          <span className="flex items-center gap-2 min-w-0">
+                            {logos[String(e.entity).toUpperCase()] ? (
+                              <span className="w-5 h-5 rounded-full shrink-0 overflow-hidden bg-white border border-border flex items-center justify-center">
+                                <img src={logos[String(e.entity).toUpperCase()]} alt="" loading="lazy" className="w-[78%] h-[78%] object-contain"
+                                  onError={ev => { (ev.currentTarget.parentElement as HTMLElement).style.visibility = 'hidden'; }} />
+                              </span>
+                            ) : (
+                              <span className="w-5 h-5 shrink-0" aria-hidden="true" />
+                            )}
+                            <span
+                              className="group-hover:text-primary transition-colors truncate block"
+                              title={e.entity}
+                            >
+                              {e.entity}
+                            </span>
                           </span>
                         </td>
                         <td className="px-3 py-2.5">
