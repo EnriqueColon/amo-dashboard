@@ -20,9 +20,10 @@ async function main() {
   const limit = Number(arg("--limit") ?? Infinity)
   const budget = Number(arg("--budget") ?? 20)
   const db = getDb()
-  const todo = targetsNeedingSuggestion(db, process.argv.includes("--redo")).slice(0, limit)
+  const all = targetsNeedingSuggestion(db, process.argv.includes("--redo"))
+  const todo = all.slice(0, limit)
   const maxCalls = Math.floor(budget / EST_COST_PER_CALL_USD)
-  console.log(`${todo.length} targets without a website; budget ~$${budget} (~${maxCalls} searches at ~$${EST_COST_PER_CALL_USD} each)`)
+  console.log(`${all.length} targets without a website or suggestion; doing ${todo.length}; budget ~$${budget} (~${maxCalls} searches at ~$${EST_COST_PER_CALL_USD} each)`)
   let i = 0, calls = 0, found = 0, none = 0, errors = 0
   const worker = async () => {
     while (i < todo.length && calls < maxCalls) {
