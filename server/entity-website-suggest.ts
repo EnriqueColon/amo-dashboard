@@ -173,8 +173,11 @@ export function registerWebsiteSuggestionRoutes(app: Express) {
     const rows = (db.prepare(`SELECT * FROM entity_website_suggestions WHERE status = 'pending'
                               ORDER BY COALESCE(name_match, 0) DESC, CASE confidence WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, entity`).all() as any[])
       .map(r => ({ ...r, logo: logos.has(r.domain) ? `/api/logo/${encodeURIComponent(r.domain)}?v=${encodeURIComponent(logos.get(r.domain))}` : null }))
+    const tried = new Set((db.prepare(`SELECT domain FROM entity_logos`).all() as any[]).map(r => r.domain))
+    const missing = rows.filter(r => r.domain && !tried.has(r.domain)).map(r => r.domain)
+    if (missing.length) enqueue(db, missing)   // previews for the reviewer
     const waiting = targetsNeedingSuggestion(db).length
-    res.json({ counts, waiting, rows })
+    res.json({ counts, waiting, rows, previews_pending: missing.length })
   })
 
   // Body (optional): { domain } to accept a corrected website instead of the suggested one.

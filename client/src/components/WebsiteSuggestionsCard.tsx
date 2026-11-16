@@ -84,7 +84,11 @@ function Row({ r, onDone }: { r: any; onDone: () => void }) {
 
 export default function WebsiteSuggestionsCard() {
   const qc = useQueryClient();
-  const { data } = useQuery({ queryKey: KEY, queryFn: () => apiRequest('GET', '/api/website-suggestions').then(r => r.json()) });
+  const { data } = useQuery({
+    queryKey: KEY,
+    queryFn: () => apiRequest('GET', '/api/website-suggestions').then(r => r.json()),
+    refetchInterval: (q: any) => ((q.state.data?.previews_pending ?? 0) > 0 ? 10_000 : false),
+  });
   const [open, setOpen] = useState(true);
   const [shown, setShown] = useState(25);
   if (!data) return null;
