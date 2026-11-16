@@ -4617,3 +4617,4 @@ Owner wants a new pipeline: Miami-Dade Clerk circuit-civil foreclosure complaint
 - Also: COMPUTERSHARE TRUST (364) + COMPUTER SHARE DELWARE TRUST (1) → www.computershare.com (main site, not the transferstock. link), `manual`, 32 px.
 - Also: LONGBRIDGE FINANCIAL (416) + LONGBRIDGE FIN (2) → longbridge-financial.com, `manual`.
 - Also: PACIFIC LIFE INSURANCE (320) + PACIFIC LIFE INVESTOR (1) → www.pacificlife.com, `manual`, 180 px.
+- Also: all 7 Lennar names (LENNAR MORTGAGE 337, LENNAR MTG 52, LENNAR HOMES 7, + 4 variants) → www.lennar.com, `manual`, 180 px.
