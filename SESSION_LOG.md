@@ -4607,3 +4607,4 @@ Owner wants a new pipeline: Miami-Dade Clerk circuit-civil foreclosure complaint
 - Also: all Churchill Real Estate vehicles → churchillre.com (`manual`): CHURCHILL FUNDING I (1,780), CHURCHILL MRA FUNDING I (183), FINDUNG I, MRA FUNDING 1, MRA FUNDING, MRS FUNDING I; target CHURCHILL REAL ESTATE already had it. CHURCHILL MORTGAGE (2) deliberately left out: different company.
 - Also: all 8 Carrington names (CARRINGTON MORTGAGE 1,458, CARRINGTON MTG SERVICES 266, + 6 spelling variants) → www.carringtonmortgage.com, `manual`.
 - Also: FIGURE LENDING (1,388) → www.figure.com, `manual`. Figure REIT / line-of-credit trusts (4 filings) left without (not asked).
+- Also: all 10 United Wholesale Mortgage names (UWM 1,505, UWM MTG 205, + 8 variants) → www.uwm.com, `manual`.
