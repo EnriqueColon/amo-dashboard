@@ -4592,3 +4592,12 @@ Owner wants a new pipeline: Miami-Dade Clerk circuit-civil foreclosure complaint
 - Also: NFM (22), NFM LENDING (4), NFM . DBA NFM LENDING (1) → nfmlending.com, `manual`.
 - Also: FREEDOM MORTGAGE (5,106) + FREEDOM MORGAGE (2) → www.freedommortgage.com, `manual`.
 - Owner (16 Nov): Hillsborough intake is forward-only from the 17 Nov 8 AM ET run; do NOT backfill the 10–12 Nov filings.
+
+### 16 Nov 2026 — Broward joins Manual Complaint Intake. LIVE 18:21 UTC (`f6e0632`, window fix `0e8580b`)
+- Owner chose "Skip on case page". Broward has no daily civil-case file; the case LIST comes from lis pendens (doc type LP) in the free Official Records SFTP feed (`collector/broward_complaints_intake.py`): CACE- circuit civil only, condo/HOA/association plaintiffs dropped, case year >= last year, recorded on/after `BROWARD_INTAKE_START` = 2026-11-13 (forward-only; feed's newest file that day). The lis pendens is not stored or read as a document; the COMPLAINT is downloaded by a person from browardclerk.org CaseSearchECA (CAPTCHA per search, answered by the person; anonymous view is redacted, amounts visible) and uploaded.
+- ~12–13 cases/day pass the filters (125 over the ~10 days of files on the server); no property type in the feed, so the person checks Case Type on the case page and uses Skip → Homestead. Broward feed lags 3–6 business days, so cases appear ~a week after filing.
+- New county-neutral reader `collector/complaints_read_case.py <case_id>` (server spawns it after any upload). `HAND_COUNTIES` = HILLSBOROUGH, BROWARD in `server/hillsborough-handpull.ts`; `VISIBLE_COMPLAINTS_SQL` hides both counties' rows from the Complaints tab until downloaded; `EMAIL_COMPLAINTS_SQL` keeps both out of the Monday email. Upload files `BR_<case>_COMPLAINT.pdf`.
+- Cron `10 13 * * * run_broward_complaints_intake.sh` (8:10 AM EST); crontab backup `collector/crontab.before_broward_intake.*`; dist backup `/root/dist.before_broward_intake.*`. First live run: 16 Broward cases (13 Nov).
+- Tested on a prod DB copy: 16 cases listed; one-case read of a stand-in complaint 17 s, $0.06. Trial copy removed.
+- Regression caught after deploy: the "first listed in 7 days" window pulled back Hillsborough's 2–9 Nov cases from the 10 Nov manual run (list went 8 → 12). Fixed in `0e8580b` (first-listed window applies to Broward only) and redeployed.
+- Hillsborough state end of day: all 6 band-3 cases filed 13 Nov uploaded (after 2 duplicate uploads were reset and redone); each file distinct and naming the right borrower; all 6 do not qualify.
