@@ -1,3 +1,41 @@
+# Rollback — 16 Nov 2026: Market Research link check, firm logos (phases 1–2 + hand fixes), Manual Complaint Intake (Hillsborough + Broward), nginx upload limit
+
+**State (all DEPLOYED 16 Nov 2026; droplet on `0e8580b` + docs).** Every deploy went through the `deploy` MCP tool (pull, build, pm2 restart) after the owner's "Yes, deploy". Before each, the old bundle was copied to `/root/dist.before_<name>.<UTC>`. To put a bundle back without rebuilding: `rm -rf /opt/amo-dashboard/dist && cp -a /root/dist.before_<name>.<TS> /opt/amo-dashboard/dist && pm2 restart amo-dashboard` (then reset the checkout to that commit so the next deploy does not bring the change back).
+
+| Change | Commit(s) | Old bundle | Data / server changes it made | Revert |
+|---|---|---|---|---|
+| Market Research link check (dead links repaired from the publisher's sitemap) | `8428b62` | `dist.before_research_links.20261116T125218Z` | `repair-research-links.ts --apply`: 3 URLs fixed in `intel.db` `research_feed_cache` and in the cached feed (`intel_cache` key `["research-feed-v2","2026-11-16"]`) | `cp /opt/amo-dashboard/intel.db.before_research_links.20261116T125218Z /opt/amo-dashboard/intel.db` (stop PM2 first), `git revert 8428b62`, build, restart |
+| Market Research: drop publishers' product pages | `316c523` | `dist.before_research_products.20261116T131731Z` | 4 CoStar product-page rows deleted from `research_feed_cache` + cached feed | restore `intel.db.before_research_products.20261116T131731Z`; `git revert 316c523` |
+| Firm logos phase 1 (banks via FDIC website; Website line on the firm card) | `a65a393`, `c6a3901` | `dist.before_logos.20261116T133128Z`, `dist.before_logos_banks.20261116T133935Z` | New tables only: `entity_websites`, `entity_logos`, `fdic_websites` (main DB). Nothing existing altered | `git revert c6a3901 a65a393`; tables can stay (unused) or `DROP TABLE` them |
+| Firm logos phase 2 (AI-suggested websites, reviewed by a person) | `a0b4101`, `ef94825`, `864562a` | `dist.before_logos_p2.20261116T135256Z` | New table `entity_website_suggestions` (425 rows: 275 accepted, 93 rejected, 57 none). Accepted ones wrote `entity_websites` rows with source `reviewed` (275). ~$12.75 est. OpenAI (owner's bill showed ~$8 that day) | `git revert 864562a ef94825 a0b4101`; to forget accepted sites: `DELETE FROM entity_websites WHERE source='reviewed'` |
+| Logos set by hand (owner-supplied sites) | data only | — | 27 `entity_websites` rows with source `manual` (Citizens… Freedom Mortgage; list in SESSION_LOG 16 Nov). **Citizens Bank** logo is a hand-cropped SVG stored in `entity_logos` (domain `www.citizensbank.com`, status ok; their site blocks the server and has only a 16 px icon) | `DELETE FROM entity_websites WHERE entity='<NAME>'` per firm; the Citizens SVG: `DELETE FROM entity_logos WHERE domain='www.citizensbank.com'` |
+| Manual Complaint Intake — Hillsborough (Data → Manual Complaint Intake, `#/complaint-intake`) | `2f794d9 abe1239 67c2a49 65fb8cf` | `dist.before_complaint_intake.20261116T165545Z` | Cron `0 13 * * * run_hillsborough_handpull_daily.sh` (crontab backup `collector/crontab.before_complaint_intake.20261116T165627Z`). Adds Hillsborough rows to `foreclosure_cases` (HC:…) and uploaded PDFs `complaints_pdfs/HC_*_COMPLAINT.pdf`. `complaints_extract.process_pending` gained an optional `case_ids` filter (no behaviour change without it) | Remove the cron line; `git revert` the commits; data: see below |
+| Find in HOVER + HOVER's three boxes | `a51b0d2` | `dist.before_find_in_hover.20261116T171102Z` | none | `git revert a51b0d2` |
+| Chrome helper (fills HOVER's search) | `4be877a` | `dist.before_hover_helper.20261116T171725Z` | `tools/hover-helper/`, zip served at `/api/complaint-intake/helper.zip`. Installed in each person's Chrome | `git revert 4be877a`; people remove "AMO Complaint Intake Helper" in `chrome://extensions` |
+| nginx upload limit 60 MB (fixes 413 on uploads; also Market Research uploads) | `e8dc763` (repo copy `docs/ops/nginx-amo-dashboard.conf`) | — | `/etc/nginx/sites-available/amo-dashboard`: `client_max_body_size 60m;` | `cp /root/nginx.amo-dashboard.before_body_size.20261116T172430Z /etc/nginx/sites-available/amo-dashboard && nginx -t && systemctl reload nginx` (puts back the 1 MB default: uploads over 1 MB fail again) |
+| Hillsborough complaints shown on the Complaints tab once uploaded; Monday email keeps them out | `2b3743d` | `dist.before_hc_visible.20261116T173254Z` | none (SQL filter `VISIBLE_COMPLAINTS_SQL`; new `EMAIL_COMPLAINTS_SQL`) | `git revert 2b3743d` |
+| Guardrails (duplicate file, name check, Replace file) | `4a51262` **reverted** by `6c8e65b` | never deployed | — | — (owner wants them after the process is settled) |
+| Manual Complaint Intake — Broward | `f6e0632`, window fix `0e8580b` | `dist.before_broward_intake.20261116T182028Z` | Cron `10 13 * * * run_broward_complaints_intake.sh` (crontab backup `collector/crontab.before_broward_intake.20261116T182109Z`). 16 rows `BR:CACE-…` in `foreclosure_cases` (county BROWARD); uploads `complaints_pdfs/BR_*`. New `collector/complaints_read_case.py` (server spawns it after any upload, both counties) | Remove the cron line; `git revert 0e8580b f6e0632`; data below |
+
+**Remove a county's intake data** (rows only ever added; no schema change):
+
+    cd /opt/amo-dashboard
+    # Broward
+    sqlite3 miami_dade_amo.db "DELETE FROM foreclosure_extractions WHERE case_id LIKE 'BR:%'; DELETE FROM foreclosure_reviews WHERE case_id LIKE 'BR:%'; DELETE FROM foreclosure_cases WHERE county='BROWARD';"
+    rm -f complaints_pdfs/BR_*.pdf
+    # Hillsborough (also removes the 24 rows from the owner's 10 Nov manual run)
+    sqlite3 miami_dade_amo.db "DELETE FROM foreclosure_extractions WHERE case_id LIKE 'HC:%'; DELETE FROM foreclosure_reviews WHERE case_id LIKE 'HC:%'; DELETE FROM foreclosure_cases WHERE county='HILLSBOROUGH';"
+    rm -f complaints_pdfs/HC_*.pdf
+    pm2 restart amo-dashboard
+
+**Hand data fixes on 16 Nov:** two wrong uploads (one complaint on two cases) were reset to `pending`; the stray copies are kept at `/root/HC_26-CA-012256_wrong_upload_culver_copy.pdf` and `/root/HC_26-CA-012258_wrong_upload_nevaeh_copy.pdf` (both cases were then uploaded correctly). Safe to delete.
+
+**Leftovers to clean up:** `/root/nal/` (~440 MB: Florida DOR 2026 Broward property roll + match script, for the Homestead pre-filter test; delete if the owner does not go ahead). Trial worktrees `/root/p2trial`, `/root/hctrial`, `/root/brtrial` and their DB copies were already removed.
+
+**Guardrails:** never restart PM2 while `normalize.py` is running (checked before every deploy above). The intake jobs never contact HOVER or the Broward case search; do not add automation there (bot walls / CAPTCHA). The Chrome helper only fills HOVER's search boxes; the person clicks Search.
+
+---
+
 # Rollback — Monroe, Leon and Citrus complaints collectors; lower-band reading; Miami-Dade fetch county filter (10 Nov 2026)
 
 **State (DEPLOYED 10 Nov 2026; droplet on `7405c85`+docs):** three county collectors writing to `foreclosure_cases` / `foreclosure_extractions`

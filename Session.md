@@ -121,3 +121,16 @@ Pick up at: grouping of same-day bulk filings (yes/no), then feed ordering date,
 - Not yet covered by the hover/card rules: chart legends, the main Bank Stress table's secondary tables and other pages' tables. Candidates for a follow-up pass.
 
 - **Result pills explain themselves (3 Nov 2026).** Hover over Qualifies / Does not qualify / Not a mortgage foreclosure / Cannot tell / No public complaint shows the reason in words, built from the same values the rules use.
+
+---
+
+## Session 3 — 2026-11-16 (UI decisions made during the logos and complaint-intake work; built and deployed)
+
+- **Logos instead of initials.** Firms show their own logo wherever a firm avatar appears (Target Reporting feed cards and Following list, Targets watchlist, firm card header); initials remain the fallback. The logo comes from the firm's website: FDIC's listed site for banks, otherwise a site typed by hand or an AI suggestion a person accepted. Icons under 32 px are refused (they looked blurry).
+- **Website line on the firm card.** Shows the website and where it came from ("from FDIC", "entered by hand", "suggested, confirmed by hand"), with Change, No website, Automatic and a Suggest button (AI search, ~3 cents, confirmed with Use it / Not it).
+- **Suggested websites card on the Targets page.** Review list (Accept / Edit / Reject, logo preview, confidence and "name on site" pills), name-on-site rows first, 25 at a time. Owner reviewed all 368 the same day.
+- **New Data-menu page: Manual Complaint Intake** (`#/complaint-intake`, "Trial" badge). Owner rejected "Complaint Uploads: Hillsborough": the name must not name a county, so other hand-download counties can join. The page lists the counties it covers (Hillsborough, Broward) and tags every row with its county.
+- **Intake page layout:** To download (per case: county tag, case number, a Find button, the parties, county-specific steps, Upload PDF and drag-and-drop onto the row, Skip with reasons), Uploaded and read (verdict pill, principal, PDF link, reason), Skipped (with Undo), counts and a by-day table. Uploaded complaints then appear on the Complaints tab like any county; cases still waiting do not.
+- **Find buttons:** HOVER has no address per case and its search takes Year / Court Type / Number in three boxes, so Hillsborough rows show those three values and "Find in HOVER" opens the search (a Chrome helper, downloadable from the page, fills the boxes; the person clicks Search). Broward rows: "Find in Broward Clerk" copies the case number and opens the Clerk's search; the row says to check Case Type and Skip Homestead.
+- **Owner preferences recorded:** drag the download straight from Chrome's download bubble onto the row (no folder step); no automated clicking on the Clerks' sites; guardrails (duplicate-file refusal, name check, Replace file) deferred until the process is settled; complaints only (the lis pendens is used only to find Broward cases, never shown as the document).
+- **Open:** Broward Homestead pre-filter (match borrowers to the state property roll's homestead flag; would halve Broward's list) waits on the owner's spot-check of 5 cases (17 Nov).
