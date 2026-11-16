@@ -4612,3 +4612,4 @@ Owner wants a new pipeline: Miami-Dade Clerk circuit-civil foreclosure complaint
 - Also: PARAMOUNT RESIDENTIAL MORTGAGE (738) + 3 misspelled "…MTG GROUP" names → www.prmg.net, `manual`, 180 px. Paramount Capital Lending / Paramount Bank left out (different firms).
 - 16 Nov 2026 deployed `9593de2`: Entities tab shows grey initials where a firm has no logo (owner chose initials over type icons / coloured initials). dist backup `/root/dist.before_entities_initials.*`.
 - Also: BENWORTH CAPITAL PARTNERS (217) → benworthcapital.com (same site/logo as target BENWORTH CAPITAL), `manual`.
+- Also: all 11 loanDepot names (LOANDEPOT COM 696, LOANDEPOT DOT COM 8, + 9 variants) → www.loandepot.com, `manual`, SVG logo.
