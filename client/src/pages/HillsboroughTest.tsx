@@ -1,7 +1,7 @@
 // Hillsborough complaints, HAND-PULL TEST (owner, 16 Nov 2026: three-day trial before deciding to integrate).
 // The Clerk's site (HOVER) blocks programs, so a person downloads each complaint and drops it here;
 // the server reads it straight away with the same reader and $500,000 test as every other county
-// (server/hillsborough-handpull.ts). Menu: Data → Complaint Uploads: Hillsborough (#/complaint-uploads).
+// (server/hillsborough-handpull.ts). Menu: Data → Manual Complaint Intake (#/complaint-intake); built county-neutral in name so other hand-pulled counties can join.
 import { useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
@@ -58,6 +58,7 @@ function TodoRow({ r, onDone }: { r: any; onDone: () => void }) {
     >
       <div className="flex-1 min-w-0 text-xs">
         <div className="flex items-center gap-2 flex-wrap">
+          <span className="rounded bg-primary/10 text-primary px-1.5 py-0.5 text-[10px] font-medium">Hillsborough</span>
           <span className="font-mono font-semibold text-sm">{r.case_number}</span>
           <button onClick={copy} className="inline-flex items-center gap-0.5 text-[11px] text-primary hover:underline" title="Copy the case number, then paste it into HOVER's case search">
             {copied ? <><Check size={11} />Copied</> : <><Copy size={11} />Copy</>}
@@ -139,7 +140,8 @@ export default function HillsboroughTest() {
   return (
     <div className="max-w-5xl mx-auto p-4 space-y-4">
       <div>
-        <h1 className="text-lg font-semibold">Complaint Uploads: Hillsborough <span className="ml-1 align-middle text-xs px-2 py-0.5 rounded bg-primary/15 text-primary font-medium">Trial</span></h1>
+        <h1 className="text-lg font-semibold">Manual Complaint Intake <span className="ml-1 align-middle text-xs px-2 py-0.5 rounded bg-primary/15 text-primary font-medium">Trial</span></h1>
+        <p className="text-sm mt-1">For counties whose Clerk site can't be read automatically, so a person downloads each complaint. <b>Counties: Hillsborough.</b></p>
         <p className="text-xs text-muted-foreground mt-1">
           A three-day trial. Each morning the system lists new Hillsborough foreclosures that could qualify ($250,000-or-more band).
           For each one: <b>Copy</b> the case number, open <a href={HOVER} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline inline-flex items-center gap-0.5">HOVER<ExternalLink size={10} /></a>,
