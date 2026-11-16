@@ -4609,3 +4609,4 @@ Owner wants a new pipeline: Miami-Dade Clerk circuit-civil foreclosure complaint
 - Also: FIGURE LENDING (1,388) → www.figure.com, `manual`. Figure REIT / line-of-credit trusts (4 filings) left without (not asked).
 - Also: all 10 United Wholesale Mortgage names (UWM 1,505, UWM MTG 205, + 8 variants) → www.uwm.com, `manual`.
 - UWM logo: uwm.com serves only a 16 px favicon, so the blue "UWM" letters were cropped by hand from its header logo (contentstack uwm-logo.svg) and stored as SVG in `entity_logos` (domain www.uwm.com, status ok; never refetched). Same treatment as Citizens.
+- Also: PARAMOUNT RESIDENTIAL MORTGAGE (738) + 3 misspelled "…MTG GROUP" names → www.prmg.net, `manual`, 180 px. Paramount Capital Lending / Paramount Bank left out (different firms).
