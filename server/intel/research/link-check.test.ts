@@ -41,3 +41,14 @@ test("sitemap parsing: urlset and index", () => {
   assert.deepEqual(set, { locs: ["https://x.com/a", "https://x.com/b?x=1&y=2"], isIndex: false })
   assert.equal(parseSitemap('<sitemapindex><sitemap><loc>https://x.com/s1.xml</loc></sitemap></sitemapindex>').isIndex, true)
 })
+
+test("product/sales pages are recognised; research and articles are not", async () => {
+  const { isProductPage } = await import("./link-check")
+  assert.ok(isProductPage("https://www.costar.com/products/market-analytics"))
+  assert.ok(isProductPage("https://www.costar.com/products/fund-data"))
+  assert.ok(isProductPage("https://www.example.com/en/solutions/data"))
+  assert.ok(!isProductPage("https://www.costar.com/article/1210761604/commercial-real-estates-price-recovery-splits"))
+  assert.ok(!isProductPage("https://www.colliers.com/en/research/nrep-usofc-us-office-market-outlook-report-q3-2026"))
+  assert.ok(!isProductPage("https://www.costar.com/sites/costar.com.na/files/2026-02/MarketActivityTrackerQ42025.pdf"))
+  assert.ok(!isProductPage("https://www.cbre.com/insights/reports/us-retail-services-capabilities"))
+})

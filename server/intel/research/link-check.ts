@@ -124,6 +124,21 @@ export function parseSitemap(xml: string): { locs: string[]; isIndex: boolean } 
   return { locs, isIndex: /<sitemapindex[\s>]/i.test(xml) }
 }
 
+/**
+ * A publisher's sales page rather than research (16 Nov 2026: the search returned
+ * costar.com/products/market-analytics, /fund-data, /custom-reporting as "reports").
+ * Matches a path segment such as /products/, /solutions/, /pricing, /contact-us,
+ * also after a locale segment (/en/products/...). Such reports are left out of the feed.
+ */
+export function isProductPage(url: string): boolean {
+  try {
+    const segs = new URL(url).pathname.toLowerCase().split("/").filter(Boolean)
+    return segs.some((s) => /^(products?|solutions?|services|pricing|platform|demo|request-a-demo|contact|contact-us|about|about-us)$/.test(s))
+  } catch {
+    return false
+  }
+}
+
 // ── network ──────────────────────────────────────────────────────────────────
 
 type Probe = { status: number | null; finalUrl: string; html: string }

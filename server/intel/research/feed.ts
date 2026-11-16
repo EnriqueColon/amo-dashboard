@@ -2,7 +2,7 @@ import { unstable_cache } from "../cache-shim"
 import { callOpenAiJson, getOpenAiApiKey } from "../openai"
 import { newsCalendarDayET } from "@shared/news/news-tab-cache"
 import { loadFeedArchive, saveFeedReports } from "./db"
-import { checkReportLinks, summarize } from "./link-check"
+import { checkReportLinks, isProductPage, summarize } from "./link-check"
 
 export type ResearchReport = {
   id: string
@@ -239,10 +239,14 @@ async function fetchResearchFeedUncached(): Promise<ResearchFeedResponse> {
   const results = await runWithConcurrency(tasks, 5)
   const allReports = results.flat()
 
-  // Deduplicate fresh results by title (case-insensitive)
+  // Deduplicate fresh results by title (case-insensitive); leave out sales/product pages.
   const seen = new Set<string>()
   const deduped: ResearchReport[] = []
   for (const r of allReports) {
+    if (r.url && isProductPage(r.url)) {
+      console.log(`[intel] research: left out product page ${r.publisher} "${r.title}" ${r.url}`)
+      continue
+    }
     const key = r.title.toLowerCase().trim()
     if (seen.has(key)) continue
     seen.add(key)
