@@ -95,7 +95,8 @@ export function registerHillsboroughHandpullRoutes(app: Express) {
              NULL AS decision, NULL AS review_address, NULL AS review_note
       FROM foreclosure_cases c
       LEFT JOIN foreclosure_extractions e ON e.case_id = c.case_id AND e.model = ?
-      WHERE ${HAND_SQL} AND (c.filing_date >= date('now', ?) OR substr(c.first_seen, 1, 10) >= date('now', ?))
+      -- Broward's dates are the lis pendens recording (a week behind), so it goes by the day we listed it.
+      WHERE ${HAND_SQL} AND (c.filing_date >= date('now', ?) OR (c.county = 'BROWARD' AND substr(c.first_seen, 1, 10) >= date('now', ?)))
       ORDER BY c.filing_date DESC, c.case_number`).all(MODEL, `-${WINDOW_DAYS} day`, `-${WINDOW_DAYS} day`) as (Row & { last_attempt: string | null })[]
     const out = rows.map(r => {
       let meta: any = null
