@@ -4618,3 +4618,4 @@ Owner wants a new pipeline: Miami-Dade Clerk circuit-civil foreclosure complaint
 - Also: LONGBRIDGE FINANCIAL (416) + LONGBRIDGE FIN (2) → longbridge-financial.com, `manual`.
 - Also: PACIFIC LIFE INSURANCE (320) + PACIFIC LIFE INVESTOR (1) → www.pacificlife.com, `manual`, 180 px.
 - Also: all 7 Lennar names (LENNAR MORTGAGE 337, LENNAR MTG 52, LENNAR HOMES 7, + 4 variants) → www.lennar.com, `manual`, 180 px.
+- Also: M&T BANK (340), MANUFACTURERS AND TRADERS TRUST (13), M&T REALTY CAPITAL (3+1), M AND T BANK, M&T HOLDING → www.mtb.com, `manual`, 300 px.
