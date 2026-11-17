@@ -8,6 +8,10 @@
  * then fetches the Street View Static image and caches it on disk (STREETVIEW_CACHE_DIR), so each address is
  * billed at most once. A "no imagery" answer is cached too. Addresses that do not start with a house number
  * ("XXX Bermuda Road", redacted or partial) are refused, since Google would show some other spot on the street.
+ *
+ *   GET /api/staticmap?address=...      -> image/png, a street map with a red pin on the address (Maps Static API,
+ *                                          enabled on the key 17 Nov 2026). Google places the pin from the address
+ *                                          itself; business and transit labels are hidden. Cached on disk the same way.
  */
 import type { Express, Request, Response } from 'express'
 import crypto from 'crypto'
@@ -20,6 +24,23 @@ const BASE = 'https://maps.googleapis.com/maps/api/streetview'
 export function normalizeAddress(a: unknown): string | null {
   const s = String(a ?? '').replace(/\s+/g, ' ').trim()
   return /^\d+[A-Za-z]?\b/.test(s) && s.length <= 200 ? s : null
+}
+
+const STATIC_MAP = 'https://maps.googleapis.com/maps/api/staticmap'
+
+/**
+ * The Maps Static API query for one address (without the key): 374x235, the hover card's frame exactly, at double
+ * resolution. Any wider and the card crops Google's logo and "Map data" credit, which must stay visible.
+ */
+export function staticMapQuery(address: string): string {
+  const p = new URLSearchParams()
+  p.set('size', '374x235')
+  p.set('scale', '2')
+  p.set('zoom', '16')
+  p.set('markers', `color:red|${address}`)
+  p.append('style', 'feature:poi|visibility:off')
+  p.append('style', 'feature:transit|visibility:off')
+  return p.toString()
 }
 
 export function registerStreetViewRoutes(app: Express) {
@@ -54,6 +75,28 @@ export function registerStreetViewRoutes(app: Express) {
       return send()
     } catch (e: any) {
       return res.status(502).json({ error: 'street view request failed' })
+    }
+  })
+
+  app.get('/api/staticmap', async (req: Request, res: Response) => {
+    const key = process.env.GOOGLE_MAPS_API_KEY
+    const address = normalizeAddress(req.query.address)
+    if (!key) return res.status(404).json({ error: 'maps not configured' })
+    if (!address) return res.status(404).json({ error: 'no street address' })
+    const id = crypto.createHash('sha256').update(address.toLowerCase()).digest('hex')
+    const png = path.join(CACHE_DIR, id + '.map.png')
+    const send = () => res.set('Cache-Control', 'private, max-age=2592000').type('image/png').sendFile(png)
+    if (fs.existsSync(png)) return send()
+    try {
+      fs.mkdirSync(CACHE_DIR, { recursive: true })
+      const img = await fetch(`${STATIC_MAP}?${staticMapQuery(address)}&key=${encodeURIComponent(key)}`)
+      if (!img.ok || !(img.headers.get('content-type') ?? '').startsWith('image/')) {
+        return res.status(502).json({ error: `map image request failed (${img.status})` })
+      }
+      fs.writeFileSync(png, Buffer.from(await img.arrayBuffer()))
+      return send()
+    } catch {
+      return res.status(502).json({ error: 'map request failed' })
     }
   })
 }
