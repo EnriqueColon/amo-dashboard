@@ -1,12 +1,17 @@
 {
   "manifest_version": 3,
   "name": "AMO Complaint Intake Helper",
-  "version": "1.0.0",
-  "description": "Fills HOVER's case-number search when opened from the AMO tool's Manual Complaint Intake page. You still click Search.",
+  "version": "1.1.0",
+  "description": "Opened from the AMO tool's Manual Complaint Intake page: fills HOVER's case-number search, and on Broward Clerk pages shows the Case Type and highlights the Complaint. You still click Search and Download.",
   "content_scripts": [
     {
       "matches": ["https://hover.hillsclerk.com/html/case/caseSearch.html*"],
       "js": ["fill-case-search.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://www.browardclerk.org/Web2/CaseSearchECA/*", "https://browardclerk.org/Web2/CaseSearchECA/*"],
+      "js": ["broward-clerk.js"],
       "run_at": "document_idle"
     }
   ]

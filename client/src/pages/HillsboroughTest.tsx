@@ -22,8 +22,13 @@ function hoverParts(caseNumber: string) {
   return { year: m[1].slice(-2), type: m[2].toUpperCase(), number: m[3].padStart(6, '0').slice(-6) };
 }
 
-// Broward's case search (CAPTCHA on each search, answered by the person). No per-case address either.
-const BROWARD_SEARCH = 'https://www.browardclerk.org/Web2/CaseSearchECA/Index/';
+// Broward's case search (Cloudflare check on each search, done by the person). No per-case address, but the
+// Clerk's own page prefills the Case Number tab from `CitationNumber` (their parameter name; checked 17 Nov 2026).
+// It wants the number with no dashes (CACE26018535). `amo=1` is read only by our Chrome add-on, which adds a
+// "click Search" banner and, on the case page, shows the Case Type and highlights the Complaint.
+const brClerkNumber = (caseNumber: string) => caseNumber.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+const browardSearchUrl = (caseNumber: string) =>
+  `https://www.browardclerk.org/Web2/CaseSearchECA/Index/?AccessLevel=ANONYMOUS&CitationNumber=${encodeURIComponent(brClerkNumber(caseNumber))}&amo=1`;
 const COUNTY_LABEL: Record<string, string> = { HILLSBOROUGH: 'Hillsborough', BROWARD: 'Broward' };
 
 const usd0 = (v: number | null) => (v == null ? null : v.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }));
@@ -62,10 +67,10 @@ function TodoRow({ r, onDone }: { r: any; onDone: () => void }) {
   const broward = r.county === 'BROWARD';
   const parts = broward ? null : hoverParts(r.case_number);
   // Hillsborough: copies the 6-digit Number and opens HOVER's case search (the Chrome helper fills the boxes).
-  // Broward: copies the whole case number and opens the Clerk's case search.
+  // Broward: opens the Clerk's case search with the number already filled in (copied too, as a fallback).
   const openSearch = async () => {
-    try { await navigator.clipboard.writeText(broward ? r.case_number : parts ? parts.number : r.case_number); setCopied(true); setTimeout(() => setCopied(false), 2500); } catch { /* clipboard blocked */ }
-    window.open(broward ? BROWARD_SEARCH : hoverSearchUrl(r.case_number), broward ? 'broward-search' : 'hover-search');
+    try { await navigator.clipboard.writeText(broward ? brClerkNumber(r.case_number) : parts ? parts.number : r.case_number); setCopied(true); setTimeout(() => setCopied(false), 2500); } catch { /* clipboard blocked */ }
+    window.open(broward ? browardSearchUrl(r.case_number) : hoverSearchUrl(r.case_number), broward ? 'broward-search' : 'hover-search');
   };
   const drop = (e: React.DragEvent) => {
     e.preventDefault(); setOver(false);
@@ -82,9 +87,9 @@ function TodoRow({ r, onDone }: { r: any; onDone: () => void }) {
           <span className="rounded bg-primary/10 text-primary px-1.5 py-0.5 text-[10px] font-medium">{COUNTY_LABEL[r.county] ?? r.county}</span>
           <span className="font-mono font-semibold text-sm">{r.case_number}</span>
           <button onClick={openSearch} className="inline-flex items-center gap-0.5 text-[11px] text-primary hover:underline"
-            title={broward ? "Opens the Broward Clerk's case search and copies the case number for pasting"
+            title={broward ? "Opens the Broward Clerk's case search with the case number filled in; just click Search"
               : "Opens HOVER's case-number search. With the Chrome helper the boxes are filled for you; without it, the Number is copied for pasting"}>
-            {copied ? <><Check size={11} />Copied, paste it in the search</> : <><ExternalLink size={11} />{broward ? 'Find in Broward Clerk' : 'Find in HOVER'}</>}
+            {copied ? <><Check size={11} />{broward ? 'Opened, click Search' : 'Copied, paste it in the search'}</> : <><ExternalLink size={11} />{broward ? 'Find in Broward Clerk' : 'Find in HOVER'}</>}
           </button>
           <span className="text-muted-foreground">{broward ? 'Lis pendens recorded' : 'Filed'} {r.filing_date}</span>
           <span className="rounded bg-muted px-1.5 py-0.5 text-[10px]">{r.case_type}</span>
@@ -97,7 +102,7 @@ function TodoRow({ r, onDone }: { r: any; onDone: () => void }) {
         )}
         {broward && (
           <p className="mt-1 text-[11px] text-muted-foreground">
-            On the case page check <b className="text-foreground">Case Type</b>: Homestead can't qualify, so Skip it. Download the Complaint for Commercial or Non-Homestead.
+            In the Clerk: <b className="font-mono text-foreground">{brClerkNumber(r.case_number)}</b> is filled in, click Search and open the case. Check <b className="text-foreground">Case Type</b>: Homestead can't qualify, so Skip it. Download the Complaint for Commercial or Non-Homestead (the Chrome helper shows the type and highlights the Complaint).
           </p>
         )}
         {error && <p className="mt-0.5 text-[11px] text-red-600">{error}</p>}
@@ -181,9 +186,9 @@ export default function HillsboroughTest() {
           A trial. Each morning the system lists new foreclosures to download. <b>Hillsborough:</b> only the $250,000-or-more band, from the Clerk's daily case file.
           {' '}<b>Broward:</b> lender foreclosures found through the county's daily records file (about a week behind; no property type, so check it on the case page and Skip Homestead).
           {' '}<b>Hillsborough</b>, for each one: click <b>Find in HOVER</b> (opens <a href={HOVER} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline inline-flex items-center gap-0.5">HOVER<ExternalLink size={10} /></a>'s case search; with the Chrome helper the boxes are filled, so just click Search),
-          download the <b>Complaint</b>. <b>Broward:</b> click <b>Find in Broward Clerk</b>, paste the case number, open the case, check its type, download the <b>Complaint</b>. Then drag it from Chrome's download bubble onto the row (or click <b>Upload PDF</b>).
+          download the <b>Complaint</b>. <b>Broward:</b> click <b>Find in Broward Clerk</b> (the case number is filled in), click Search, open the case; with the Chrome helper the Case Type is shown in a banner and the <b>Complaint</b> is highlighted, so download it or Skip a Homestead. Then drag it from Chrome's download bubble onto the row (or click <b>Upload PDF</b>).
           {' '}<a href="/api/complaint-intake/helper.zip" className="text-primary hover:underline font-medium">Get the Chrome helper</a>{' '}
-          <span title="Unzip it, open chrome://extensions, turn on Developer mode, click Load unpacked and choose the hover-helper folder.">(install: unzip, chrome://extensions, Developer mode, Load unpacked)</span>. It is read automatically in a few minutes (scanned complaints take longer).
+          <span title="Unzip it, open chrome://extensions, turn on Developer mode, click Load unpacked and choose the hover-helper folder. Already installed? Download it again, replace the folder and click the reload arrow on the add-on.">(install: unzip, chrome://extensions, Developer mode, Load unpacked)</span>. It is read automatically in a few minutes (scanned complaints take longer).
           Once read, each one also appears on the Complaints tab (not yet in the Monday email).
         </p>
       </div>
