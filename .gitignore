@@ -60,3 +60,6 @@ local_complaints_week/
 
 # Street View photos cached by server/streetview.ts
 streetview_cache/
+
+# Broward property roll source (FL DOR NAL zip/csv, ~440 MB) for collector/broward_property_roll.py --load (17 Nov 2026)
+data_sources/

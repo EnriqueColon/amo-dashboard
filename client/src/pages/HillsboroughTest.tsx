@@ -5,7 +5,7 @@
 import { useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
-import { Upload, ExternalLink, Check, Loader2, AlertTriangle, FileText, RotateCcw, X } from 'lucide-react';
+import { Upload, ExternalLink, Check, Loader2, AlertTriangle, FileText, RotateCcw, X, ChevronDown, ChevronRight, Copy } from 'lucide-react';
 
 const KEY = ['/api/hillsborough-test'];
 const HOVER = 'https://hover.hillsclerk.com/';
@@ -29,7 +29,16 @@ function hoverParts(caseNumber: string) {
 const brClerkNumber = (caseNumber: string) => caseNumber.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
 const browardSearchUrl = (caseNumber: string) =>
   `https://www.browardclerk.org/Web2/CaseSearchECA/Index/?AccessLevel=ANONYMOUS&CitationNumber=${encodeURIComponent(brClerkNumber(caseNumber))}&amo=1`;
+const BROWARD_PARTY_SEARCH = 'https://www.browardclerk.org/Web2/CaseSearchECA/Index/?AccessLevel=ANONYMOUS';
 const COUNTY_LABEL: Record<string, string> = { HILLSBOROUGH: 'Hillsborough', BROWARD: 'Broward' };
+
+// Ranking of the To download list (owner, 17 Nov 2026). Nothing is hidden: tier 4 sits in a collapsed section.
+const TIER: Record<number, { label: string; tip: string; style: string }> = {
+  1: { label: 'Non-Homestead: certain', tip: 'A company borrower or a non-residential property can not be a Homestead case', style: 'bg-emerald-100 text-emerald-800' },
+  2: { label: 'Non-Homestead: likely', tip: 'The state property roll shows no homestead exemption on the property', style: 'bg-emerald-50 text-emerald-700' },
+  3: { label: 'Type unknown', tip: 'No clear match in the state property roll: check the Case Type on the case page', style: 'bg-amber-100 text-amber-800' },
+  4: { label: 'Likely Homestead', tip: "The property roll shows a homestead exemption. Check the Case Type: the lender's choice decides, so a few turn out Non-Homestead", style: 'bg-muted text-muted-foreground' },
+};
 
 const usd0 = (v: number | null) => (v == null ? null : v.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }));
 const et = (iso: string | null) => (iso ? new Date(iso).toLocaleString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) + ' ET' : '');
@@ -86,24 +95,37 @@ function TodoRow({ r, onDone }: { r: any; onDone: () => void }) {
         <div className="flex items-center gap-2 flex-wrap">
           <span className="rounded bg-primary/10 text-primary px-1.5 py-0.5 text-[10px] font-medium">{COUNTY_LABEL[r.county] ?? r.county}</span>
           <span className="font-mono font-semibold text-sm">{r.case_number}</span>
-          <button onClick={openSearch} className="inline-flex items-center gap-0.5 text-[11px] text-primary hover:underline"
+          {!r.no_case_number && <button onClick={openSearch} className="inline-flex items-center gap-0.5 text-[11px] text-primary hover:underline"
             title={broward ? "Opens the Broward Clerk's case search with the case number filled in; just click Search"
               : "Opens HOVER's case-number search. With the Chrome helper the boxes are filled for you; without it, the Number is copied for pasting"}>
             {copied ? <><Check size={11} />{broward ? 'Opened, click Search' : 'Copied, paste it in the search'}</> : <><ExternalLink size={11} />{broward ? 'Find in Broward Clerk' : 'Find in HOVER'}</>}
-          </button>
+          </button>}
           <span className="text-muted-foreground">{broward ? 'Lis pendens recorded' : 'Filed'} {r.filing_date}</span>
           <span className="rounded bg-muted px-1.5 py-0.5 text-[10px]">{r.case_type}</span>
+          {TIER[r.tier] && <span title={TIER[r.tier].tip} className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${TIER[r.tier].style}`}>{TIER[r.tier].label}</span>}
+          {r.note?.startsWith('Back on the list') && <span className="rounded-full bg-sky-100 text-sky-800 px-2 py-0.5 text-[10px] font-medium" title="It was skipped as not online yet; check again">{r.note}</span>}
         </div>
+        {r.tier_reason && <p className="mt-0.5 text-[11px] text-muted-foreground" title="Why it is ranked here">{r.tier_reason}</p>}
         <p className="mt-0.5 truncate" title={r.case_style || ''}>{r.case_style}</p>
         {parts && (
           <p className="mt-1 text-[11px] text-muted-foreground">
             In HOVER: Year <b className="font-mono text-foreground">{parts.year}</b> · Court Type <b className="font-mono text-foreground">{parts.type}</b> · Number <b className="font-mono text-foreground">{parts.number}</b>
           </p>
         )}
-        {broward && (
+        {broward && r.no_case_number && <NoNumberHelp r={r} />}
+        {broward && !r.no_case_number && (
           <p className="mt-1 text-[11px] text-muted-foreground">
-            <b className="text-foreground">Type not known yet</b> (the county file doesn't say). Click Find (<b className="font-mono text-foreground">{brClerkNumber(r.case_number)}</b> is filled in), click Search, open the case and look at <b className="text-foreground">Case Type</b>:
-            {' '}if it says <b className="text-foreground">Homestead</b>, don't download, choose Skip → Homestead; if <b className="text-foreground">Non-Homestead</b> or <b className="text-foreground">Commercial</b>, download the Complaint. With the Chrome helper, a red or green banner on the case page tells you which.
+            {r.tier <= 2 ? <>
+              Click Find (<b className="font-mono text-foreground">{brClerkNumber(r.case_number)}</b> is filled in), click Search, open the case and download the <b className="text-foreground">Complaint</b>.
+              {' '}Glance at the <b className="text-foreground">Case Type</b> first: if it ever says Homestead, choose Skip → Homestead instead.
+            </> : r.tier >= 4 ? <>
+              <b className="text-foreground">Probably Homestead, still check:</b> click Find (<b className="font-mono text-foreground">{brClerkNumber(r.case_number)}</b> is filled in), click Search, open the case.
+              {' '}If the <b className="text-foreground">Case Type</b> says Homestead, choose Skip → Homestead; if it says Non-Homestead or Commercial, download the Complaint.
+            </> : <>
+              <b className="text-foreground">Type not known yet.</b> Click Find (<b className="font-mono text-foreground">{brClerkNumber(r.case_number)}</b> is filled in), click Search, open the case and look at the <b className="text-foreground">Case Type</b>:
+              {' '}if it says Homestead, choose Skip → Homestead; if Non-Homestead or Commercial, download the Complaint.
+            </>}
+            {' '}With the Chrome helper, a red or green banner on the case page tells you which.
           </p>
         )}
         {error && <p className="mt-0.5 text-[11px] text-red-600">{error}</p>}
@@ -128,6 +150,27 @@ function TodoRow({ r, onDone }: { r: any; onDone: () => void }) {
         </select>
       </div>
     </li>
+  );
+}
+
+/** A lis pendens with no case number: find the case by party name in the Clerk's search. */
+function NoNumberHelp({ r }: { r: any }) {
+  const [copied, setCopied] = useState<string | null>(null);
+  const names: string[] = [...(r.defendants ?? []).slice(0, 1), ...(r.plaintiffs ?? []).slice(0, 1)];
+  const copy = async (n: string) => { try { await navigator.clipboard.writeText(n); setCopied(n); setTimeout(() => setCopied(null), 2000); } catch { /* blocked */ } };
+  return (
+    <div className="mt-1 text-[11px] text-muted-foreground">
+      <b className="text-foreground">No case number on the lis pendens.</b> Find it by party name:{' '}
+      <a href={BROWARD_PARTY_SEARCH} target="broward-search" rel="noopener noreferrer" className="text-primary hover:underline inline-flex items-center gap-0.5">Broward Clerk search<ExternalLink size={10} /></a>
+      {' '}(Party Name or Business Name tab), then check it is a foreclosure filed recently.
+      <span className="ml-1 inline-flex gap-1 flex-wrap">
+        {names.map(n => (
+          <button key={n} onClick={() => copy(n)} className="inline-flex items-center gap-0.5 rounded border border-border px-1.5 py-0.5 hover:bg-muted">
+            {copied === n ? <Check size={10} /> : <Copy size={10} />}{n}
+          </button>
+        ))}
+      </span>
+    </div>
   );
 }
 
@@ -165,6 +208,36 @@ function DoneRow({ r, onDone }: { r: any; onDone: () => void }) {
   );
 }
 
+/** To download, ranked: work the top first; Likely Homestead stays listed, collapsed (nothing is hidden). */
+function TodoSections({ todo, onDone }: { todo: any[]; onDone: () => void }) {
+  const [showHomestead, setShowHomestead] = useState(false);
+  const groups = [
+    { key: 'first', title: 'Work these first', sub: 'Commercial or Non-Homestead, certain or likely', rows: todo.filter(r => r.tier <= 2) },
+    { key: 'unknown', title: 'Type unknown', sub: 'check the Case Type on the case page', rows: todo.filter(r => r.tier === 3) },
+  ];
+  const homestead = todo.filter(r => r.tier >= 4);
+  return (
+    <div>
+      {groups.filter(g => g.rows.length).map(g => (
+        <div key={g.key}>
+          <div className="px-4 py-1.5 bg-muted/40 text-[11px] font-semibold border-b border-border/40">{g.title} <span className="font-normal text-muted-foreground">· {g.rows.length} · {g.sub}</span></div>
+          <ul className="divide-y divide-border/40">{g.rows.map(r => <TodoRow key={r.case_id} r={r} onDone={onDone} />)}</ul>
+        </div>
+      ))}
+      {homestead.length > 0 && (
+        <div>
+          <button onClick={() => setShowHomestead(v => !v)} className="w-full text-left px-4 py-1.5 bg-muted/40 text-[11px] font-semibold border-y border-border/40 inline-flex items-center gap-1"
+            title="Still listed so nothing is missed: open the case and check the Case Type; Skip → Homestead if it says Homestead">
+            {showHomestead ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+            Likely Homestead <span className="font-normal text-muted-foreground">· {homestead.length} · the property roll shows a homestead exemption; still check each one</span>
+          </button>
+          {showHomestead && <ul className="divide-y divide-border/40">{homestead.map(r => <TodoRow key={r.case_id} r={r} onDone={onDone} />)}</ul>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function HillsboroughTest() {
   const qc = useQueryClient();
   const { data, isLoading, error } = useQuery({
@@ -185,7 +258,7 @@ export default function HillsboroughTest() {
         <p className="text-sm mt-1">For counties whose Clerk site can't be read automatically, so a person downloads each complaint. <b>Counties: Hillsborough, Broward.</b></p>
         <p className="text-xs text-muted-foreground mt-1">
           A trial. Each morning the system lists new foreclosures to download. <b>Hillsborough:</b> only the $250,000-or-more band, from the Clerk's daily case file.
-          {' '}<b>Broward:</b> lender foreclosures found through the county's daily records file (about a week behind). The county file doesn't say whether a case is Homestead, so every Broward case is listed; you find out on the Clerk's case page and Skip the Homestead ones.
+          {' '}<b>Broward:</b> lender foreclosures found through the county's daily records file (about a week behind). The county file doesn't say whether a case is Homestead, so every Broward case is listed, ranked by the state property roll: work <b>Work these first</b> from the top; <b>Likely Homestead</b> is collapsed at the bottom but still listed. The Clerk's Case Type decides: Skip the Homestead ones. A case skipped as <b>Not online yet</b> comes back after 3 days.
           {' '}<b>Hillsborough</b>, for each one: click <b>Find in HOVER</b> (opens <a href={HOVER} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline inline-flex items-center gap-0.5">HOVER<ExternalLink size={10} /></a>'s case search; with the Chrome helper the boxes are filled, so just click Search),
           download the <b>Complaint</b>. <b>Broward:</b> click <b>Find in Broward Clerk</b> (the case number is filled in), click Search, open the case; with the Chrome helper the Case Type is shown in a banner and the <b>Complaint</b> is highlighted, so download it or Skip a Homestead. Then drag it from Chrome's download bubble onto the row (or click <b>Upload PDF</b>).
           {' '}<a href="/api/complaint-intake/helper.zip" className="text-primary hover:underline font-medium">Get the Chrome helper</a>{' '}
@@ -209,11 +282,11 @@ export default function HillsboroughTest() {
           <div className="bg-card border border-border rounded-lg overflow-hidden">
             <div className="px-4 py-2.5 border-b border-border flex items-center gap-2">
               <h2 className="text-sm font-semibold">To download</h2>
-              <span className="text-[11px] text-muted-foreground">filed in the last {data.window_days} days · list updated {et(data.last_case_seen)}</span>
+              <span className="text-[11px] text-muted-foreground">every case stays here until uploaded or skipped · list updated {et(data.last_case_seen)}</span>
             </div>
             {data.todo.length === 0
               ? <p className="px-4 py-3 text-xs text-muted-foreground">Nothing to download right now.</p>
-              : <ul className="divide-y divide-border/40">{data.todo.map((r: any) => <TodoRow key={r.case_id} r={r} onDone={refresh} />)}</ul>}
+              : <TodoSections todo={data.todo} onDone={refresh} />}
           </div>
 
           <div className="bg-card border border-border rounded-lg overflow-hidden">

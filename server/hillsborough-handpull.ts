@@ -32,7 +32,14 @@ const ROOT = process.cwd()
 const PDF_DIR = process.env.COMPLAINTS_DIR || path.join(ROOT, 'complaints_pdfs')
 const COLLECTOR = path.join(ROOT, 'collector')
 const MAX_PDF_BYTES = 60 * 1024 * 1024
-const WINDOW_DAYS = 7 // the list shows cases filed (or first listed) in the last week
+const WINDOW_DAYS = 7 // Uploaded / Skipped lists show the last week; "To download" keeps every case until handled
+/** "To download" keeps every case listed from this day until someone uploads or skips it (owner, 17 Nov 2026:
+ *  nothing may drop off unworked). Hillsborough's 2-9 Nov cases from the 10 Nov manual run stay out. */
+const TODO_FROM = process.env.HAND_INTAKE_FROM || '2026-11-13'
+/** A "not online yet" skip comes back to To download after this many days, for up to RETRY_FOR_DAYS after listing. */
+const RETRY_AFTER_DAYS = 3
+const RETRY_FOR_DAYS = 30
+const NOT_ONLINE = ['Complaint not online yet', 'Complaint not on HOVER yet']
 /** Counties whose complaints a person downloads (Data -> Manual Complaint Intake). Broward: owner, 16 Nov 2026. */
 export const HAND_COUNTIES = ['HILLSBOROUGH', 'BROWARD']
 const HAND_SQL = `c.county IN (${HAND_COUNTIES.map(c => `'${c}'`).join(', ')})`
@@ -89,6 +96,14 @@ export function registerHillsboroughHandpullRoutes(app: Express) {
     const has = db.prepare(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='foreclosure_cases'`).get()
     if (!has) return res.json({ window_days: WINDOW_DAYS, todo: [], done: [], skipped: [], below_band: 0, days: [], last_case_seen: null })
     ensureExtractions()
+    // Complaints not online yet: put them back on the list after RETRY_AFTER_DAYS, until RETRY_FOR_DAYS after listing.
+    db.prepare(`UPDATE foreclosure_cases AS c SET complaint_status = 'pending',
+                  note = 'Back on the list: was not online on ' || substr(last_attempt, 1, 10)
+                WHERE ${HAND_SQL} AND complaint_status = 'skipped_by_hand'
+                  AND note IN (${NOT_ONLINE.map(() => '?').join(', ')})
+                  AND last_attempt < strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)
+                  AND first_seen >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)`)
+      .run(...NOT_ONLINE, `-${RETRY_AFTER_DAYS} day`, `-${RETRY_FOR_DAYS} day`)
     const rows = db.prepare(`
       SELECT c.case_id, c.case_number, c.case_type, c.filing_date, c.case_style, c.complaint_status,
              c.complaint_pdf, c.note, c.county, c.first_seen, c.metadata_json, c.last_attempt, e.result_json, e.extracted_at,
@@ -96,8 +111,10 @@ export function registerHillsboroughHandpullRoutes(app: Express) {
       FROM foreclosure_cases c
       LEFT JOIN foreclosure_extractions e ON e.case_id = c.case_id AND e.model = ?
       -- Broward's dates are the lis pendens recording (a week behind), so it goes by the day we listed it.
-      WHERE ${HAND_SQL} AND (c.filing_date >= date('now', ?) OR (c.county = 'BROWARD' AND substr(c.first_seen, 1, 10) >= date('now', ?)))
-      ORDER BY c.filing_date DESC, c.case_number`).all(MODEL, `-${WINDOW_DAYS} day`, `-${WINDOW_DAYS} day`) as (Row & { last_attempt: string | null })[]
+      WHERE ${HAND_SQL} AND (
+        (c.complaint_status = 'pending' AND (c.filing_date >= ? OR (c.county = 'BROWARD' AND substr(c.first_seen, 1, 10) >= ?)))
+        OR c.filing_date >= date('now', ?) OR (c.county = 'BROWARD' AND substr(c.first_seen, 1, 10) >= date('now', ?)))
+      ORDER BY c.filing_date DESC, c.case_number`).all(MODEL, TODO_FROM, TODO_FROM, `-${WINDOW_DAYS} day`, `-${WINDOW_DAYS} day`) as (Row & { last_attempt: string | null })[]
     const out = rows.map(r => {
       let meta: any = null
       try { meta = r.metadata_json ? JSON.parse(r.metadata_json) : null } catch { meta = null }
@@ -108,12 +125,17 @@ export function registerHillsboroughHandpullRoutes(app: Express) {
         case_style: r.case_style, first_seen: r.first_seen, status: r.complaint_status, note: r.note,
         uploaded_at: r.complaint_status === 'downloaded' ? r.last_attempt : null,
         plaintiffs: meta?.plaintiffs ?? [], defendants: meta?.defendants ?? [],
+        // Ranking (owner, 17 Nov 2026): 1 certain / 2 likely Non-Homestead or Commercial, 3 unknown, 4 likely Homestead.
+        // Hillsborough lists only the Clerk's Commercial / Non-Homestead types, so it is certain.
+        tier: r.county === 'HILLSBOROUGH' ? 1 : (meta?.tier ?? 3),
+        tier_reason: r.county === 'HILLSBOROUGH' ? `Clerk case type: ${r.case_type}` : (meta?.tier_reason ?? 'Not ranked yet: check the Case Type on the case page'),
+        no_case_number: !!meta?.no_case_number, lp_address: meta?.lp_address ?? null,
         reading: !!rd && !rd.error && !r.result_json, read_error: rd?.error ?? null,
         read: !!r.result_json, verdict: s.verdict, principal: s.principal, address: s.address,
         reason: s.result_reason, has_pdf: !!r.complaint_pdf,
       }
     })
-    const todo = out.filter(r => r.status === 'pending')
+    const todo = out.filter(r => r.status === 'pending').sort((a, b) => a.tier - b.tier || String(b.filing_date).localeCompare(String(a.filing_date)))
     const done = out.filter(r => r.status === 'downloaded')
     const skipped = out.filter(r => r.status === 'skipped_by_hand')
     const below = out.filter(r => r.status === 'below_band_threshold').length

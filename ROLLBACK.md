@@ -21,6 +21,7 @@
 | Broward Find fills the case number (Clerk's `CitationNumber=` prefill) + Chrome helper v1.1 (`broward-clerk.js`), 17 Nov 2026 | `1a6dfdc` | `dist.before_broward_find.20261117T134531Z` | none (front end + helper zip only) | `git revert 1a6dfdc`, build, restart; people reload the older helper or leave v1.1 (harmless without the button's `amo=1`) |
 | Clearer Broward wording on the intake rows (17 Nov 2026) | `b3b13c9` | `dist.before_broward_wording.20261117T135053Z` | none (text only) | `git revert b3b13c9`, build, restart |
 | Logos set by hand 17 Nov 2026 (data only) | — | — | `entity_websites` source `manual`: BROWN CAPITAL, OAKTREE, INTERFACE LENDING (+PROPERTIES), PENNYMAC, PENNY LOAN SERVICES, 6 Cardinal Financial names, CL CRE HOLDINGS, CITICORP TRUST BANK, CITICORP TRUST, NEW WAVE LOANS RESIDENTIAL; `entity_logos` rows for www.browncapital.com, www.oaktreecapital.com, interfacelending.com (none), www.pennymac.com, www.cardinalfinancial.com, clscre.com | `DELETE FROM entity_websites WHERE entity='<NAME>'` per firm |
+| More logos by hand 17 Nov 2026 (data only) | — | — | `entity_websites` manual: LENDZ FINANCIAL, ACRA LENDING, CITADEL SERVICING, CITADEL SERVICING DBA ACRA LENDING, CITADEL SERV, ARCHWEST LENDING, ARCHWEST FUNDING, PORTFOLIO RECOVERY ASSOCIATES; `entity_logos` hand-stored SVG for www.portfoliorecovery.com | `DELETE FROM entity_websites WHERE entity='<NAME>'`; `DELETE FROM entity_logos WHERE domain='www.portfoliorecovery.com'` |
 
 **Remove a county's intake data** (rows only ever added; no schema change):
 

@@ -45,6 +45,9 @@ const JOBS: Job[] = [
   { id: 'monroe_complaints', label: 'Monroe complaints', group: 'Foreclosure complaints', log: 'monroe_complaints_daily.log', format: 'marker', cron: { utc: ['12:10'] }, expectH: D + 3, maxRunH: 4 },
   { id: 'leon_complaints', label: 'Leon complaints', group: 'Foreclosure complaints', log: 'leon_complaints_daily.log', format: 'marker', cron: { utc: ['12:30'] }, expectH: D + 3, maxRunH: 4 },
   { id: 'citrus_complaints', label: 'Citrus complaints', group: 'Foreclosure complaints', log: 'citrus_complaints_daily.log', format: 'marker', cron: { utc: ['12:50'] }, expectH: D + 3, maxRunH: 4 },
+  // Manual Complaint Intake lists (17 Nov 2026). Broward is time-critical: the county feed keeps ~10 days of lis pendens.
+  { id: 'hillsborough_handpull', label: 'Hillsborough intake list', group: 'Foreclosure complaints', log: 'hillsborough_handpull.log', format: 'marker', cron: { utc: ['13:00'] }, expectH: D + 3, maxRunH: 3 },
+  { id: 'broward_intake', label: 'Broward intake list (lis pendens, ranked)', group: 'Foreclosure complaints', log: 'broward_complaints_intake.log', format: 'marker', cron: { utc: ['13:10'] }, expectH: D + 3, maxRunH: 3 },
 
   { id: 'daily_reconcile', label: 'Daily completeness check (all counties)', group: 'Checks and processing', log: 'daily_reconcile.log', format: 'marker', cron: { utc: ['16:30'] }, expectH: D + 3, maxRunH: 3 },
   { id: 'weekly_review', label: 'Friday 14-day completeness review', group: 'Checks and processing', log: 'weekly_review.log', format: 'marker', cron: { utc: ['17:00'], days: 'Fri' }, expectH: 7 * D + 6, maxRunH: 3 },
