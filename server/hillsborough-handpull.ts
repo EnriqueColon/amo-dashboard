@@ -20,7 +20,8 @@
  *   POST /api/hillsborough-test/:caseId/reread     read the stored PDF again (after a failed read)
  */
 import express, { type Express, type Request, type Response } from 'express'
-import { spawn } from 'child_process'
+import { spawn, execFileSync } from 'child_process'
+import os from 'os'
 import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
@@ -44,6 +45,21 @@ const NOT_ONLINE = ['Complaint not online yet', 'Complaint not on HOVER yet']
 export const HAND_COUNTIES = ['HILLSBOROUGH', 'BROWARD']
 const HAND_SQL = `c.county IN (${HAND_COUNTIES.map(c => `'${c}'`).join(', ')})`
 const FILE_PREFIX: Record<string, string> = { HILLSBOROUGH: 'HC', BROWARD: 'BR' }
+
+/** Page count from poppler's pdfinfo (installed on the droplet); null when it can't tell, so the upload is not blocked. */
+function pdfPages(buf: Buffer): number | null {
+  const tmp = path.join(os.tmpdir(), `intake-${crypto.randomBytes(6).toString('hex')}.pdf`)
+  try {
+    fs.writeFileSync(tmp, buf)
+    const out = execFileSync('pdfinfo', [tmp], { encoding: 'utf8', timeout: 15_000 })
+    const m = /^Pages:\s+(\d+)/m.exec(out)
+    return m ? Number(m[1]) : null
+  } catch {
+    return null
+  } finally {
+    fs.rmSync(tmp, { force: true })
+  }
+}
 
 const reading = new Map<string, { started: string; error?: string }>()
 
@@ -163,6 +179,12 @@ export function registerHillsboroughHandpullRoutes(app: Express) {
       const buf = req.body as Buffer
       if (!Buffer.isBuffer(buf) || buf.length < 1000) return res.status(400).json({ error: 'No file received' })
       if (buf.subarray(0, 5).toString('latin1') !== '%PDF-') return res.status(400).json({ error: 'That file is not a PDF' })
+      // A foreclosure complaint is never one page (address, amounts and the note/mortgage exhibits follow page 1).
+      // 17 Nov 2026: every Broward upload that morning was the Clerk viewer's single-page save. Refuse it.
+      const pages = pdfPages(buf)
+      if (pages === 1) {
+        return res.status(400).json({ error: 'Only 1 page in this PDF. Download the whole complaint (all pages, with the exhibits), not just the page on screen.' })
+      }
       fs.mkdirSync(PDF_DIR, { recursive: true })
       const safe = row.case_number.replace(/[^A-Z0-9-]/gi, '')
       const file = path.join(PDF_DIR, `${FILE_PREFIX[row.county ?? ''] ?? 'XX'}_${safe}_COMPLAINT.pdf`)

@@ -104,6 +104,7 @@ function TodoRow({ r, onDone }: { r: any; onDone: () => void }) {
           <span className="rounded bg-muted px-1.5 py-0.5 text-[10px]">{r.case_type}</span>
           {TIER[r.tier] && <span title={TIER[r.tier].tip} className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${TIER[r.tier].style}`}>{TIER[r.tier].label}</span>}
           {r.note?.startsWith('Back on the list') && <span className="rounded-full bg-sky-100 text-sky-800 px-2 py-0.5 text-[10px] font-medium" title="It was skipped as not online yet; check again">{r.note}</span>}
+          {r.note?.startsWith('Download again') && <span className="rounded-full bg-red-100 text-red-800 px-2 py-0.5 text-[10px] font-medium" title="The earlier upload had only the first page, so it could not be read">{r.note}</span>}
         </div>
         {r.tier_reason && <p className="mt-0.5 text-[11px] text-muted-foreground" title="Why it is ranked here">{r.tier_reason}</p>}
         <p className="mt-0.5 truncate" title={r.case_style || ''}>{r.case_style}</p>
