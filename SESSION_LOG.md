@@ -4629,3 +4629,11 @@ Owner wants a new pipeline: Miami-Dade Clerk circuit-civil foreclosure complaint
 - Also: all 13 US Small Business Administration names (U S SMALL BUSINESS ADMINISTRATION 353 + 12 misspellings) → www.sba.gov (agency site, not the usa.gov directory page the owner sent), `manual`, SBA seal 180 px.
 - Also: PLANET HOME LENDING (362) → www.planethomelending.com, `manual`.
 - Also: all 4 Onslow Bay names (ONSLOW BAY FINANCIAL 355 + 3 variants) → www.onslowbayfinancial.com, `manual`, 32 px (Squarespace has no larger original).
+
+## 2026-11-17 — Broward intake: Find button fills the case number; helper v1.1 (DEPLOYED `1a6dfdc`, 13:46 UTC)
+- Found: the Clerk's search page prefills from `?CitationNumber=<case>` (fills `#CaseNumber`, opens Case Number tab; their own JS, `var caseNumber` from that param). `CaseNumber=`/`caseNumber=` do nothing. Format must be dash-free `CACE26018535` (Clerk's sample-numbers modal); old button copied `CACE-26-018535`.
+- Search has Cloudflare Turnstile (`cf-turnstile`) per anonymous search: person does it and clicks Search. Never automate.
+- `HillsboroughTest.tsx`: `browardSearchUrl()` = Index/?AccessLevel=ANONYMOUS&CitationNumber=<nodash>&amo=1; clipboard copy is the dash-free number; row/page text updated.
+- `tools/hover-helper` v1.1: new `broward-clerk.js` on `www./browardclerk.org/Web2/CaseSearchECA/*`. Search page (`amo=1` only): green "click Search" banner (verified in the app's browser pane on the live Clerk page). Case page: finds "Case Type" label by text → banner (Homestead red / else green / no Complaint amber) and outlines docket lines matching "complaint" minus summons/cover sheet/notice/motion/order etc. **Case-page part UNVERIFIED** (needs a person past the human check); tune selectors when a case page can be read.
+- Zip rebuilt; droplet was on `9593de2` before the pull (docs-only commits in between). dist backup `/root/dist.before_broward_find.20261117T134531Z`.
+- Mac ssh-agent was empty again this morning; `ssh-add --apple-load-keychain` fixed it.
