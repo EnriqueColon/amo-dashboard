@@ -85,6 +85,40 @@ export type TrdApiPost = {
   market?: number[]
   sector?: number[]
   story_type?: number[]
+  /** Yoast's social-card block; `og_image` is the article's lead photo (requested as `yoast_head_json.og_image`). */
+  yoast_head_json?: { og_image?: Array<{ url?: string; width?: number; height?: number }> }
+}
+
+/** An article's lead photo: the full image and a ~300 px wide copy for cards (may not exist; fall back to `url`). */
+export type TrdImage = { url: string; thumb: string }
+
+const TRD_IMAGE_HOST = /^(static\.)?therealdeal\.com$/i
+
+/**
+ * The lead photo of a post, or null. Only https images on TRD's own hosts are accepted, so a page
+ * never loads an arbitrary URL the API might carry. The thumbnail is WordPress's "medium" size
+ * (300 px wide, proportional), named `<file>-300x<h>.<ext>`; TRD generates it for uploads wider
+ * than 300 px (checked 17 Nov 2026: 1500x1000 -> 300x200, 14 KB vs 300 KB). The client falls back
+ * to the full image if that copy is missing.
+ */
+export function trdImageOf(post: Pick<TrdApiPost, "yoast_head_json">): TrdImage | null {
+  const og = post?.yoast_head_json?.og_image?.[0]
+  const raw = (og?.url || "").trim()
+  if (!raw) return null
+  let u: URL
+  try {
+    u = new URL(raw)
+  } catch {
+    return null
+  }
+  if (u.protocol !== "https:" || !TRD_IMAGE_HOST.test(u.hostname)) return null
+  const url = u.toString()
+  const w = Number(og?.width)
+  const h = Number(og?.height)
+  const m = /^(.*?)(\.(?:jpe?g|png|webp))$/i.exec(u.pathname)
+  if (!m || !(w > 300) || !(h > 0)) return { url, thumb: url }
+  const thumbPath = `${m[1]}-300x${Math.round((h * 300) / w)}${m[2]}`
+  return { url, thumb: `${u.origin}${thumbPath}` }
 }
 
 export type TrdArticle = {
@@ -100,6 +134,7 @@ export type TrdArticle = {
   markets: string[]
   sectors: string[]
   storyTypes: string[]
+  image: TrdImage | null
 }
 
 export type NewsTopic =
@@ -127,6 +162,8 @@ export type TrdPick = {
   storyType: string
   sectors: string[]
   markets: string[]
+  /** The article's lead photo, or null when the API gave none. */
+  image: TrdImage | null
 }
 
 export type TrdSelection = {
@@ -212,6 +249,7 @@ export function normalizeTrdPost(post: TrdApiPost): TrdArticle | null {
     markets: termSlugs(post.market, TRD_TERMS.market, "market"),
     sectors: termSlugs(post.sector, TRD_TERMS.sector, "sector"),
     storyTypes: termSlugs(post.story_type, TRD_TERMS.storyType, "story_type"),
+    image: trdImageOf(post),
   }
 }
 
@@ -419,6 +457,7 @@ export function selectTrdTop(
     storyType: article.storyTypes[0] ?? "unknown",
     sectors: article.sectors,
     markets: article.markets,
+    image: article.image,
   }))
 
   return { picks, candidates: scored.length, excluded }
@@ -444,6 +483,7 @@ export type TrdArticleView = {
   modified: string | null
   blocks: ArticleBlock[]
   wordCount: number
+  image: TrdImage | null
 }
 
 const REMOVED_BLOCKS = /<(article|figure|section|aside|script|style|iframe|noscript|svg|form|nav|footer|header)\b[\s\S]*?<\/\1>/gi
@@ -482,12 +522,12 @@ export function buildTrdArticleView(post: TrdApiPost): TrdArticleView | null {
   if (blocks.length === 0) return null
   const modified = post.modified_gmt ? toIsoDate(post.modified_gmt)?.date ?? null : null
   const wordCount = blocks.reduce((n, b) => n + b.text.split(/\s+/).filter(Boolean).length, 0)
-  return { id: article.id, title: article.title, url: article.url, date: article.date, modified, blocks, wordCount }
+  return { id: article.id, title: article.title, url: article.url, date: article.date, modified, blocks, wordCount, image: article.image }
 }
 
 export function trdPostUrl(id: number): string {
   const u = new URL(`${TRD_API_URL}/${id}`)
-  u.searchParams.set("_fields", "id,date_gmt,modified_gmt,link,title,excerpt,content,market,sector,story_type")
+  u.searchParams.set("_fields", "id,date_gmt,modified_gmt,link,title,excerpt,content,market,sector,story_type,yoast_head_json.og_image")
   return u.toString()
 }
 
@@ -506,6 +546,6 @@ export function trdQueryUrl(params: Record<string, number>, since: string, perPa
   u.searchParams.set("per_page", String(perPage))
   u.searchParams.set("orderby", "date")
   u.searchParams.set("order", "desc")
-  u.searchParams.set("_fields", "id,date_gmt,modified_gmt,link,title,excerpt,content,market,sector,story_type")
+  u.searchParams.set("_fields", "id,date_gmt,modified_gmt,link,title,excerpt,content,market,sector,story_type,yoast_head_json.og_image")
   return u.toString()
 }

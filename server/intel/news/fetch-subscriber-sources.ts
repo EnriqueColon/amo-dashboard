@@ -35,7 +35,8 @@ export type SubscriberSourcesResponse = {
 
 // v2: ten picks rather than five (2026-10-27). Bumped so production shows ten on deploy rather than
 // at the next day's rollover.
-const CACHE_VERSION = "subscriber-sources-v2"
+// v3: picks carry the lead photo (2026-11-17).
+const CACHE_VERSION = "subscriber-sources-v3"
 
 async function buildSubscriberSources(): Promise<SubscriberSourcesResponse> {
   const now = new Date()

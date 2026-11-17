@@ -98,6 +98,15 @@ export function TrdReadDialog({ target, onClose }: { target: ReadTarget | null; 
 
           {!loading && result?.ok && (
             <article className="text-[15px] leading-relaxed text-slate-800 sm:text-sm">
+              {result.article.image ? (
+                <img
+                  src={result.article.image.url}
+                  alt=""
+                  referrerPolicy="no-referrer"
+                  className="mb-3 aspect-[3/2] w-full rounded-md bg-slate-100 object-cover"
+                  onError={(e) => (e.currentTarget.style.display = "none")}
+                />
+              ) : null}
               {result.article.blocks.map((b, i) =>
                 b.kind === "h" ? (
                   <h3 key={`rb-${i}`} className="mt-4 mb-1 text-base font-semibold text-slate-900">
@@ -118,8 +127,8 @@ export function TrdReadDialog({ target, onClose }: { target: ReadTarget | null; 
                 )
               )}
               <p className="mt-5 border-t border-slate-200 pt-3 text-xs text-slate-600">
-                Text as published by The Real Deal, read from its public API on {result.readAt.slice(0, 10)}. Images, charts and embedded
-                media are not shown; the article&apos;s own page has them.
+                Text as published by The Real Deal, read from its public API on {result.readAt.slice(0, 10)}. Other images, charts and
+                embedded media are not shown; the article&apos;s own page has them.
               </p>
             </article>
           )}

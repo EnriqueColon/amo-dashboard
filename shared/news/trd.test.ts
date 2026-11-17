@@ -21,6 +21,7 @@ import {
   topicOf,
   trdQueryUrl,
   trdSinceParam,
+  trdImageOf,
   type TrdApiPost,
 } from "./trd"
 
@@ -256,5 +257,22 @@ test("query helpers: the window has a day of slack and the URL names every field
   assert.equal(url.searchParams.get("market"), "9574")
   assert.equal(url.searchParams.get("after"), "2026-10-19T18:00:00")
   assert.equal(url.searchParams.get("per_page"), "100")
-  assert.equal(url.searchParams.get("_fields"), "id,date_gmt,modified_gmt,link,title,excerpt,content,market,sector,story_type")
+  assert.equal(url.searchParams.get("_fields"), "id,date_gmt,modified_gmt,link,title,excerpt,content,market,sector,story_type,yoast_head_json.og_image")
+})
+
+test("trdImageOf: lead photo with its 300 px copy; only https images on TRD hosts", () => {
+  const base = "https://static.therealdeal.com/wp-content/uploads/2026/11/Some-Deal"
+  assert.deepEqual(trdImageOf({ yoast_head_json: { og_image: [{ url: `${base}.jpg`, width: 1500, height: 1000 }] } }), {
+    url: `${base}.jpg`,
+    thumb: `${base}-300x200.jpg`,
+  })
+  assert.deepEqual(trdImageOf({ yoast_head_json: { og_image: [{ url: `${base}.png`, width: 1200, height: 675 }] } })?.thumb, `${base}-300x169.png`)
+  // Small or unsized images: the full image doubles as the thumbnail.
+  assert.equal(trdImageOf({ yoast_head_json: { og_image: [{ url: `${base}.jpg`, width: 280, height: 200 }] } })?.thumb, `${base}.jpg`)
+  assert.equal(trdImageOf({ yoast_head_json: { og_image: [{ url: `${base}.jpg` }] } })?.thumb, `${base}.jpg`)
+  assert.equal(trdImageOf({ yoast_head_json: { og_image: [{ url: "http://static.therealdeal.com/a.jpg", width: 1500, height: 1000 }] } }), null)
+  assert.equal(trdImageOf({ yoast_head_json: { og_image: [{ url: "https://evil.example/a.jpg", width: 1500, height: 1000 }] } }), null)
+  assert.equal(trdImageOf({ yoast_head_json: { og_image: [{ url: "https://static.therealdeal.com.evil.example/a.jpg" }] } }), null)
+  assert.equal(trdImageOf({}), null)
+  assert.equal(trdImageOf({ yoast_head_json: { og_image: [] } }), null)
 })

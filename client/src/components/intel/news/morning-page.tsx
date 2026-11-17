@@ -56,6 +56,29 @@ async function loadLevels(fetchLevel: (level: MorningLevel) => Promise<{ news: P
   )
 }
 
+/**
+ * The article's lead photo as a small card image, linked to the article. Loads the publisher's
+ * ~300 px copy, falls back to the full photo if that copy is missing, and disappears if neither
+ * loads; old cached picks without `image` show nothing.
+ */
+function NewsThumb({ image, href }: { image?: SubscriberItem["image"]; href: string }) {
+  const [src, setSrc] = useState<string | null>(image?.thumb ?? null)
+  useEffect(() => setSrc(image?.thumb ?? null), [image?.thumb])
+  if (!image || !src) return null
+  return (
+    <a href={href} target="_blank" rel="noreferrer" className="shrink-0" tabIndex={-1} aria-hidden="true">
+      <img
+        src={src}
+        alt=""
+        loading="lazy"
+        referrerPolicy="no-referrer"
+        className="h-16 w-24 rounded border border-slate-200 bg-slate-100 object-cover"
+        onError={() => setSrc(src === image.thumb && image.url !== image.thumb ? image.url : null)}
+      />
+    </a>
+  )
+}
+
 function postIdOf(item: SubscriberItem): number | null {
   const m = /^trd-(\d+)$/.exec(item.id)
   return m ? Number(m[1]) : null
@@ -367,7 +390,17 @@ export function NewsMorningPage({ initialNews }: { initialNews?: InitialNewsData
                   return (
                     <tr key={p.id} className="hover:bg-slate-50/60">
                       {dateCell(p.date)}
-                      {headlineCell(p.title, p.url, p.snippet, "line-clamp-2")}
+                      <td className="py-2 px-2 align-top min-w-[360px]">
+                        <div className="flex gap-3">
+                          <NewsThumb image={p.image} href={p.url} />
+                          <div className="min-w-0">
+                            <a href={p.url} target="_blank" rel="noreferrer" className="text-[13px] font-medium leading-snug text-slate-900 hover:text-primary hover:underline">
+                              {p.title}
+                            </a>
+                            {p.snippet ? <p className="mt-0.5 text-xs leading-snug text-slate-500 line-clamp-2">{p.snippet}</p> : null}
+                          </div>
+                        </div>
+                      </td>
                       <td className="py-2 px-2 align-top whitespace-nowrap text-slate-600">{regionLabel(p.region)}</td>
                       <td className="py-2 px-2 align-top whitespace-nowrap text-slate-600">{p.topic}</td>
                       <td

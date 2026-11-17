@@ -16,7 +16,7 @@ import { fetchTrdPost } from "./trd-service"
 
 export type TrdArticleResult = { ok: true; article: TrdArticleView; readAt: string } | { ok: false; error: string }
 
-const CACHE_VERSION = "trd-article-v1"
+const CACHE_VERSION = "trd-article-v2"
 const ONE_DAY_SECONDS = 86_400
 
 export async function fetchTrdArticle(postId: number): Promise<TrdArticleResult> {
