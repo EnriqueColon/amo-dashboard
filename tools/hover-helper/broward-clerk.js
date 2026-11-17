@@ -95,7 +95,7 @@
     if (homestead) {
       banner(`Case Type: ${esc(type)}<br>Homestead can't qualify. Back in the AMO tool, choose <u>Skip → Homestead</u>.`, 'skip');
     } else if (found) {
-      banner(`Case Type: ${esc(type)}<br>Download the <u>Complaint</u> (highlighted below), then drag it onto the row in the AMO tool.`, 'ok');
+      banner(`Case Type: ${esc(type)}<br>Open the <u>Complaint</u> (highlighted below), click <u>All pages</u>, then <u>Download</u>, and drag it onto the row in the AMO tool.`, 'ok');
     } else {
       banner(`Case Type: ${esc(type)}<br>No Complaint found on the docket yet. If it isn't there, choose <u>Skip → Not online yet</u>.`, 'warn');
     }

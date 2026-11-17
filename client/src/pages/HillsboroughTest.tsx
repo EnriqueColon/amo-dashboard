@@ -127,6 +127,7 @@ function TodoRow({ r, onDone }: { r: any; onDone: () => void }) {
               {' '}if it says Homestead, choose Skip → Homestead; if Non-Homestead or Commercial, download the Complaint.
             </>}
             {' '}With the Chrome helper, a red or green banner on the case page tells you which.
+            {' '}<b className="text-red-700">In the document viewer click All pages, then Download</b> (a one-page file is refused).
           </p>
         )}
         {error && <p className="mt-0.5 text-[11px] text-red-600">{error}</p>}
@@ -261,7 +262,7 @@ export default function HillsboroughTest() {
           A trial. Each morning the system lists new foreclosures to download. <b>Hillsborough:</b> only the $250,000-or-more band, from the Clerk's daily case file.
           {' '}<b>Broward:</b> lender foreclosures found through the county's daily records file (about a week behind). The county file doesn't say whether a case is Homestead, so every Broward case is listed, ranked by the state property roll: work <b>Work these first</b> from the top; <b>Likely Homestead</b> is collapsed at the bottom but still listed. The Clerk's Case Type decides: Skip the Homestead ones. A case skipped as <b>Not online yet</b> comes back after 3 days.
           {' '}<b>Hillsborough</b>, for each one: click <b>Find in HOVER</b> (opens <a href={HOVER} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline inline-flex items-center gap-0.5">HOVER<ExternalLink size={10} /></a>'s case search; with the Chrome helper the boxes are filled, so just click Search),
-          download the <b>Complaint</b>. <b>Broward:</b> click <b>Find in Broward Clerk</b> (the case number is filled in), click Search, open the case; with the Chrome helper the Case Type is shown in a banner and the <b>Complaint</b> is highlighted, so download it or Skip a Homestead. Then drag it from Chrome's download bubble onto the row (or click <b>Upload PDF</b>).
+          download the <b>Complaint</b>. <b>Broward:</b> click <b>Find in Broward Clerk</b> (the case number is filled in), click Search, open the case; with the Chrome helper the Case Type is shown in a banner and the <b>Complaint</b> is highlighted, so open it, click <b>All pages</b>, then <b>Download</b> (the plain download saves only the page on screen), or Skip a Homestead. Then drag it from Chrome's download bubble onto the row (or click <b>Upload PDF</b>).
           {' '}<a href="/api/complaint-intake/helper.zip" className="text-primary hover:underline font-medium">Get the Chrome helper</a>{' '}
           <span title="Unzip it, open chrome://extensions, turn on Developer mode, click Load unpacked and choose the hover-helper folder. Already installed? Download it again, replace the folder and click the reload arrow on the add-on.">(install: unzip, chrome://extensions, Developer mode, Load unpacked)</span>. It is read automatically in a few minutes (scanned complaints take longer).
           Once read, each one also appears on the Complaints tab (not yet in the Monday email).
