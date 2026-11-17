@@ -102,7 +102,8 @@ function TodoRow({ r, onDone }: { r: any; onDone: () => void }) {
         )}
         {broward && (
           <p className="mt-1 text-[11px] text-muted-foreground">
-            In the Clerk: <b className="font-mono text-foreground">{brClerkNumber(r.case_number)}</b> is filled in, click Search and open the case. Check <b className="text-foreground">Case Type</b>: Homestead can't qualify, so Skip it. Download the Complaint for Commercial or Non-Homestead (the Chrome helper shows the type and highlights the Complaint).
+            <b className="text-foreground">Type not known yet</b> (the county file doesn't say). Click Find (<b className="font-mono text-foreground">{brClerkNumber(r.case_number)}</b> is filled in), click Search, open the case and look at <b className="text-foreground">Case Type</b>:
+            {' '}if it says <b className="text-foreground">Homestead</b>, don't download, choose Skip → Homestead; if <b className="text-foreground">Non-Homestead</b> or <b className="text-foreground">Commercial</b>, download the Complaint. With the Chrome helper, a red or green banner on the case page tells you which.
           </p>
         )}
         {error && <p className="mt-0.5 text-[11px] text-red-600">{error}</p>}
@@ -184,7 +185,7 @@ export default function HillsboroughTest() {
         <p className="text-sm mt-1">For counties whose Clerk site can't be read automatically, so a person downloads each complaint. <b>Counties: Hillsborough, Broward.</b></p>
         <p className="text-xs text-muted-foreground mt-1">
           A trial. Each morning the system lists new foreclosures to download. <b>Hillsborough:</b> only the $250,000-or-more band, from the Clerk's daily case file.
-          {' '}<b>Broward:</b> lender foreclosures found through the county's daily records file (about a week behind; no property type, so check it on the case page and Skip Homestead).
+          {' '}<b>Broward:</b> lender foreclosures found through the county's daily records file (about a week behind). The county file doesn't say whether a case is Homestead, so every Broward case is listed; you find out on the Clerk's case page and Skip the Homestead ones.
           {' '}<b>Hillsborough</b>, for each one: click <b>Find in HOVER</b> (opens <a href={HOVER} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline inline-flex items-center gap-0.5">HOVER<ExternalLink size={10} /></a>'s case search; with the Chrome helper the boxes are filled, so just click Search),
           download the <b>Complaint</b>. <b>Broward:</b> click <b>Find in Broward Clerk</b> (the case number is filled in), click Search, open the case; with the Chrome helper the Case Type is shown in a banner and the <b>Complaint</b> is highlighted, so download it or Skip a Homestead. Then drag it from Chrome's download bubble onto the row (or click <b>Upload PDF</b>).
           {' '}<a href="/api/complaint-intake/helper.zip" className="text-primary hover:underline font-medium">Get the Chrome helper</a>{' '}
