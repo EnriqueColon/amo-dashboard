@@ -10,7 +10,10 @@
  * the session is the only gate, by the owner's decision.
  */
 import type { Express, Request, Response } from "express"
-import { fetchResearchFeed, type ResearchReport } from "./feed"
+import { fetchResearchFeed, logoSiteForPublisher, PUBLISHER_NAMES, type ResearchReport } from "./feed"
+import { getDb } from "../../db"
+import { enqueue as enqueueLogos, ensureTables as ensureLogoTables, toDomain } from "../../entity-logos"
+import { getIntelDb } from "../db"
 import { generateResearchMemo } from "./memo"
 import { countFeedArchive, deleteReport, getReport, getSummary, listReports, upsertResearchReport } from "./db"
 import { deleteLocalReport, readLocalReport, saveReportToDisk } from "./storage"
@@ -31,6 +34,38 @@ function safeFilename(input: string): string {
 }
 
 export function registerResearchRoutes(app: Express): void {
+  // ── Publisher logos ──────────────────────────────────────────────────────
+  // Publisher name (upper case) -> logo URL, from the same logo store the firm avatars use
+  // (`entity_logos`, served by /api/logo/:domain). Logos not tried yet, or that failed more than
+  // two weeks ago, are fetched in the background and appear on a later load.
+  app.get("/api/intel/research/publisher-logos", (_req: Request, res: Response) => {
+    try {
+      const db = getDb()
+      ensureLogoTables(db)
+      const names = new Set<string>(PUBLISHER_NAMES)
+      try {
+        for (const r of getIntelDb().prepare("SELECT DISTINCT publisher FROM research_feed_cache").all() as { publisher: string }[]) names.add(r.publisher)
+      } catch {
+        // No feed table yet: the listed publishers are enough.
+      }
+      const rows = new Map<string, { status: string; fetched_at: string }>()
+      for (const r of db.prepare("SELECT domain, status, fetched_at FROM entity_logos").all() as { domain: string; status: string; fetched_at: string }[]) rows.set(r.domain, r)
+      const logos: Record<string, string> = {}
+      const missing = new Set<string>()
+      for (const name of names) {
+        const domain = toDomain(logoSiteForPublisher(name))
+        if (!domain) continue
+        const l = rows.get(domain)
+        if (l?.status === "ok") logos[name.toUpperCase()] = `/api/logo/${encodeURIComponent(domain)}?v=${encodeURIComponent(l.fetched_at)}`
+        else if (!l || Date.now() - Date.parse(l.fetched_at) > 14 * 24 * 3600_000) missing.add(domain)
+      }
+      if (missing.size) enqueueLogos(db, [...missing])
+      res.json({ logos, pending: missing.size })
+    } catch (err) {
+      sendError(res, err, 500)
+    }
+  })
+
   // ── Publisher feed ───────────────────────────────────────────────────────
   app.get("/api/intel/research/feed", async (_req: Request, res: Response) => {
     try {

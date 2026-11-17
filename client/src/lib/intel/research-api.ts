@@ -14,6 +14,8 @@ const post = <T,>(path: string, payload: unknown) =>
   call<T>(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) })
 
 export const fetchResearchFeed = () => call<FeedResponse>("/feed")
+/** Publisher name (upper case) -> logo URL; `pending` > 0 while the server is still fetching some. */
+export const fetchPublisherLogos = () => call<{ logos: Record<string, string>; pending: number }>("/publisher-logos")
 export const refreshResearchFeed = () => post<FeedResponse>("/feed/refresh", {})
 export const generateResearchMemo = (reports: ResearchReport[]) => post<GeneratedMemo>("/memo", { reports })
 

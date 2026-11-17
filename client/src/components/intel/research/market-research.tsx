@@ -5,6 +5,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { DefTerm } from "@/components/DefTerm"
 import {
   deleteReport,
+  fetchPublisherLogos,
   fetchResearchFeed,
   getSummary,
   listReports,
@@ -18,6 +19,26 @@ import {
   type StoredSummary,
 } from "@/lib/intel/research-api"
 import { ResearchMemoModal } from "./research-memo-modal"
+import { useQuery } from "@tanstack/react-query"
+import { initials } from "@/components/EntityAvatar"
+
+/** The publisher's logo (or its initials when we have none) followed by its name. */
+function PublisherLabel({ name, logos }: { name: string; logos: Record<string, string> }) {
+  const src = logos[name.toUpperCase()]
+  const [broken, setBroken] = useState<string | null>(null)
+  return (
+    <span className="inline-flex items-center gap-2">
+      {src && broken !== src ? (
+        <span className="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded border border-slate-200 bg-white">
+          <img src={src} alt="" loading="lazy" className="h-[80%] w-[80%] object-contain" onError={() => setBroken(src)} />
+        </span>
+      ) : (
+        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-slate-100 text-[9px] font-semibold text-slate-500">{initials(name)}</span>
+      )}
+      <span>{name}</span>
+    </span>
+  )
+}
 
 /**
  * Market Research, in the dashboard's style. Two halves on one page: the
@@ -65,6 +86,14 @@ export function MarketResearch() {
   const [refreshing, setRefreshing] = useState(false)
   const [topic, setTopic] = useState("All")
   const [publisher, setPublisher] = useState("All")
+  const { data: logoData } = useQuery({
+    queryKey: ["/api/intel/research/publisher-logos"],
+    queryFn: fetchPublisherLogos,
+    staleTime: 10 * 60 * 1000,
+    // Logos still being fetched on the server show up on a later poll.
+    refetchInterval: (q) => ((q.state.data?.pending ?? 0) > 0 ? 20_000 : false),
+  })
+  const publisherLogos = logoData?.logos ?? {}
   const [search, setSearch] = useState("")
   const [includeArchive, setIncludeArchive] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -248,7 +277,9 @@ export function MarketResearch() {
               </div>
             </div>
           </td>
-          <td className="py-2 px-2 align-top whitespace-nowrap text-slate-700">{r.publisher}</td>
+          <td className="py-2 px-2 align-top whitespace-nowrap text-slate-700">
+            <PublisherLabel name={r.publisher} logos={publisherLogos} />
+          </td>
           <td className="py-2 px-2 align-top whitespace-nowrap">
             <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${TOPIC_CLASS[r.topic] ?? "bg-slate-100 text-slate-600"}`}>{r.topic}</span>
           </td>

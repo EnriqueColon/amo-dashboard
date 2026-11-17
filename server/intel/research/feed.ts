@@ -43,6 +43,21 @@ const PUBLISHERS = [
   { name: "Walker & Dunlop",      site: "walkerdunlop.com",         focus: "multifamily lending, CRE debt markets, agency/CMBS originations" },
 ]
 
+/**
+ * The website whose logo stands for a publisher on the Market Research page. Names the model
+ * writes slightly differently ("NAIOP Research Foundation") match the listed publisher they
+ * start with. Moody's Analytics publishes no icon of its own; the parent site's is used.
+ */
+const LOGO_SITE: Record<string, string> = { "Moody's Analytics": "moodys.com" }
+
+export function logoSiteForPublisher(publisher: string): string | undefined {
+  const p = publisher.toLowerCase().trim()
+  const hit = PUBLISHERS.find((x) => x.name.toLowerCase() === p) ?? PUBLISHERS.find((x) => p.startsWith(`${x.name.toLowerCase()} `))
+  return hit ? LOGO_SITE[hit.name] ?? hit.site : undefined
+}
+
+export const PUBLISHER_NAMES: readonly string[] = PUBLISHERS.map((x) => x.name)
+
 export function siteForPublisher(publisher: string): string | undefined {
   const p = publisher.toLowerCase().trim()
   return PUBLISHERS.find((x) => x.name.toLowerCase() === p)?.site
