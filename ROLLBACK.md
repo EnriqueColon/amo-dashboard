@@ -19,6 +19,7 @@
 | Guardrails (duplicate file, name check, Replace file) | `4a51262` **reverted** by `6c8e65b` | never deployed | — | — (owner wants them after the process is settled) |
 | Manual Complaint Intake — Broward | `f6e0632`, window fix `0e8580b` | `dist.before_broward_intake.20261116T182028Z` | Cron `10 13 * * * run_broward_complaints_intake.sh` (crontab backup `collector/crontab.before_broward_intake.20261116T182109Z`). 16 rows `BR:CACE-…` in `foreclosure_cases` (county BROWARD); uploads `complaints_pdfs/BR_*`. New `collector/complaints_read_case.py` (server spawns it after any upload, both counties) | Remove the cron line; `git revert 0e8580b f6e0632`; data below |
 | Broward Find fills the case number (Clerk's `CitationNumber=` prefill) + Chrome helper v1.1 (`broward-clerk.js`), 17 Nov 2026 | `1a6dfdc` | `dist.before_broward_find.20261117T134531Z` | none (front end + helper zip only) | `git revert 1a6dfdc`, build, restart; people reload the older helper or leave v1.1 (harmless without the button's `amo=1`) |
+| Clearer Broward wording on the intake rows (17 Nov 2026) | `b3b13c9` | `dist.before_broward_wording.20261117T135053Z` | none (text only) | `git revert b3b13c9`, build, restart |
 
 **Remove a county's intake data** (rows only ever added; no schema change):
 
