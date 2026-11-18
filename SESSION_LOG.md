@@ -4688,3 +4688,4 @@ Owner wants a new pipeline: Miami-Dade Clerk circuit-civil foreclosure complaint
 - Also 18 Nov: PARK PLACE FINANCE (44, PRIVATE_CREDIT) → parkplacefinance.com, 146 px "PPF" seal (`wp-content/uploads/favicon.png`). PARK PLACE SECURITIES (4, TRUST: Ameriquest-era securitisation trust, different firm) left out. 246 `manual` rows.
 - Also 18 Nov: DEEPHAVEN MORTGAGE (48) + DEEPHAVEN MTG (4) → deephavenmortgage.com (owner's link was an ad page, tracking query dropped), 268 px blue "D" PNG. DEEPHAVEN RESIDENTIAL MORTGAGE TRUST 2021-3 / 2022 1 (1 each) left out (vehicles only when owner says). 248 `manual` rows.
 - Owner "Yes, add them": DEEPHAVEN RESIDENTIAL MORTGAGE TRUST 2021-3 and …TRUST 2022 1 → deephavenmortgage.com (same logo). 250 `manual` rows.
+- Also 18 Nov: TY MORTGAGE (57, SERVICER; only name) → tymortgage.com, 86×62 px orange "TY" PNG (site header letters). 251 `manual` rows.
