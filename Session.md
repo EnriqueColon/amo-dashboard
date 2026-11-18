@@ -140,3 +140,15 @@ Pick up at: grouping of same-day bulk filings (yes/no), then feed ordering date,
 - **Logos added by hand from websites the owner sends**, firm plus its misspelled name variants (216 names in all by end of day). The owner decides per firm whether related vehicles share the logo: **yes** for all Churchill vehicles, all JPMorgan entities and the 75 "Chase…" JPMorgan entities (JPMorgan Chase now shows the JPMorgan logo, not Chase's); **no** for Anchor Loans' "Anchor Assets" vehicles, and by the same rule Velocity's loan trusts; FirstKey/Onity trusts, Alto Partners Operating, Lakeview Community Capital, Lennar Homes (given the Lennar logo, owner may change) noted as open.
 - **When a site's own icon is too small** (16–32 px), the logo is taken from the site's header logo (Citizens, UWM) or a larger copy from its image server (A&D); a white-on-dark header logo is not used (Velocity keeps its 32 px icon).
 - **ON HOLD (owner, 16 Nov):** New Residential Mortgage (341 filings + variants and 2 trusts). It is NewRez's sister company under Rithm Capital (formerly New Residential Investment), not NewRez itself. Options when resumed: Rithm Capital's logo (rithmcap.com), or NewRez's logo to show the group as one. NEWREZ / SHELLPOINT (5,305) has no logo yet either.
+
+---
+
+## Session 4 — 2026-11-17 (UI decisions made during the Broward intake work; built and deployed)
+
+- **Find in Broward Clerk fills the case number.** The button opens the Clerk's search with the number already typed (no dashes, e.g. CACE26018535); the person ticks the human check and clicks Search. The Chrome helper adds a "click Search" banner, and on the case page a banner with the Case Type (red "Skip → Homestead" for Homestead, green "download") and a yellow highlight on the Complaint.
+- **Wording:** each Broward row says the type is not known until the case page is opened; owner asked for this after reading the old line as a per-case verdict.
+- **Nothing hidden, everything ranked (owner: "make sure we get everything").** To download has three sections: **Work these first** (company borrower or no homestead exemption on the state property roll), **Type unknown**, **Likely Homestead** (collapsed at the bottom, still listed). Each row shows a tier pill, a one-line reason ("No homestead exemption on 3511 Inverrary Blvd W, Lauderhill") and instructions matched to its tier.
+- **Rows never drop off unworked:** the 7-day window is gone for To download; "Not online yet" skips come back after 3 days with a blue "Back on the list" tag.
+- **Lis pendens with no case number** are listed with the party names as copy buttons and a link to the Clerk's name search.
+- **Whole documents only:** rows say "In the document viewer click All pages, then Download"; a 1-page upload is refused with a message; re-done cases carry a red "Download again" tag.
+- Rejected / not wanted: a loan-size filter (balances can exceed the original loan); a server-side cache for the logo list (owner: leave it, it loads in ~0.2 s and does not block the page).
