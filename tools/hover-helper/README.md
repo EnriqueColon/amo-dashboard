@@ -6,6 +6,11 @@ Used from the tool's **Data → Manual Complaint Intake** page:
 - **Broward Clerk** (added 17 Nov 2026): on the search page, a banner says the case number is filled in (the Clerk's
   own page fills it from the link) and to click Search. On the case page, a banner shows the **Case Type**
   (red "Skip it" for Homestead) and the **Complaint** line on the docket is highlighted and scrolled into view.
+  **v1.2 (17 Nov 2026):** the banner says "Open the Complaint, click All pages, then Download" — the Clerk's
+  viewer otherwise saves only the page on screen, and the tool refuses a 1-page upload. People re-download the
+  helper from the intake page and reload it in `chrome://extensions`.
+  **Not yet verified:** the case-page banner has not been seen on a real Broward case page (needs a person past
+  the Clerk's human check); the search-page banner is verified.
 
 You still pass the Clerk's check, click **Search**, open the case and download yourself. The add-on never clicks,
 searches, downloads or sends data anywhere; on the case page it only reads what is already on screen.

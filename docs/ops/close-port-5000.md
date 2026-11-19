@@ -1,7 +1,6 @@
 # Runbook — make nginx the only public entry point (close port 5000)
 
-Drafted 26 Oct 2026. **Nothing here has been applied until the owner says yes**; the "Status" line
-at the bottom records what has.
+Drafted 26 Oct 2026. **APPLIED 26 Oct 2026 17:28–17:36 UTC** — see the "Status" section at the bottom for what was done and what is still open.
 
 ## Why
 

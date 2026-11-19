@@ -1,6 +1,8 @@
 # Hillsborough County Foreclosure Complaints — Scope
 
 **Status:** scoping only · **Written:** 3 Nov 2026 · **No code written, production untouched**
+
+> **Update 19 Nov 2026 — superseded in practice.** The by-hand route was built as **Manual Complaint Intake** (live 16 Nov 2026, Data → Manual Complaint Intake): the tool lists Hillsborough's band-3 cases daily (13:00 UTC) and a person downloads each complaint from HOVER and uploads it. Trellis is ruled out (owner, 16 Nov). Whether to keep the trial is parked by the owner (18 Nov). See SESSION_LOG 16 Nov 2026 and CLAUDE.md.
 **Purpose:** hand-off for a new session. It records what was checked on 3 Nov 2026, what it means, what is still unknown, and what the owner has to decide. Read it with `docs/MIAMI_DADE_COMPLAINTS_REVERSE_ENGINEERING.md` (§12.4 rules, §17 approved rules, §18–§23 the build, audit and daily run).
 
 ---

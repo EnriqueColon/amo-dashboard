@@ -1,5 +1,7 @@
 # Bank Stress Ranking — Phase 0 report (27 Oct 2026)
 
+> **Historical (19 Nov 2026):** all four stages were finished by 29 Oct 2026; the live reference is `collector/bank_stress/README.md`.
+
 > **Status update, same day:** the owner decided all five questions in §7 (build here; Tier 1
 > denominator; owner-occupied excluded; CERT 17281 confirmed; four bands) and additionally to drop the
 > Market Intelligence dependency in three stages. **Stage 1 is built and verified locally** — see

@@ -1,6 +1,6 @@
 # Citrus County (FL) Foreclosure Cases — Runbook
 
-**Status:** built 10 Nov 2026 · cases, parties and claim bands from the Clerk's official Bulk Data Export; complaints downloaded through the owner's registered account on the Clerk's court records site and read with the shared reader.
+**Status:** LIVE since 10 Nov 2026 (cron `run_citrus_complaints_daily.sh` 12:50 UTC) · cases, parties and claim bands from the Clerk's official Bulk Data Export; complaints downloaded through the owner's registered account on the Clerk's court records site and read with the shared reader.
 
 ## Source
 

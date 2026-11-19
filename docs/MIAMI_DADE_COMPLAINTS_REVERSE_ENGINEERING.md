@@ -3,6 +3,8 @@
 Source reviewed: `Safe Harbor Equity_ Document Processing Outputs (4).xlsx` (the other collector's output).
 Status: **spreadsheet-only analysis. NOT yet verified against the PDFs** (Drive links return 404 without the owner's login; see §7).
 
+> **Update 19 Nov 2026:** the Miami-Dade complaints pipeline this doc designed went **LIVE 3 Nov 2026** (cron `run_complaints_daily.sh` 11:30 UTC, Complaints tab). Sections below that say "nothing built" or "not deployed" describe the state when they were written.
+
 ## 1. What the workbook is
 
 | Tab | Rows | What it is |

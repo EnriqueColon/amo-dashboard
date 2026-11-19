@@ -2,6 +2,8 @@
 
 **Status:** draft for the owner's decision · **Written:** 28 Oct 2026 · **No code written, production untouched**
 
+> **Also see (18 Nov 2026):** a separate track — Palm Beach foreclosure **complaints** through Manual Complaint Intake (daily ClerkCart "Civil Case Party 05" list, $5.60 per business day, plus eCaseView by hand) — is scoped in SESSION_LOG 18 Nov 2026. Nothing built; the owner buys one day's file first. The FTP lis pendens in this doc could feed that list too.
+
 > Supersedes the Palm Beach part of the 13 Oct 2026 scoping entry in `SESSION_LOG.md`. The one fact that changed since then changes the recommendation: **the county's paid FTP feed now delivers document images, not only the index.** On 13 Oct the clerk's page described a $600/yr index-only service; on 28 Oct it describes index ($1,200/yr), images ($2,400/yr) or both ($3,600/yr). With images on the feed, Palm Beach can run exactly like Broward — no portal, no captcha, no scraping — and better than Broward, because the feed keeps 45 days instead of 10.
 
 ---
